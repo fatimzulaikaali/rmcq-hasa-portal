@@ -1925,15 +1925,13 @@ function DeptIiPageDetail({ dept, all, overdue, pending, onTime, late }: { dept:
     <div className="rc-page">
       <div className="rc-h"><div className="t1">{dept} — Section 9: Internal Investigation</div></div>
       <div className="rc-section">
-        <div className="rc-kpis">
+        <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
           <div className="rc-kpi"><div className="l">Total II</div><div className="v" style={{ color: 'var(--blue)' }}>{all.length}</div></div>
           <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{overdue.length}</div></div>
           <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{pending.length}</div></div>
           <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{onTime.length}</div></div>
-        </div>
-        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
           <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{late.length}</div></div>
-          <div className="rc-kpi"><div className="l">Submission Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
+          <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
         </div>
       </div>
 
@@ -1988,15 +1986,13 @@ function DeptRcaPageDetail({ dept, all, overdue, pending, onTime, late }: { dept
     <div className="rc-page">
       <div className="rc-h"><div className="t1">{dept} — Section 10: Root Cause Analysis</div></div>
       <div className="rc-section">
-        <div className="rc-kpis">
+        <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
           <div className="rc-kpi"><div className="l">Total RCA</div><div className="v" style={{ color: 'var(--blue)' }}>{all.length}</div></div>
           <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{overdue.length}</div></div>
           <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{pending.length}</div></div>
           <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{onTime.length}</div></div>
-        </div>
-        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
           <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{late.length}</div></div>
-          <div className="rc-kpi"><div className="l">Submission Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
+          <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
         </div>
       </div>
 
