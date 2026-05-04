@@ -86,6 +86,16 @@ export function monthLabel(key: string): string {
   if (!y || !m) return key
   return `${MONTH_LABEL[parseInt(m, 10) - 1]} ${y}`
 }
+export function submissionMonthKey(r: { submission_date: string | null; incident_month: string | null }): string | null {
+  // Prefer submission_date (when the report was filed) — falls back to incident_month if missing
+  return monthKey(r.submission_date) ?? monthKey(r.incident_month)
+}
+
+export function isPrimaryDept(code: string | null): boolean {
+  if (!code) return false
+  return PRIMARY_DEPTS.includes(code.trim())
+}
+
 export function shortMonthLabel(key: string): string {
   const [y, m] = key.split('-')
   if (!y || !m) return key
@@ -138,7 +148,7 @@ export function activeMonthRange(rows: Incident[], f: IrFilters): string {
 /* ===================== STATUS PARSERS ===================== */
 
 export type IiStatus = 'Non-II' | 'Overdue' | 'Pending' | 'On Time' | 'Late' | 'Unknown'
-export type RcaStatus = 'Non-RCA' | 'Overdue' | 'Pending' | 'Completed' | 'Unknown'
+export type RcaStatus = 'Non-RCA' | 'Overdue' | 'Pending' | 'On Time' | 'Late' | 'Unknown'
 
 export function parseIiStatus(s: string | null): IiStatus {
   const t = (s ?? '').trim()
@@ -159,7 +169,8 @@ export function parseRcaStatus(s: string | null): RcaStatus {
   if (lo === 'non-rca' || lo.includes('non-rca')) return 'Non-RCA'
   if (lo.includes('overdue')) return 'Overdue'
   if (lo.includes('pending')) return 'Pending'
-  if (lo.includes('completed') || lo.includes('complete')) return 'Completed'
+  if (lo.includes('on time') || lo.includes('on-time')) return 'On Time'
+  if (lo.includes('late')) return 'Late'
   return 'Unknown'
 }
 
@@ -305,10 +316,11 @@ export function rcaBuckets(rows: Incident[]): {
   total: number
   overdue: Incident[]
   pending: Incident[]
-  completed: number
+  onTime: number
+  late: number
   nonRCA: number
 } {
-  let completed = 0, nonRCA = 0
+  let onTime = 0, late = 0, nonRCA = 0
   const overdue: Incident[] = []
   const pending: Incident[] = []
   let total = 0
@@ -318,9 +330,10 @@ export function rcaBuckets(rows: Incident[]): {
     total++
     if (status === 'Overdue') overdue.push(r)
     else if (status === 'Pending') pending.push(r)
-    else if (status === 'Completed') completed++
+    else if (status === 'On Time') onTime++
+    else if (status === 'Late') late++
   }
-  return { total, overdue, pending, completed, nonRCA }
+  return { total, overdue, pending, onTime, late, nonRCA }
 }
 
 export function deptCounts(items: Incident[], pick: (r: Incident) => string | null = (r) => r.action_dept): Map<string, number> {
@@ -390,7 +403,7 @@ export function isOverdue(dueIso: string | null, today = new Date()): boolean {
 /* Period filtering for report card */
 export type PeriodKey =
   | 'YTD'
-  | 'M-1' | 'M-2' | 'M-3' | 'M-4'
+  | 'M-D' | 'M-1' | 'M-2' | 'M-3' | 'M-4'
   | 'Q1' | 'Q2'
   | 'H1' | 'H2'
   | '9M'
@@ -399,6 +412,7 @@ export type PeriodKey =
 export const PERIOD_OPTIONS: { group: string; options: { value: PeriodKey; label: string }[] }[] = [
   { group: 'Year-to-Date', options: [{ value: 'YTD', label: 'Year-to-Date (All Months)' }] },
   { group: 'Monthly', options: [
+    { value: 'M-D', label: 'December 2025' },
     { value: 'M-1', label: 'January 2026' },
     { value: 'M-2', label: 'February 2026' },
     { value: 'M-3', label: 'March 2026' },
@@ -425,8 +439,9 @@ export function periodLabel(k: PeriodKey): string {
 }
 
 export function periodMonthRange(k: PeriodKey, year = 2026): { from: string; to: string } {
-  const fmt = (m: number) => `${year}-${String(m).padStart(2, '0')}`
+  const fmt = (m: number, y = year) => `${y}-${String(m).padStart(2, '0')}`
   switch (k) {
+    case 'M-D': return { from: fmt(12, 2025), to: fmt(12, 2025) }
     case 'M-1': return { from: fmt(1), to: fmt(1) }
     case 'M-2': return { from: fmt(2), to: fmt(2) }
     case 'M-3': return { from: fmt(3), to: fmt(3) }
@@ -436,7 +451,8 @@ export function periodMonthRange(k: PeriodKey, year = 2026): { from: string; to:
     case 'H1': return { from: fmt(1), to: fmt(6) }
     case 'H2': return { from: fmt(7), to: fmt(12) }
     case '9M': return { from: fmt(1), to: fmt(9) }
-    case 'YEAR': case 'YTD': default: return { from: fmt(1), to: fmt(12) }
+    case 'YEAR': return { from: fmt(1), to: fmt(12) }
+    case 'YTD': default: return { from: fmt(12, 2025), to: fmt(12) }
   }
 }
 
@@ -449,5 +465,5 @@ export function filterByPeriod(rows: Incident[], k: PeriodKey): Incident[] {
   })
 }
 
-export const PRIMARY_DEPTS = ['MED','O&G','ED','SURG','ORTHO','PAEDS','CVTS','CARDIO','PCM','ORL','REHAB','PLASTIC','NEPHRO','PSY']
-export const ACTION_DEPTS = ['AMO','ANAEST','CDL','DC','NURSING','PHARMACY','RAD','RMCQ']
+export const PRIMARY_DEPTS = ['MED','ED','REHAB','PSY','PCM','PAEDS','NEPH','ONCO','CARDIO','SURG','CVTS','ORTHO','OPHTHAL','ORL','O&G','DENTAL','PLASTIC']
+export const ACTION_DEPTS = ['ANAEST','RMCQ','RAD','PHARMACY','OT','NURSING','DIET','DC','CDL','FINANCE','PB','MR','AMO','FORENSIC','PH','PCI','FPP']

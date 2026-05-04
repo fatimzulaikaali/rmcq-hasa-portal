@@ -31,6 +31,8 @@ import {
   isPsi,
   monthLabel,
   monthKey,
+  submissionMonthKey,
+  isPrimaryDept,
   overviewMetrics,
   parseIiStatus,
   parseRcaStatus,
@@ -86,6 +88,15 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
 ]
 
 const PAGE_SIZE = 20
+
+const RC_ACT_CLR: Record<string, string> = {
+  'MONITOR': '#185FA5',
+  'NURSING RELATED INCIDENT': '#0F6E56',
+  'INTERNAL INVESTIGATION': '#A32D2D',
+  'INTERNAL INQUIRY': '#854F0B',
+  'RCA': '#534AB7',
+  'INFORM HEAD OF DEPARTMENT': '#993C1D',
+}
 
 const TYPE_OPTIONS = [
   { value: 'all', label: 'All Types' },
@@ -147,22 +158,8 @@ export default function IrPage() {
           <div className="sb-sub">Incident Reporting Dashboard 2026</div>
         </div>
 
+        {/* Portal links — small section. View navigation lives in the top tab bar. */}
         <div className="nav-section">
-          <div className="nav-lbl">Views</div>
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`nav-item ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-              type="button"
-            >
-              <span className="nav-icon">{t.icon}</span>
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="nav-section" style={{ marginTop: 4 }}>
           <div className="nav-lbl">Portal</div>
           <Link href="/kpi" className="nav-item">
             <span className="nav-icon">📈</span>
@@ -398,14 +395,19 @@ function fmtMonth(iso: string | null): string {
 
 function OverviewTab({ rows }: { rows: Incident[] }) {
   const m = useMemo(() => overviewMetrics(rows), [rows])
+  const psiSentinel = useMemo(() => rows.filter((r) => r.sentinel && isPsi(r)).length, [rows])
+  const psiSentinelDeaths = useMemo(() => rows.filter((r) => r.sentinel && isPsi(r) && (r.severity_real ?? '').toUpperCase() === 'DEATH').length, [rows])
+  const psiSentinelIds = useMemo(() => rows.filter((r) => r.sentinel && isPsi(r)).map((r) => r.incident_id).filter(Boolean) as string[], [rows])
+  const severeReal = useMemo(() => rows.filter((r) => isPsi(r) && (r.severity_real ?? '').toUpperCase() === 'SEVERE' && !r.sentinel).length, [rows])
 
-  // monthly trend (PSI vs Non-PSI)
+  // monthly trend (PSI vs Non-PSI) — by SUBMISSION date (date of reporting)
   const monthly = useMemo(() => {
-    const acc = new Map<string, { psi: number; nonPsi: number }>()
+    const acc = new Map<string, { psi: number; nonPsi: number; total: number }>()
     for (const r of rows) {
-      const k = monthKey(r.incident_month); if (!k) continue
-      if (!acc.has(k)) acc.set(k, { psi: 0, nonPsi: 0 })
+      const k = submissionMonthKey(r); if (!k) continue
+      if (!acc.has(k)) acc.set(k, { psi: 0, nonPsi: 0, total: 0 })
       const a = acc.get(k)!
+      a.total++
       if (isPsi(r)) a.psi++; else a.nonPsi++
     }
     const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
@@ -413,6 +415,7 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
       labels: sorted.map(([k]) => monthLabel(k)),
       psi: sorted.map(([, v]) => v.psi),
       nonPsi: sorted.map(([, v]) => v.nonPsi),
+      total: sorted.map(([, v]) => v.total),
     }
   }, [rows])
 
@@ -421,10 +424,10 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
     return Array.from(c.entries())
   }, [rows])
 
-  const topDept = useMemo(() => sortedTop(counts(rows, (r) => r.dept_code), 12), [rows])
+  const topDept = useMemo(() => sortedTop(counts(rows.filter((r) => isPsi(r) && isPrimaryDept(r.dept_code)), (r) => r.dept_code), 10), [rows])
   const typeCounts = useMemo(() => {
     let actual = 0, near = 0
-    for (const r of rows) {
+    for (const r of rows.filter(isPsi)) {
       const t = (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '')
       if (t === 'ACTUAL') actual++
       else if (t === 'NEARMISS') near++
@@ -440,9 +443,9 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
         <MetricCard tone="teal"   label="Patient Safety PSI" value={m.psi} />
         <MetricCard tone="gray"   label="Non-PSI"            value={m.nonPsi} />
         <MetricCard tone="amber"  label="Open Cases"         value={m.open} />
-        <MetricCard tone="red"    label="Sentinel Events"    value={m.sentinel} sub={`${m.deaths} Death case(s)`} />
+        <MetricCard tone="red"    label="Sentinel Events"    value={psiSentinel} sub={psiSentinelDeaths > 0 ? `${psiSentinelDeaths} Death case(s)` : 'No Death cases'} />
         <MetricCard tone="green"  label="Near Miss"          value={m.nearMiss} sub="PSI — intercepted" />
-        <MetricCard tone="red"    label="Severe (Real)"      value={m.severe} />
+        <MetricCard tone="red"    label="Severe (Real)"      value={severeReal} sub="Excl. Sentinel/Death" />
       </div>
 
       <div className="g2">
@@ -494,8 +497,9 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
             data={{
               labels: monthly.labels,
               datasets: [
-                { label: 'PSI',     data: monthly.psi,    borderColor: '#378ADD', backgroundColor: '#378ADD', tension: 0.3, fill: false, pointRadius: 3 },
-                { label: 'Non-PSI', data: monthly.nonPsi, borderColor: '#B4B2A9', backgroundColor: '#B4B2A9', tension: 0.3, fill: false, pointRadius: 3 },
+                { label: 'Total',   data: monthly.total,  borderColor: '#378ADD', backgroundColor: '#378ADD', tension: 0.3, fill: false, pointRadius: 3 },
+                { label: 'PSI',     data: monthly.psi,    borderColor: '#1D9E75', backgroundColor: '#1D9E75', tension: 0.3, fill: false, pointRadius: 3 },
+                { label: 'Non-PSI', data: monthly.nonPsi, borderColor: '#B4B2A9', backgroundColor: '#B4B2A9', borderDash: [5, 5], tension: 0.3, fill: false, pointRadius: 3 },
               ],
             }}
             options={{
@@ -511,24 +515,29 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
       </Panel>
 
       <div className="g2">
-        <Panel title="Top Departments (Primary)">
+        <Panel title="Top Departments (Primary) — PSI Only">
           <ProgressList items={topDept.labels.map((l, i) => ({ label: l, value: topDept.data[i] }))} color="#378ADD" />
         </Panel>
 
-        <Panel title="Actual vs Near Miss">
+        <Panel title="Actual vs Near Miss — PSI Only">
           <div style={{ height: 220 }}>
-            <Doughnut
+            <Bar
               data={{
-                labels: ['Actual', 'Near Miss'],
+                labels: ['ACTUAL', 'NEAR MISS'],
                 datasets: [{
+                  label: 'Count',
                   data: [typeCounts.actual, typeCounts.near],
-                  backgroundColor: ['#185FA5', '#1D9E75'],
-                  borderWidth: 0,
+                  backgroundColor: ['#378ADD', '#1D9E75'],
+                  borderRadius: 4,
                 }],
               }}
               options={{
-                responsive: true, maintainAspectRatio: false, cutout: '60%',
-                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
               }}
             />
           </div>
@@ -540,7 +549,7 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
           <Bar
             data={{
               labels: actionTaken.labels,
-              datasets: [{ label: 'Count', data: actionTaken.data, backgroundColor: '#1D9E75', borderRadius: 4 }],
+              datasets: [{ label: 'Count', data: actionTaken.data, backgroundColor: actionTaken.labels.map((l) => RC_ACT_CLR[l.toUpperCase()] ?? '#888780'), borderRadius: 4 }],
             }}
             options={{
               indexAxis: 'y', responsive: true, maintainAspectRatio: false,
@@ -555,16 +564,16 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
       </Panel>
 
       <Panel title="⚠️ Alerts & Watch Items">
-        {m.sentinel > 0 && (
+        {psiSentinel > 0 && (
           <div className="ac red">
             <div className="ai">⚠️</div>
             <div>
-              <div className="at">{m.sentinel} Sentinel Event{m.sentinel === 1 ? '' : 's'} reported</div>
-              <div className="as">Includes {m.deaths} death{m.deaths === 1 ? '' : 's'}. Requires immediate review.</div>
+              <div className="at">{psiSentinel} Sentinel Event{psiSentinel === 1 ? '' : 's'} reported</div>
+              <div className="as">{psiSentinelIds.slice(0, 8).join(', ')}{psiSentinelIds.length > 8 ? ` (+${psiSentinelIds.length - 8} more)` : ''}{psiSentinelDeaths > 0 ? ` — ${psiSentinelDeaths} death${psiSentinelDeaths === 1 ? '' : 's'} recorded` : ''}.</div>
             </div>
           </div>
         )}
-        {m.open > 10 && (
+        {m.open > 0 && (
           <div className="ac amber">
             <div className="ai">⏰</div>
             <div>
@@ -582,7 +591,7 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
             </div>
           </div>
         )}
-        {m.sentinel === 0 && m.open <= 10 && m.nearMiss === 0 && (
+        {psiSentinel === 0 && m.open === 0 && m.nearMiss === 0 && (
           <div style={{ color: 'var(--muted)', fontSize: 12 }}>No items requiring attention.</div>
         )}
       </Panel>
@@ -613,15 +622,9 @@ function CategoriesTab({ rows }: { rows: Incident[] }) {
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
         <MetricCard tone="teal" label="Total PSI" value={psi.length} />
-        {top3.map((c, i) => (
-          <MetricCard
-            key={c.label}
-            tone={i === 0 ? 'red' : i === 1 ? 'amber' : 'blue'}
-            label={`#${i + 1} Category`}
-            value={c.value}
-            sub={c.label}
-          />
-        ))}
+        <MetricCard tone="red" label="Top Category" value={top3[0]?.value ?? 0} sub={top3[0]?.label ?? '—'} />
+        <MetricCard tone="blue" label="No. of Categories" value={cats.labels.length} />
+        <MetricCard tone="green" label="Near Miss" value={psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'NEARMISS').length} />
       </div>
 
       <div className="g2">
@@ -699,18 +702,18 @@ function SeverityTab({ rows }: { rows: Incident[] }) {
   const sevPot = useMemo(() => severityCounts(psi, (r) => r.severity_potential), [psi])
   const sentinels = useMemo(() => psi.filter((r) => r.sentinel), [psi])
   const byCat = useMemo(() => severityByCategory(psi), [psi])
+  const psiSentinel = sentinels.length
+  const psiDeaths = sentinels.filter((r) => (r.severity_real ?? '').toUpperCase() === 'DEATH').length
 
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        {SEVERITY_ORDER.map((s) => (
-          <div key={s} className="mc">
-            <div className="ml">{s}</div>
-            <div className="mv" style={{ color: s === 'DEATH' || s === 'SEVERE' ? 'var(--red)' : s === 'MODERATE' ? 'var(--amber)' : s === 'MILD' ? 'var(--blue)' : 'var(--green)' }}>
-              {sevReal[s].toLocaleString()}
-            </div>
-          </div>
-        ))}
+        <MetricCard tone="blue" label="PSI Total" value={psi.length} />
+        <MetricCard tone="red" label="Sentinel Events" value={psiSentinel} sub={psiDeaths > 0 ? `${psiDeaths} Death case(s)` : 'No Death cases'} />
+        <MetricCard tone="red" label="Severe (Real)" value={sevReal.SEVERE} />
+        <MetricCard tone="amber" label="Moderate" value={sevReal.MODERATE} />
+        <MetricCard tone="blue" label="Mild" value={sevReal.MILD} />
+        <MetricCard tone="green" label="No Harm" value={sevReal['NO HARM']} />
       </div>
 
       <div className="g2">
@@ -832,49 +835,62 @@ function SeverityDoughnut({ counts: c }: { counts: Record<Severity, number> }) {
  * ========================================================================= */
 
 function IiTab({ rows }: { rows: Incident[] }) {
-  const b = useMemo(() => iiBuckets(rows), [rows])
+  const iiCases = useMemo(() => rows.filter((r) => (r.is_ii ?? 0) === 1), [rows])
+  const iiOverdue = useMemo(() => iiCases.filter((r) => (r.ii_status ?? '').includes('Overdue')), [iiCases])
+  const iiPending = useMemo(() => iiCases.filter((r) => (r.ii_status ?? '').includes('Pending') && !(r.ii_status ?? '').includes('Overdue')), [iiCases])
+  const iiOnTime = useMemo(() => iiCases.filter((r) => (r.ii_status ?? '').toLowerCase().includes('on time')), [iiCases])
+  const iiLate = useMemo(() => iiCases.filter((r) => (r.ii_status ?? '').toLowerCase().includes('late') && !(r.ii_status ?? '').toLowerCase().includes('on time')), [iiCases])
 
-  const overdueByDept = useMemo(() => sortedTop(counts(b.overdue, (r) => r.action_dept)), [b.overdue])
-  const pendingByDept = useMemo(() => sortedTop(counts(b.pending, (r) => r.action_dept)), [b.pending])
-  const iiByDept = useMemo(() => {
-    const ii = rows.filter((r) => parseIiStatus(r.ii_status) !== 'Non-II' && parseIiStatus(r.ii_status) !== 'Unknown')
-    return sortedTop(counts(ii, (r) => r.action_dept), 12)
-  }, [rows])
-  const iiTrend = useMemo(() => {
-    const ii = rows.filter((r) => parseIiStatus(r.ii_status) !== 'Non-II' && parseIiStatus(r.ii_status) !== 'Unknown')
+  const overdueByDept = useMemo(() => sortedTop(counts(iiOverdue, (r) => r.action_dept)), [iiOverdue])
+  const pendingByDept = useMemo(() => sortedTop(counts(iiPending, (r) => r.action_dept)), [iiPending])
+  const onTimeByDept  = useMemo(() => sortedTop(counts(iiOnTime,  (r) => r.action_dept)), [iiOnTime])
+  const lateByDept    = useMemo(() => sortedTop(counts(iiLate,    (r) => r.action_dept)), [iiLate])
+
+  const byMonth = useMemo(() => {
     const acc = new Map<string, number>()
-    for (const r of ii) {
-      const k = monthKey(r.incident_month); if (!k) continue
+    for (const r of iiCases) {
+      const k = submissionMonthKey(r); if (!k) continue
       acc.set(k, (acc.get(k) ?? 0) + 1)
     }
     const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
     return { labels: sorted.map(([k]) => monthLabel(k)), data: sorted.map(([, v]) => v) }
-  }, [rows])
+  }, [iiCases])
+
+  const sevSummary = useMemo(() => severityCounts(iiCases), [iiCases])
+  const catSummary = useMemo(() => sortedTop(counts(iiCases, (r) => r.category), 8), [iiCases])
 
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        <MetricCard tone="blue"  label="Total II"   value={b.total} />
-        <MetricCard tone="red"   label="Overdue"    value={b.overdue.length} />
-        <MetricCard tone="amber" label="Pending"    value={b.pending.length} />
-        <MetricCard tone="green" label="On Time"    value={b.onTime} />
-        <MetricCard tone="blue"  label="Late"       value={b.late} />
-        <MetricCard tone="gray"  label="Non-II"     value={b.nonII} />
+        <MetricCard tone="blue"  label="Total II"   value={iiCases.length} />
+        <MetricCard tone="red"   label="Overdue"    value={iiOverdue.length} />
+        <MetricCard tone="amber" label="Pending"    value={iiPending.length} />
+        <MetricCard tone="green" label="On Time"    value={iiOnTime.length} />
+        <MetricCard tone="blue"  label="Late"       value={iiLate.length} />
       </div>
 
-      <Panel title="Investigation Status Summary">
-        <StatusRow color="var(--red)"   label="Overdue" n={b.overdue.length} />
-        <StatusRow color="var(--amber)" label="Pending" n={b.pending.length} />
-        <StatusRow color="var(--green)" label="On Time" n={b.onTime} />
-        <StatusRow color="var(--blue)"  label="Late"    n={b.late} />
-        <StatusRow color="var(--gray)"  label="Non-II"  n={b.nonII} />
+      <Panel title="Internal Investigations by Submission Month">
+        <div style={{ height: 220 }}>
+          <Bar
+            data={{ labels: byMonth.labels, datasets: [{ label: 'II', data: byMonth.data, backgroundColor: '#185FA5', borderRadius: 4 }] }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
       </Panel>
 
-      <div className="g2">
-        <Panel title="Overdue by Department">
-          {overdueByDept.labels.length === 0 ? (
-            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue cases ✓</div>
-          ) : (
+      <Panel title="🚨 Overdue Cases — Requires Immediate Action">
+        {iiOverdue.length === 0 ? (
+          <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue cases ✓</div>
+        ) : (
+          <>
+            <div className="psub" style={{ marginBottom: 6 }}>By Action Department</div>
             <div className="dept-heat">
               {overdueByDept.labels.map((d, i) => (
                 <div className="dh-cell dh-red" key={d}>
@@ -884,13 +900,18 @@ function IiTab({ rows }: { rows: Incident[] }) {
                 </div>
               ))}
             </div>
-          )}
-        </Panel>
+            <div className="psub" style={{ marginTop: 12, marginBottom: 6 }}>Case List</div>
+            <CompactCaseList rows={iiOverdue} status="Overdue" kind="ii" />
+          </>
+        )}
+      </Panel>
 
-        <Panel title="Pending by Department">
-          {pendingByDept.labels.length === 0 ? (
-            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending cases ✓</div>
-          ) : (
+      <Panel title="⏳ Pending Cases">
+        {iiPending.length === 0 ? (
+          <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending cases ✓</div>
+        ) : (
+          <>
+            <div className="psub" style={{ marginBottom: 6 }}>By Action Department</div>
             <div className="dept-heat">
               {pendingByDept.labels.map((d, i) => (
                 <div className="dh-cell dh-amber" key={d}>
@@ -900,88 +921,71 @@ function IiTab({ rows }: { rows: Incident[] }) {
                 </div>
               ))}
             </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel title="Overdue Cases — Requires Immediate Action">
-        {b.overdue.length === 0 ? (
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
-        ) : (
-          <CaseTable rows={b.overdue} statusKind="ii" forceStatus="Overdue" />
-        )}
-      </Panel>
-
-      <Panel title="Pending Cases">
-        {b.pending.length === 0 ? (
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
-        ) : (
-          <CaseTable rows={b.pending} statusKind="ii" forceStatus="Pending" />
+            <div className="psub" style={{ marginTop: 12, marginBottom: 6 }}>Case List</div>
+            <CompactCaseList rows={iiPending} status="Pending" kind="ii" />
+          </>
         )}
       </Panel>
 
       <div className="g2">
-        <Panel title="II by Department (Action Dept)">
-          <div style={{ height: 240 }}>
-            <Bar
-              data={{
-                labels: iiByDept.labels,
-                datasets: [{ label: 'II Cases', data: iiByDept.data, backgroundColor: '#185FA5', borderRadius: 4 }],
-              }}
-              options={{
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
-                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
-                },
-              }}
-            />
+        <Panel title="✅ On Time Submissions — by Action Department">
+          {onTimeByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>None yet.</div>
+          ) : (
+            <div className="dept-heat">
+              {onTimeByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-green" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{onTimeByDept.data[i]}</div>
+                  <div className="dh-label">On Time</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        <Panel title="🔵 Late Submissions — by Action Department">
+          {lateByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+          ) : (
+            <div className="dept-heat">
+              {lateByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-blue" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{lateByDept.data[i]}</div>
+                  <div className="dh-label">Late</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="g2">
+        <Panel title="Severity of II Cases">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
+                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{sevSummary[s]}</div>
+              </div>
+            ))}
           </div>
         </Panel>
-        <Panel title="II Trend by Month">
-          <div style={{ height: 240 }}>
-            <Line
-              data={{
-                labels: iiTrend.labels,
-                datasets: [{ label: 'II', data: iiTrend.data, borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }],
-              }}
-              options={{
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
-                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
-                },
-              }}
-            />
-          </div>
+        <Panel title="Category of II Cases">
+          <ProgressList items={catSummary.labels.map((l, i) => ({ label: l, value: catSummary.data[i], color: CATEGORY_COLORS[l] }))} />
         </Panel>
       </div>
     </>
   )
 }
 
-function StatusRow({ color, label, n }: { color: string; label: string; n: number }) {
-  return (
-    <div className="sts-row">
-      <div className="sts-left">
-        <div className="sts-dot" style={{ background: color }} />
-        <div className="sts-label">{label}</div>
-      </div>
-      <div className="sts-num" style={{ color }}>{n}</div>
-    </div>
-  )
-}
-
-function CaseTable({ rows, statusKind, forceStatus }: { rows: Incident[]; statusKind: 'ii' | 'rca'; forceStatus: string }) {
+function CompactCaseList({ rows, status, kind }: { rows: Incident[]; status: string; kind: 'ii' | 'rca' }) {
   return (
     <div className="tw">
       <table>
         <thead>
           <tr>
-            <th>Incident ID</th><th>Month</th><th>Primary Dept</th><th>Action Dept</th>
-            <th>Category</th><th>Sub-Category</th><th>Severity</th><th>Status</th>
+            <th>Incident ID</th><th>Month</th><th>Dept</th><th>Category</th><th>Severity</th><th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -990,11 +994,9 @@ function CaseTable({ rows, statusKind, forceStatus }: { rows: Incident[]; status
               <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
               <td>{fmtMonth(r.incident_month)}</td>
               <td>{r.dept_code ?? '—'}</td>
-              <td>{r.action_dept ?? '—'}</td>
               <td>{r.category ?? '—'}</td>
-              <td>{r.sub_category ?? '—'}</td>
               <td><SevBadge sev={r.severity_real} /></td>
-              <td><StatusBadge kind={statusKind} status={forceStatus} /></td>
+              <td><StatusBadge kind={kind} status={status} /></td>
             </tr>
           ))}
         </tbody>
@@ -1008,34 +1010,62 @@ function CaseTable({ rows, statusKind, forceStatus }: { rows: Incident[]; status
  * ========================================================================= */
 
 function RcaTab({ rows }: { rows: Incident[] }) {
-  const b = useMemo(() => rcaBuckets(rows), [rows])
-  const overdueByDept = useMemo(() => sortedTop(counts(b.overdue, (r) => r.action_dept)), [b.overdue])
-  const pendingByDept = useMemo(() => sortedTop(counts(b.pending, (r) => r.action_dept)), [b.pending])
-  const rcaCases = useMemo(() => rows.filter((r) => parseRcaStatus(r.rca_status) !== 'Non-RCA' && parseRcaStatus(r.rca_status) !== 'Unknown'), [rows])
-  const rcaSev = useMemo(() => severityCounts(rcaCases), [rcaCases])
-  const rcaCat = useMemo(() => sortedTop(counts(rcaCases, (r) => r.category), 8), [rcaCases])
+  const rcaAll = useMemo(() => rows.filter((r) => (r.is_rca ?? 0) === 1), [rows])
+  const rcaOverdue = useMemo(() => rcaAll.filter((r) => (r.rca_status ?? '').includes('Overdue')), [rcaAll])
+  const rcaPendingOnly = useMemo(() => rcaAll.filter((r) => (r.rca_status ?? '').includes('Pending') && !(r.rca_status ?? '').includes('Overdue')), [rcaAll])
+  const rcaOnTime = useMemo(() => rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('on time')), [rcaAll])
+  const rcaLate = useMemo(() => rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('late') && !(r.rca_status ?? '').toLowerCase().includes('on time')), [rcaAll])
+
+  const overdueByDept = useMemo(() => sortedTop(counts(rcaOverdue, (r) => r.action_dept)), [rcaOverdue])
+  const pendingByDept = useMemo(() => sortedTop(counts(rcaPendingOnly, (r) => r.action_dept)), [rcaPendingOnly])
+  const onTimeByDept  = useMemo(() => sortedTop(counts(rcaOnTime,  (r) => r.action_dept)), [rcaOnTime])
+  const lateByDept    = useMemo(() => sortedTop(counts(rcaLate,    (r) => r.action_dept)), [rcaLate])
+
+  const byMonth = useMemo(() => {
+    const acc = new Map<string, number>()
+    for (const r of rcaAll) {
+      const k = submissionMonthKey(r); if (!k) continue
+      acc.set(k, (acc.get(k) ?? 0) + 1)
+    }
+    const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
+    return { labels: sorted.map(([k]) => monthLabel(k)), data: sorted.map(([, v]) => v) }
+  }, [rcaAll])
+
+  const rcaSev = useMemo(() => severityCounts(rcaAll), [rcaAll])
+  const rcaCat = useMemo(() => sortedTop(counts(rcaAll, (r) => r.category), 8), [rcaAll])
 
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        <MetricCard tone="blue"  label="Total RCA" value={b.total} />
-        <MetricCard tone="red"   label="Overdue"   value={b.overdue.length} />
-        <MetricCard tone="amber" label="Pending"   value={b.pending.length} />
-        <MetricCard tone="green" label="Completed" value={b.completed} />
-        <MetricCard tone="gray"  label="Non-RCA"   value={b.nonRCA} />
+        <MetricCard tone="blue"  label="Total RCA" value={rcaAll.length} />
+        <MetricCard tone="red"   label="Overdue"   value={rcaOverdue.length} />
+        <MetricCard tone="amber" label="Pending"   value={rcaPendingOnly.length} />
+        <MetricCard tone="green" label="On Time"   value={rcaOnTime.length} />
+        <MetricCard tone="blue"  label="Late"      value={rcaLate.length} />
       </div>
 
-      <Panel title="RCA Status Summary">
-        <StatusRow color="var(--red)"   label="Overdue"   n={b.overdue.length} />
-        <StatusRow color="var(--amber)" label="Pending"   n={b.pending.length} />
-        <StatusRow color="var(--green)" label="Completed" n={b.completed} />
+      <Panel title="RCA by Submission Month">
+        <div style={{ height: 220 }}>
+          <Bar
+            data={{ labels: byMonth.labels, datasets: [{ label: 'RCA', data: byMonth.data, backgroundColor: '#534AB7', borderRadius: 4 }] }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
       </Panel>
 
-      <div className="g2">
-        <Panel title="Overdue RCA by Department">
-          {overdueByDept.labels.length === 0 ? (
-            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue RCA cases ✓</div>
-          ) : (
+      <Panel title="🚨 Overdue RCA Cases — Requires Immediate Action">
+        {rcaOverdue.length === 0 ? (
+          <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue RCA cases ✓</div>
+        ) : (
+          <>
+            <div className="psub" style={{ marginBottom: 6 }}>By Action Department</div>
             <div className="dept-heat">
               {overdueByDept.labels.map((d, i) => (
                 <div className="dh-cell dh-red" key={d}>
@@ -1045,12 +1075,18 @@ function RcaTab({ rows }: { rows: Incident[] }) {
                 </div>
               ))}
             </div>
-          )}
-        </Panel>
-        <Panel title="Pending RCA by Department">
-          {pendingByDept.labels.length === 0 ? (
-            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending RCA cases ✓</div>
-          ) : (
+            <div className="psub" style={{ marginTop: 12, marginBottom: 6 }}>Case List</div>
+            <CompactCaseList rows={rcaOverdue} status="Overdue" kind="rca" />
+          </>
+        )}
+      </Panel>
+
+      <Panel title="⏳ Pending RCA Cases">
+        {rcaPendingOnly.length === 0 ? (
+          <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending RCA cases ✓</div>
+        ) : (
+          <>
+            <div className="psub" style={{ marginBottom: 6 }}>By Action Department</div>
             <div className="dept-heat">
               {pendingByDept.labels.map((d, i) => (
                 <div className="dh-cell dh-amber" key={d}>
@@ -1060,58 +1096,57 @@ function RcaTab({ rows }: { rows: Incident[] }) {
                 </div>
               ))}
             </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel title="Overdue & Pending RCA Cases">
-        {b.overdue.length + b.pending.length === 0 ? (
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
-        ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Incident ID</th><th>Month</th><th>Dept</th><th>Category</th><th>Severity</th><th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...b.overdue.map((r) => ({ r, status: 'Overdue' })), ...b.pending.map((r) => ({ r, status: 'Pending' }))].map(({ r, status }) => (
-                  <tr key={r.id}>
-                    <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
-                    <td>{fmtMonth(r.incident_month)}</td>
-                    <td>{r.dept_code ?? '—'}</td>
-                    <td>{r.category ?? '—'}</td>
-                    <td><SevBadge sev={r.severity_real} /></td>
-                    <td><StatusBadge kind="rca" status={status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <div className="psub" style={{ marginTop: 12, marginBottom: 6 }}>Case List</div>
+            <CompactCaseList rows={rcaPendingOnly} status="Pending" kind="rca" />
+          </>
         )}
       </Panel>
 
       <div className="g2">
-        <Panel title="RCA by Severity">
+        <Panel title="✅ On Time Submissions — by Action Department">
+          {onTimeByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>None yet.</div>
+          ) : (
+            <div className="dept-heat">
+              {onTimeByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-green" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{onTimeByDept.data[i]}</div>
+                  <div className="dh-label">On Time</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        <Panel title="🔵 Late Submissions — by Action Department">
+          {lateByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+          ) : (
+            <div className="dept-heat">
+              {lateByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-blue" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{lateByDept.data[i]}</div>
+                  <div className="dh-label">Late</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="g2">
+        <Panel title="Severity of RCA Cases">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
             {SEVERITY_ORDER.map((s) => (
-              <div
-                key={s}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: 'var(--rs)',
-                  background: SEVERITY_BG[s],
-                  color: SEVERITY_FG[s],
-                }}
-              >
+              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
                 <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>{rcaSev[s]}</div>
               </div>
             ))}
           </div>
         </Panel>
-        <Panel title="RCA by Category">
+        <Panel title="Category of RCA Cases">
           <ProgressList items={rcaCat.labels.map((l, i) => ({ label: l, value: rcaCat.data[i], color: CATEGORY_COLORS[l] }))} />
         </Panel>
       </div>
@@ -1127,20 +1162,22 @@ function ReportingTab({ rows }: { rows: Incident[] }) {
   const psi = useMemo(() => rows.filter(isPsi), [rows])
   const reporters = useMemo(() => sortedTop(counts(psi, (r) => r.reporting_dept), 12), [psi])
   const totalReporters = useMemo(() => Array.from(counts(psi, (r) => r.reporting_dept).keys()).length, [psi])
+  const actionDeptCount = useMemo(() => Array.from(counts(psi, (r) => r.action_dept).keys()).length, [psi])
   const mostActive = reporters.labels[0] ?? '—'
 
   const pvr = useMemo(() => primaryVsReporting(psi, 8), [psi])
   const trend = useMemo(() => reportingTrend(psi, 5), [psi])
-  const actions = useMemo(() => sortedTop(counts(psi, (r) => r.action_taken), 12), [psi])
+  const actionWorkload = useMemo(() => sortedTop(counts(psi, (r) => r.action_dept), 12), [psi])
 
   const colors = ['#185FA5', '#1D9E75', '#EF9F27', '#A32D2D', '#534AB7']
 
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        <MetricCard tone="blue" label="Total PSI Reporters" value={psi.length} />
-        <MetricCard tone="teal" label="Unique Depts Reporting" value={totalReporters} />
-        <MetricCard tone="amber" label="Most Active Dept" value={mostActive} />
+        <MetricCard tone="blue" label="PSI Reports" value={psi.length} />
+        <MetricCard tone="teal" label="Unique Reporting Depts" value={totalReporters} />
+        <MetricCard tone="amber" label="Top Reporter" value={mostActive} />
+        <MetricCard tone="purple" label="Action Depts" value={actionDeptCount} />
       </div>
 
       <div className="g2">
@@ -1165,7 +1202,7 @@ function ReportingTab({ rows }: { rows: Incident[] }) {
             />
           </div>
         </Panel>
-        <Panel title="Top Reporting Departments">
+        <Panel title="Who Files Reports">
           <ProgressList items={reporters.labels.map((l, i) => ({ label: l, value: reporters.data[i] }))} color="#1D9E75" />
         </Panel>
       </div>
@@ -1205,23 +1242,8 @@ function ReportingTab({ rows }: { rows: Incident[] }) {
         </div>
       </Panel>
 
-      <Panel title="Action Taken Breakdown">
-        <div style={{ height: 240 }}>
-          <Bar
-            data={{
-              labels: actions.labels,
-              datasets: [{ label: 'Count', data: actions.data, backgroundColor: '#185FA5', borderRadius: 4 }],
-            }}
-            options={{
-              indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
-              scales: {
-                x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
-                y: { ticks: { font: { size: 11 } }, grid: { display: false } },
-              },
-            }}
-          />
-        </div>
+      <Panel title="Action Dept Workload">
+        <ProgressList items={actionWorkload.labels.map((l, i) => ({ label: l, value: actionWorkload.data[i] }))} color="#A32D2D" />
       </Panel>
     </>
   )
@@ -1233,10 +1255,11 @@ function ReportingTab({ rows }: { rows: Incident[] }) {
 
 function NonPsiTab({ rows }: { rows: Incident[] }) {
   const nonPsi = useMemo(() => rows.filter((r) => !isPsi(r)), [rows])
-  const open = nonPsi.filter((r) => !r.case_closed).length
   const closed = nonPsi.filter((r) => r.case_closed).length
   const subCats = useMemo(() => sortedTop(counts(nonPsi, (r) => r.sub_category), 12), [nonPsi])
   const byDept = useMemo(() => sortedTop(counts(nonPsi, (r) => r.dept_code), 12), [nonPsi])
+  const byReportingDept = useMemo(() => sortedTop(counts(nonPsi, (r) => r.reporting_dept), 12), [nonPsi])
+  const careCounts = useMemo(() => Array.from(counts(nonPsi, (r) => (r.care_setting ?? '').toUpperCase()).entries()), [nonPsi])
   const byMonth = useMemo(() => {
     const acc = new Map<string, number>()
     for (const r of nonPsi) {
@@ -1246,23 +1269,67 @@ function NonPsiTab({ rows }: { rows: Incident[] }) {
     const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
     return { labels: sorted.map(([k]) => monthLabel(k)), data: sorted.map(([, v]) => v) }
   }, [nonPsi])
+  const monthCount = (k: string) => {
+    const r = byMonth.labels.findIndex((l) => l === k)
+    return r >= 0 ? byMonth.data[r] : 0
+  }
 
   return (
     <>
-      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        <MetricCard tone="gray"  label="Total Non-PSI"  value={nonPsi.length} />
-        <MetricCard tone="amber" label="Open Non-PSI"   value={open} />
-        <MetricCard tone="green" label="Closed Non-PSI" value={closed} />
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
+        <MetricCard tone="gray"  label="Total Non-PSI" value={nonPsi.length} />
+        <MetricCard tone="blue"  label="Dec 2025"      value={monthCount('Dec 2025')} />
+        <MetricCard tone="blue"  label="Jan 2026"      value={monthCount('Jan 2026')} />
+        <MetricCard tone="blue"  label="Feb 2026"      value={monthCount('Feb 2026')} />
+        <MetricCard tone="blue"  label="Mar 2026"      value={monthCount('Mar 2026')} />
+        <MetricCard tone="blue"  label="Apr 2026"      value={monthCount('Apr 2026')} />
+        <MetricCard tone="green" label="Cases Closed"  value={closed} />
+      </div>
+
+      <Panel title="Non-PSI by Month">
+        <div style={{ height: 220 }}>
+          <Bar
+            data={{ labels: byMonth.labels, datasets: [{ label: 'Non-PSI', data: byMonth.data, backgroundColor: '#888780', borderRadius: 4 }] }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+
+      <div className="g2">
+        <Panel title="Care Setting (Non-PSI)">
+          <div style={{ height: 220 }}>
+            <Doughnut
+              data={{
+                labels: careCounts.map(([k]) => k),
+                datasets: [{ data: careCounts.map(([, v]) => v), backgroundColor: ['#185FA5', '#E24B4A', '#1D9E75', '#EF9F27'], borderWidth: 0 }],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false, cutout: '60%',
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+              }}
+            />
+          </div>
+        </Panel>
+        <Panel title="By Department">
+          <ProgressList items={byDept.labels.map((l, i) => ({ label: l, value: byDept.data[i] }))} color="#888780" />
+        </Panel>
       </div>
 
       <div className="g2">
-        <Panel title="Non-PSI by Sub-Category">
+        <Panel title="By Reporting Department">
+          <ProgressList items={byReportingDept.labels.map((l, i) => ({ label: l, value: byReportingDept.data[i] }))} color="#378ADD" />
+        </Panel>
+        <Panel title="Sub-Category">
           <div style={{ height: 280 }}>
             <Bar
-              data={{
-                labels: subCats.labels,
-                datasets: [{ label: 'Count', data: subCats.data, backgroundColor: '#888780', borderRadius: 4 }],
-              }}
+              data={{ labels: subCats.labels, datasets: [{ label: 'Count', data: subCats.data, backgroundColor: '#888780', borderRadius: 4 }] }}
               options={{
                 indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
@@ -1274,27 +1341,35 @@ function NonPsiTab({ rows }: { rows: Incident[] }) {
             />
           </div>
         </Panel>
-        <Panel title="Non-PSI by Department">
-          <ProgressList items={byDept.labels.map((l, i) => ({ label: l, value: byDept.data[i] }))} color="#888780" />
-        </Panel>
       </div>
 
-      <Panel title="Non-PSI Trend by Month">
-        <div style={{ height: 220 }}>
-          <Bar
-            data={{
-              labels: byMonth.labels,
-              datasets: [{ label: 'Non-PSI', data: byMonth.data, backgroundColor: '#888780', borderRadius: 4 }],
-            }}
-            options={{
-              responsive: true, maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
-              scales: {
-                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
-                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
-              },
-            }}
-          />
+      <Panel title={`All Non-PSI Records (${nonPsi.length})`}>
+        <div className="tw" style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>IR No</th><th>Month</th><th>Dept</th><th>Reporting Dept</th><th>Ward</th><th>Setting</th>
+                <th>Sub-Category</th><th>Severity</th><th>Type</th><th>Action</th><th>Case</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nonPsi.map((r) => (
+                <tr key={r.id}>
+                  <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+                  <td>{fmtMonth(r.incident_month)}</td>
+                  <td>{r.dept_code ?? '—'}</td>
+                  <td>{r.reporting_dept ?? '—'}</td>
+                  <td>{r.ward ?? '—'}</td>
+                  <td>{r.care_setting ?? '—'}</td>
+                  <td>{r.sub_category ?? '—'}</td>
+                  <td><SevBadge sev={r.severity_real} /></td>
+                  <td><TypeBadge t={r.incident_type} /></td>
+                  <td>{r.action_taken ?? '—'}</td>
+                  <td><CaseBadge closed={r.case_closed} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </Panel>
     </>
@@ -1506,9 +1581,10 @@ function HospitalReport({ rows, period }: { rows: Incident[]; period: PeriodKey 
           </div>
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 3 }}>Root Cause Analysis</div>
-            <SmallStatusRow color="var(--red)"   label="Overdue"   n={rca.overdue.length} />
-            <SmallStatusRow color="var(--amber)" label="Pending"   n={rca.pending.length} />
-            <SmallStatusRow color="var(--green)" label="Completed" n={rca.completed} />
+            <SmallStatusRow color="var(--red)"   label="Overdue" n={rca.overdue.length} />
+            <SmallStatusRow color="var(--amber)" label="Pending" n={rca.pending.length} />
+            <SmallStatusRow color="var(--green)" label="On Time" n={rca.onTime} />
+            <SmallStatusRow color="var(--blue)"  label="Late"    n={rca.late} />
           </div>
         </div>
       </div>
@@ -1538,30 +1614,51 @@ function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: str
   const actual = psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'ACTUAL').length
   const near = psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'NEARMISS').length
 
-  // Monthly
+  // Reporting culture (PSI only): self-reported = dept_code === reporting_dept
+  const selfReported = psi.filter((r) => (r.reporting_dept ?? '').trim() === dept).length
+  const otherReported = psi.length - selfReported
+  const selfPct = psi.length ? Math.round((selfReported / psi.length) * 100) : 0
+
+  // Monthly trend by submission date (date of reporting)
   const monthAcc = new Map<string, number>()
-  for (const r of psi) { const k = monthKey(r.incident_month); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
+  for (const r of psi) { const k = submissionMonthKey(r); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
   const monthly = Array.from(monthAcc.entries()).sort(([a], [b]) => a.localeCompare(b))
 
-  const byStaff = sortedTop(counts(deptRows, (r) => r.action_dept), 10)
   const byCat = sortedTop(counts(psi, (r) => r.category), 10)
   const byWard = sortedTop(counts(psi, (r) => r.ward), 10)
   const sev = severityCounts(psi)
   const actionTaken = sortedTop(counts(psi, (r) => r.action_taken), 10)
 
-  // Section 8 — Incidents under department management (action_dept = selected)
+  // Section 8 — Incidents Under Department Management (action_dept = selected dept)
   const underMgmt = rows.filter((r) => r.action_dept === dept)
 
-  // II + RCA for dept (cases where action_dept = dept)
-  const deptIi = iiBuckets(underMgmt)
-  const deptRca = rcaBuckets(underMgmt)
+  // Section 9/10 — II & RCA (cases where action_dept = dept)
+  const iiAll = underMgmt.filter((r) => (r.is_ii ?? 0) === 1)
+  const iiOverdue = iiAll.filter((r) => (r.ii_status ?? '').includes('Overdue'))
+  const iiPending = iiAll.filter((r) => (r.ii_status ?? '').includes('Pending') && !(r.ii_status ?? '').includes('Overdue'))
+  const iiOnTime = iiAll.filter((r) => (r.ii_status ?? '').toLowerCase().includes('on time'))
+  const iiLate = iiAll.filter((r) => (r.ii_status ?? '').toLowerCase().includes('late') && !(r.ii_status ?? '').toLowerCase().includes('on time'))
 
-  // Section 11 — IR under other dept management (action_dept=dept, dept_code≠dept), filtered to II/RCA/Internal Inquiry/M&M
-  const otherMgmt = rows.filter((r) => {
-    if (r.action_dept !== dept || r.dept_code === dept) return false
-    const a = (r.action_taken ?? '').toUpperCase()
-    return a.includes('II') || a.includes('RCA') || a.includes('INTERNAL INQUIRY') || a.includes('M&M')
+  const rcaAll = underMgmt.filter((r) => (r.is_rca ?? 0) === 1)
+  const rcaOverdue = rcaAll.filter((r) => (r.rca_status ?? '').includes('Overdue'))
+  const rcaPendingOnly = rcaAll.filter((r) => (r.rca_status ?? '').includes('Pending') && !(r.rca_status ?? '').includes('Overdue'))
+  const rcaOnTime = rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('on time'))
+  const rcaLate = rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('late') && !(r.rca_status ?? '').toLowerCase().includes('on time'))
+
+  // Section 11 — IR Under Other Department Management
+  // own (this dept's PSI) where action_dept !== dept AND action is II/RCA/Internal Inquiry/M&M
+  const TARGET_ACTIONS = ['INTERNAL INVESTIGATION', 'RCA', 'INTERNAL INQUIRY', 'M&M']
+  const otherMgmt = psi.filter((r) => {
+    if (r.action_dept === dept || r.dept_code !== dept) return false
+    const a = (r.action_taken ?? '').toUpperCase().trim()
+    return TARGET_ACTIONS.includes(a)
   })
+  const otherCounts = {
+    ii: otherMgmt.filter((r) => (r.action_taken ?? '').toUpperCase().trim() === 'INTERNAL INVESTIGATION').length,
+    rca: otherMgmt.filter((r) => (r.action_taken ?? '').toUpperCase().trim() === 'RCA').length,
+    inquiry: otherMgmt.filter((r) => (r.action_taken ?? '').toUpperCase().trim() === 'INTERNAL INQUIRY').length,
+    mm: otherMgmt.filter((r) => (r.action_taken ?? '').toUpperCase().trim() === 'M&M').length,
+  }
 
   return (
     <>
@@ -1596,12 +1693,20 @@ function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: str
         </div>
 
         <div className="rc-section">
-          <div className="rc-st">Section 3 — IR by Staff (Action Dept Breakdown)</div>
-          <div style={{ height: 130 }}>
-            <Bar
-              data={{ labels: byStaff.labels, datasets: [{ data: byStaff.data, backgroundColor: '#378ADD', borderRadius: 3 }] }}
-              options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } } } } }}
-            />
+          <div className="rc-st">Section 3 — Reporting Culture (IR by Staff)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            <div className="rc-kpi">
+              <div className="l">Self-Reported (by {dept})</div>
+              <div className="v" style={{ color: 'var(--green)' }}>{selfReported}</div>
+            </div>
+            <div className="rc-kpi">
+              <div className="l">Reported by Other Depts</div>
+              <div className="v" style={{ color: 'var(--blue)' }}>{otherReported}</div>
+            </div>
+            <div className="rc-kpi">
+              <div className="l">Self-Reporting %</div>
+              <div className="v" style={{ color: selfPct >= 70 ? 'var(--green)' : selfPct >= 40 ? 'var(--amber)' : 'var(--red)' }}>{selfPct >= 70 ? '🟢' : selfPct >= 40 ? '🟡' : '🔴'} {selfPct}%</div>
+            </div>
           </div>
         </div>
 
@@ -1658,7 +1763,7 @@ function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: str
 
         <div className="rc-section">
           <div className="rc-st">Section 8 — Incidents Under Department Management ({underMgmt.length})</div>
-          <SmallTable rows={underMgmt.slice(0, 14)} />
+          <UnderMgmtTable rows={underMgmt.slice(0, 14)} />
           {underMgmt.length > 14 && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>… and {underMgmt.length - 14} more</div>}
         </div>
 
@@ -1666,19 +1771,64 @@ function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: str
       </div>
 
       {/* PAGE 4 — II */}
-      <DeptIiPage dept={dept} ii={deptIi} />
+      <DeptIiPageDetail
+        dept={dept}
+        all={iiAll}
+        overdue={iiOverdue}
+        pending={iiPending}
+        onTime={iiOnTime}
+        late={iiLate}
+      />
 
       {/* PAGE 5 — RCA */}
-      <DeptRcaPage dept={dept} rca={deptRca} />
+      <DeptRcaPageDetail
+        dept={dept}
+        all={rcaAll}
+        overdue={rcaOverdue}
+        pending={rcaPendingOnly}
+        onTime={rcaOnTime}
+        late={rcaLate}
+      />
 
       {/* PAGE 6 — IR under other dept mgmt */}
       <div className="rc-page">
         <div className="rc-h"><div className="t1">{dept} — Page 6</div></div>
         <div className="rc-section">
-          <div className="rc-st">Section 11 — IR Under Other Department Management ({otherMgmt.length})</div>
-          <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 6 }}>Filtered: action = II, RCA, Internal Inquiry, or M&M; primary dept ≠ {dept}</div>
-          <SmallTable rows={otherMgmt.slice(0, 18)} />
-          {otherMgmt.length > 18 && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>… and {otherMgmt.length - 18} more</div>}
+          <div className="rc-st">Section 11 — IR Under Other Department Management</div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>
+            Patients belong to <b>{dept}</b> where action is handled by another department.
+            Incidents involving {dept} patients that require formal investigation — action managed by another department.
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
+            Total: {otherMgmt.length} incidents — II: {otherCounts.ii}  |  RCA: {otherCounts.rca}  |  Internal Inquiry: {otherCounts.inquiry}  |  M&amp;M: {otherCounts.mm}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg)' }}>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Incident ID</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Month</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Category</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Severity</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Action</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Action Dept</th>
+                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {otherMgmt.slice(0, 22).map((r) => (
+                <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+                  <td style={{ padding: '3px 5px' }}>{fmtMonth(r.incident_month)}</td>
+                  <td style={{ padding: '3px 5px' }}>{r.category ?? '—'}</td>
+                  <td style={{ padding: '3px 5px' }}>{r.severity_real ?? '—'}</td>
+                  <td style={{ padding: '3px 5px' }}>{r.action_taken ?? '—'}</td>
+                  <td style={{ padding: '3px 5px' }}>{r.action_dept ?? '—'}</td>
+                  <td style={{ padding: '3px 5px' }}>{r.case_closed ? 'Closed' : 'Open'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {otherMgmt.length > 22 && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>… and {otherMgmt.length - 22} more</div>}
         </div>
         <ReportFooter />
       </div>
@@ -1733,23 +1883,57 @@ function SmallTable({ rows }: { rows: Incident[] }) {
   )
 }
 
-function DeptIiPage({ dept, ii }: { dept: string; ii: ReturnType<typeof iiBuckets> }) {
-  const overduePending = [...ii.overdue, ...ii.pending]
-  const overdueCases = ii.overdue
-  const sev = severityCounts(overduePending)
-  const cats = sortedTop(counts(overduePending, (r) => r.category), 6)
+function UnderMgmtTable({ rows }: { rows: Incident[] }) {
+  if (rows.length === 0) return <div style={{ fontSize: 9, color: 'var(--muted)' }}>None.</div>
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
+      <thead>
+        <tr style={{ background: 'var(--bg)' }}>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>IR No</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Month</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Primary Dept</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Category</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Severity</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Action</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+            <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{fmtMonth(r.incident_month)}</td>
+            <td style={{ padding: '3px 5px' }}>{r.dept_code ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.category ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.severity_real ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.action_taken ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.case_closed ? 'Closed' : 'Open'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function DeptIiPageDetail({ dept, all, overdue, pending, onTime, late }: { dept: string; all: Incident[]; overdue: Incident[]; pending: Incident[]; onTime: Incident[]; late: Incident[] }) {
+  const sev = severityCounts(all)
+  const cats = sortedTop(counts(all, (r) => r.category), 8)
+  const compliance = all.length ? Math.round(((onTime.length + late.length) / all.length) * 100) : 0
+  const overdueByDept = sortedTop(counts(overdue, (r) => r.action_dept))
+  const pendingByDept = sortedTop(counts(pending, (r) => r.action_dept))
   return (
     <div className="rc-page">
       <div className="rc-h"><div className="t1">{dept} — Section 9: Internal Investigation</div></div>
       <div className="rc-section">
         <div className="rc-kpis">
-          <div className="rc-kpi"><div className="l">Total II</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.total}</div></div>
-          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{ii.overdue.length}</div></div>
-          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{ii.pending.length}</div></div>
-          <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{ii.onTime}</div></div>
+          <div className="rc-kpi"><div className="l">Total II</div><div className="v" style={{ color: 'var(--blue)' }}>{all.length}</div></div>
+          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{overdue.length}</div></div>
+          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{pending.length}</div></div>
+          <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{onTime.length}</div></div>
         </div>
-        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr', marginTop: 6 }}>
-          <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.late}</div></div>
+        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
+          <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{late.length}</div></div>
+          <div className="rc-kpi"><div className="l">Submission Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
         </div>
       </div>
 
@@ -1770,29 +1954,49 @@ function DeptIiPage({ dept, ii }: { dept: string; ii: ReturnType<typeof iiBucket
         <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#185FA5" />
       </div>
 
-      <div className="rc-section">
-        <div className="rc-st">Overdue & Pending II Cases</div>
-        <SmallTable rows={overdueCases.slice(0, 12)} />
-      </div>
+      {overdue.length > 0 && (
+        <div className="rc-section">
+          <div className="rc-st">Overdue Cases</div>
+          {overdueByDept.labels.length > 0 && (
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>By Action Dept: {overdueByDept.labels.map((d, i) => `${d} (${overdueByDept.data[i]})`).join(' · ')}</div>
+          )}
+          <SmallTable rows={overdue.slice(0, 8)} />
+        </div>
+      )}
+      {pending.length > 0 && (
+        <div className="rc-section">
+          <div className="rc-st">Pending Cases</div>
+          {pendingByDept.labels.length > 0 && (
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>By Action Dept: {pendingByDept.labels.map((d, i) => `${d} (${pendingByDept.data[i]})`).join(' · ')}</div>
+          )}
+          <SmallTable rows={pending.slice(0, 8)} />
+        </div>
+      )}
 
       <ReportFooter />
     </div>
   )
 }
 
-function DeptRcaPage({ dept, rca }: { dept: string; rca: ReturnType<typeof rcaBuckets> }) {
-  const overduePending = [...rca.overdue, ...rca.pending]
-  const sev = severityCounts(overduePending)
-  const cats = sortedTop(counts(overduePending, (r) => r.category), 6)
+function DeptRcaPageDetail({ dept, all, overdue, pending, onTime, late }: { dept: string; all: Incident[]; overdue: Incident[]; pending: Incident[]; onTime: Incident[]; late: Incident[] }) {
+  const sev = severityCounts(all)
+  const cats = sortedTop(counts(all, (r) => r.category), 8)
+  const compliance = all.length ? Math.round(((onTime.length + late.length) / all.length) * 100) : 0
+  const overdueByDept = sortedTop(counts(overdue, (r) => r.action_dept))
+  const pendingByDept = sortedTop(counts(pending, (r) => r.action_dept))
   return (
     <div className="rc-page">
       <div className="rc-h"><div className="t1">{dept} — Section 10: Root Cause Analysis</div></div>
       <div className="rc-section">
         <div className="rc-kpis">
-          <div className="rc-kpi"><div className="l">Total RCA</div><div className="v" style={{ color: 'var(--blue)' }}>{rca.total}</div></div>
-          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{rca.overdue.length}</div></div>
-          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{rca.pending.length}</div></div>
-          <div className="rc-kpi"><div className="l">Completed</div><div className="v" style={{ color: 'var(--green)' }}>{rca.completed}</div></div>
+          <div className="rc-kpi"><div className="l">Total RCA</div><div className="v" style={{ color: 'var(--blue)' }}>{all.length}</div></div>
+          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{overdue.length}</div></div>
+          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{pending.length}</div></div>
+          <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{onTime.length}</div></div>
+        </div>
+        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
+          <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{late.length}</div></div>
+          <div className="rc-kpi"><div className="l">Submission Compliance</div><div className="v" style={{ color: compliance >= 70 ? 'var(--green)' : compliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{compliance}%</div></div>
         </div>
       </div>
 
@@ -1810,13 +2014,27 @@ function DeptRcaPage({ dept, rca }: { dept: string; rca: ReturnType<typeof rcaBu
 
       <div className="rc-section">
         <div className="rc-st">Category of RCA Cases</div>
-        <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#185FA5" />
+        <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#534AB7" />
       </div>
 
-      <div className="rc-section">
-        <div className="rc-st">Overdue & Pending RCA Cases</div>
-        <SmallTable rows={overduePending.slice(0, 12)} />
-      </div>
+      {overdue.length > 0 && (
+        <div className="rc-section">
+          <div className="rc-st">Overdue Cases</div>
+          {overdueByDept.labels.length > 0 && (
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>By Action Dept: {overdueByDept.labels.map((d, i) => `${d} (${overdueByDept.data[i]})`).join(' · ')}</div>
+          )}
+          <SmallTable rows={overdue.slice(0, 8)} />
+        </div>
+      )}
+      {pending.length > 0 && (
+        <div className="rc-section">
+          <div className="rc-st">Pending Cases</div>
+          {pendingByDept.labels.length > 0 && (
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>By Action Dept: {pendingByDept.labels.map((d, i) => `${d} (${pendingByDept.data[i]})`).join(' · ')}</div>
+          )}
+          <SmallTable rows={pending.slice(0, 8)} />
+        </div>
+      )}
 
       <ReportFooter />
     </div>
@@ -1824,18 +2042,34 @@ function DeptRcaPage({ dept, rca }: { dept: string; rca: ReturnType<typeof rcaBu
 }
 
 function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: string; period: PeriodKey }) {
-  const assigned = rows.filter((r) => r.action_dept === dept)
-  const psi = assigned.filter(isPsi)
-  const ii = iiBuckets(assigned)
-  const rca = rcaBuckets(assigned)
-  const sev = severityCounts(psi)
-  const cats = sortedTop(counts(psi, (r) => r.category), 8)
-  const actionTaken = sortedTop(counts(psi, (r) => r.action_taken), 8)
-  const primaryDepts = sortedTop(counts(assigned, (r) => r.dept_code), 8)
+  // ALL incidents assigned to this dept (Action Dept)
+  const allResp = rows.filter((r) => r.action_dept === dept)
 
+  // II / RCA computed inline
+  const iiAll = allResp.filter((r) => (r.is_ii ?? 0) === 1)
+  const iiOverdue = iiAll.filter((r) => (r.ii_status ?? '').includes('Overdue'))
+  const iiPending = iiAll.filter((r) => (r.ii_status ?? '').includes('Pending') && !(r.ii_status ?? '').includes('Overdue'))
+  const iiOnTime = iiAll.filter((r) => (r.ii_status ?? '').toLowerCase().includes('on time'))
+  const iiLate = iiAll.filter((r) => (r.ii_status ?? '').toLowerCase().includes('late') && !(r.ii_status ?? '').toLowerCase().includes('on time'))
+  const iiCompliance = iiAll.length ? Math.round(((iiOnTime.length + iiLate.length) / iiAll.length) * 100) : 0
+
+  const rcaAll = allResp.filter((r) => (r.is_rca ?? 0) === 1)
+  const rcaOverdue = rcaAll.filter((r) => (r.rca_status ?? '').includes('Overdue'))
+  const rcaPending = rcaAll.filter((r) => (r.rca_status ?? '').includes('Pending') && !(r.rca_status ?? '').includes('Overdue'))
+  const rcaOnTime = rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('on time'))
+  const rcaLate = rcaAll.filter((r) => (r.rca_status ?? '').toLowerCase().includes('late') && !(r.rca_status ?? '').toLowerCase().includes('on time'))
+  const rcaCompliance = rcaAll.length ? Math.round(((rcaOnTime.length + rcaLate.length) / rcaAll.length) * 100) : 0
+
+  // Monthly trend (by submission date)
   const monthAcc = new Map<string, number>()
-  for (const r of assigned) { const k = monthKey(r.incident_month); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
+  for (const r of allResp) { const k = submissionMonthKey(r); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
   const monthly = Array.from(monthAcc.entries()).sort(([a], [b]) => a.localeCompare(b))
+
+  // Page 2 content
+  const cats = sortedTop(counts(allResp, (r) => r.category), 10)
+  const sev = severityCounts(allResp)
+  const actionTaken = sortedTop(counts(allResp, (r) => r.action_taken), 10)
+  const primaryDepts = sortedTop(counts(allResp, (r) => r.dept_code), 10)
 
   return (
     <>
@@ -1847,16 +2081,34 @@ function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: stri
 
         <div className="rc-section">
           <div className="rc-st">Section 1 — Summary</div>
-          <div className="rc-kpis">
-            <div className="rc-kpi"><div className="l">Total Assigned</div><div className="v" style={{ color: 'var(--blue)' }}>{assigned.length}</div></div>
-            <div className="rc-kpi"><div className="l">II Total</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.total}</div></div>
-            <div className="rc-kpi"><div className="l">RCA Total</div><div className="v" style={{ color: 'var(--blue)' }}>{rca.total}</div></div>
-            <div className="rc-kpi"><div className="l">Overdue (II+RCA)</div><div className="v" style={{ color: 'var(--red)' }}>{ii.overdue.length + rca.overdue.length}</div></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 2fr', alignItems: 'stretch', gap: 8 }}>
+            <div className="rc-kpi" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div className="l">Total Assigned</div>
+              <div style={{ fontSize: 40, fontWeight: 700, color: 'var(--blue)', lineHeight: 1 }}>{allResp.length}</div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              <div className="rc-kpi"><div className="l">Total II</div><div className="v" style={{ color: 'var(--blue)' }}>{iiAll.length}</div></div>
+              <div className="rc-kpi"><div className="l">II Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{iiOverdue.length}</div></div>
+              <div className="rc-kpi" style={{ gridColumn: '1 / -1' }}>
+                <div className="l">II Submission Compliance</div>
+                <div className="v" style={{ color: iiCompliance >= 70 ? 'var(--green)' : iiCompliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{iiCompliance >= 70 ? '🟢' : iiCompliance >= 40 ? '🟡' : '🔴'} {iiCompliance}%</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              <div className="rc-kpi"><div className="l">Total RCA</div><div className="v" style={{ color: 'var(--blue)' }}>{rcaAll.length}</div></div>
+              <div className="rc-kpi"><div className="l">RCA Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{rcaOverdue.length}</div></div>
+              <div className="rc-kpi" style={{ gridColumn: '1 / -1' }}>
+                <div className="l">RCA Submitted %</div>
+                <div className="v" style={{ color: rcaCompliance >= 70 ? 'var(--green)' : rcaCompliance >= 40 ? 'var(--amber)' : 'var(--red)' }}>{rcaCompliance >= 70 ? '🟢' : rcaCompliance >= 40 ? '🟡' : '🔴'} {rcaCompliance}%</div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="rc-section">
-          <div className="rc-st">Section 2 — Monthly Trend</div>
+          <div className="rc-st">Section 2 — Monthly Trend (Assigned per Month)</div>
           <div style={{ height: 130 }}>
             <Line
               data={{ labels: monthly.map(([k]) => monthLabel(k)), datasets: [{ data: monthly.map(([, v]) => v), borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }] }}
@@ -1872,11 +2124,12 @@ function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: stri
         <div className="rc-h"><div className="t1">{dept} — Page 2</div></div>
 
         <div className="rc-section">
-          <div className="rc-st">Section 3 — Categories</div>
+          <div className="rc-st">Section 3 — Category of Incidents</div>
           <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#1D9E75" />
         </div>
+
         <div className="rc-section">
-          <div className="rc-st">Section 4 — Severity (PSI)</div>
+          <div className="rc-st">Section 4 — Severity of Incidents</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
             {SEVERITY_ORDER.map((s) => (
               <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
@@ -1886,20 +2139,37 @@ function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: stri
             ))}
           </div>
         </div>
+
         <div className="rc-section">
-          <div className="rc-st">Section 5 — Action Types</div>
+          <div className="rc-st">Section 5 — Action Taken Summary</div>
           <CompactProgressList items={actionTaken.labels.map((l, i) => ({ label: l, value: actionTaken.data[i] }))} color="#378ADD" />
         </div>
+
         <div className="rc-section">
-          <div className="rc-st">Section 6 — Primary Dept Breakdown</div>
+          <div className="rc-st">Section 6 — Patient&rsquo;s Primary Departments</div>
           <CompactProgressList items={primaryDepts.labels.map((l, i) => ({ label: l, value: primaryDepts.data[i] }))} color="#185FA5" />
         </div>
 
         <ReportFooter />
       </div>
 
-      <DeptIiPage dept={dept} ii={ii} />
-      <DeptRcaPage dept={dept} rca={rca} />
+      <DeptIiPageDetail
+        dept={dept}
+        all={iiAll}
+        overdue={iiOverdue}
+        pending={iiPending}
+        onTime={iiOnTime}
+        late={iiLate}
+      />
+
+      <DeptRcaPageDetail
+        dept={dept}
+        all={rcaAll}
+        overdue={rcaOverdue}
+        pending={rcaPending}
+        onTime={rcaOnTime}
+        late={rcaLate}
+      />
     </>
   )
 }
