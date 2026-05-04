@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
+import { AppShell, Topbar } from '@/components/AppShell'
 import {
   parseRows,
   type IncidentRow,
@@ -132,7 +133,10 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <AppShell>
+      <Topbar title="Upload IR Database" meta="Bulk import incidents from Excel" />
+      <main className="flex-1 p-6">
+        <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Upload IR Database</h1>
         <p className="mt-1 text-sm text-gray-600">
@@ -281,7 +285,9 @@ export default function UploadPage() {
           </ul>
         </div>
       )}
-    </div>
+        </div>
+      </main>
+    </AppShell>
   )
 }
 
