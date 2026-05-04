@@ -2,6 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Chart as ChartJS,
@@ -18,21 +19,40 @@ import {
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { createClient } from '@/lib/supabase/client'
-import { AppShell, Topbar } from '@/components/AppShell'
 import {
   applyFilters,
-  categoryBreakdown,
+  CATEGORY_COLORS,
+  categoryByMonth,
+  counts,
   DEFAULT_FILTERS,
+  filterByPeriod,
+  iiBuckets,
   isOverdue,
-  monthlyTrend,
-  severityDistribution,
-  severityHex,
-  summarize,
-  topDepartments,
-  uniqueMonths,
-  uniqueValues,
+  isPsi,
+  monthLabel,
+  monthKey,
+  overviewMetrics,
+  parseIiStatus,
+  parseRcaStatus,
+  PERIOD_OPTIONS,
+  PRIMARY_DEPTS,
+  ACTION_DEPTS,
+  primaryVsReporting,
+  rcaBuckets,
+  reportingTrend,
+  SEVERITY_BG,
+  SEVERITY_FG,
+  SEVERITY_ORDER,
+  severityByCategory,
+  severityCounts,
+  sortedTop,
   type Incident,
   type IrFilters,
+  type PeriodKey,
+  type Severity,
+  uniqueMonths,
+  uniqueValues,
+  activeMonthRange,
 } from '@/lib/ir/dashboard-helpers'
 
 ChartJS.register(
@@ -48,25 +68,46 @@ ChartJS.register(
   Title
 )
 
-type Tab = 'overview' | 'dept' | 'severity' | 'rca' | 'table'
+type TabId =
+  | 'overview' | 'categories' | 'severity'
+  | 'ii' | 'rca' | 'reporting'
+  | 'non-psi' | 'report-card' | 'all-records'
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'dept', label: 'By Department' },
-  { id: 'severity', label: 'Severity Analysis' },
-  { id: 'rca', label: 'RCA & II Tracker' },
-  { id: 'table', label: 'Incident Table' },
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: 'overview',     label: 'Overview',              icon: '📊' },
+  { id: 'categories',   label: 'PSI Categories',        icon: '🏷️' },
+  { id: 'severity',     label: 'Severity',              icon: '⚠️' },
+  { id: 'ii',           label: 'Internal Investigation',icon: '🔍' },
+  { id: 'rca',          label: 'RCA',                   icon: '🧩' },
+  { id: 'reporting',    label: 'Reporting Culture',     icon: '🏢' },
+  { id: 'non-psi',      label: 'Non-PSI Incidents',     icon: '📁' },
+  { id: 'report-card',  label: 'Report Card',           icon: '📄' },
+  { id: 'all-records',  label: 'All Records',           icon: '📋' },
 ]
 
 const PAGE_SIZE = 20
+
+const TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'ACTUAL', label: 'ACTUAL' },
+  { value: 'NEARMISS', label: 'NEAR MISS' },
+]
+const CARE_OPTIONS = [
+  { value: 'all', label: 'All Settings' },
+  { value: 'INPATIENT', label: 'INPATIENT' },
+  { value: 'EMERGENCY', label: 'EMERGENCY' },
+  { value: 'OUTPATIENT', label: 'OUTPATIENT' },
+]
+
+/* =========================================================================
+ * MAIN PAGE
+ * ========================================================================= */
 
 export default function IrPage() {
   const [rows, setRows] = useState<Incident[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [filters, setFilters] = useState<IrFilters>(DEFAULT_FILTERS)
-  const [tab, setTab] = useState<Tab>('overview')
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
+  const [tab, setTab] = useState<TabId>('overview')
 
   // Initial fetch
   useEffect(() => {
@@ -88,157 +129,160 @@ export default function IrPage() {
         setRows((data ?? []) as Incident[])
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   const filtered = useMemo(() => (rows ? applyFilters(rows, filters) : []), [rows, filters])
-  const summary = useMemo(() => summarize(filtered), [filtered])
-  const trend = useMemo(() => monthlyTrend(filtered), [filtered])
-  const sev = useMemo(() => severityDistribution(filtered), [filtered])
-  const top = useMemo(() => topDepartments(filtered), [filtered])
-  const cats = useMemo(() => categoryBreakdown(filtered), [filtered])
 
   const monthOpts = useMemo(() => uniqueMonths(rows ?? []), [rows])
   const deptOpts = useMemo(() => uniqueValues(rows ?? [], 'dept_code'), [rows])
-  const sevOpts = useMemo(() => uniqueValues(rows ?? [], 'severity_real'), [rows])
-  const setOpts = useMemo(() => uniqueValues(rows ?? [], 'care_setting'), [rows])
-
-  // Reset page when filters/search change
-  useEffect(() => {
-    setPage(1)
-  }, [filters, search, tab])
-
-  const Filters = (
-    <div className="px-3 py-3">
-      <div className="mb-2 px-1 text-[9px] font-bold uppercase tracking-widest text-[#5A6070]">
-        Filters
-      </div>
-      <FilterSelect
-        label="Month"
-        value={filters.month}
-        onChange={(v) => setFilters({ ...filters, month: v })}
-        options={[{ value: 'all', label: 'All months' }, ...monthOpts]}
-      />
-      <FilterSelect
-        label="Department"
-        value={filters.dept}
-        onChange={(v) => setFilters({ ...filters, dept: v })}
-        options={[{ value: 'all', label: 'All depts' }, ...deptOpts.map((v) => ({ value: v, label: v }))]}
-      />
-      <FilterSelect
-        label="Severity"
-        value={filters.severity}
-        onChange={(v) => setFilters({ ...filters, severity: v })}
-        options={[{ value: 'all', label: 'All severities' }, ...sevOpts.map((v) => ({ value: v, label: v }))]}
-      />
-      <FilterSelect
-        label="Care Setting"
-        value={filters.careSetting}
-        onChange={(v) => setFilters({ ...filters, careSetting: v })}
-        options={[{ value: 'all', label: 'All settings' }, ...setOpts.map((v) => ({ value: v, label: v }))]}
-      />
-      <FilterSelect
-        label="Case Status"
-        value={filters.caseStatus}
-        onChange={(v) => setFilters({ ...filters, caseStatus: v })}
-        options={[
-          { value: 'all', label: 'All cases' },
-          { value: 'open', label: 'Open only' },
-          { value: 'closed', label: 'Closed only' },
-        ]}
-      />
-      <button
-        onClick={() => setFilters(DEFAULT_FILTERS)}
-        className="mt-2 w-full rounded-md border border-white/10 bg-white/[0.06] px-2 py-1.5 text-xs text-[var(--sidebar-text)] hover:bg-white/[0.11] hover:text-white"
-      >
-        Reset filters
-      </button>
-    </div>
-  )
+  const catOpts = useMemo(() => uniqueValues(rows ?? [], 'category'), [rows])
+  const meta = useMemo(() => activeMonthRange(rows ?? [], filters), [rows, filters])
 
   return (
-    <AppShell sidebarExtra={Filters}>
-      <Topbar
-        title="Patient Safety Incident Dashboard 2026"
-        meta="Hospital Al-Sultan Abdullah UiTM · RMCQ"
-        right={
-          <span className="rounded-full bg-[var(--blue-lt)] px-3 py-1 text-xs font-bold text-[var(--blue)]">
-            {rows == null ? 'Loading…' : `${filtered.length.toLocaleString()} record${filtered.length === 1 ? '' : 's'}`}
-          </span>
-        }
-      />
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="sb-head">
+          <div className="sb-logo">🏥 Patient Safety</div>
+          <div className="sb-sub">Incident Reporting Dashboard 2026</div>
+        </div>
 
-      <main className="flex-1 px-6 py-5">
-        {rows == null ? (
-          <Loader />
-        ) : loadError ? (
-          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            Failed to load incidents: {loadError}
+        <div className="nav-section">
+          <div className="nav-lbl">Views</div>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`nav-item ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+              type="button"
+            >
+              <span className="nav-icon">{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="nav-section" style={{ marginTop: 4 }}>
+          <div className="nav-lbl">Portal</div>
+          <Link href="/kpi" className="nav-item">
+            <span className="nav-icon">📈</span>
+            <span>KPI Monitor</span>
+          </Link>
+          <Link href="/upload" className="nav-item">
+            <span className="nav-icon">⬆</span>
+            <span>Upload Data</span>
+          </Link>
+        </div>
+
+        <div className="sb-filters">
+          <div className="sf-lbl">🔎 Filters</div>
+          <FilterSelect
+            label="Month"
+            value={filters.month}
+            onChange={(v) => setFilters({ ...filters, month: v })}
+            options={[{ value: 'all', label: 'All Months' }, ...monthOpts]}
+          />
+          <FilterSelect
+            label="Department"
+            value={filters.dept}
+            onChange={(v) => setFilters({ ...filters, dept: v })}
+            options={[{ value: 'all', label: 'All Departments' }, ...deptOpts.map((v) => ({ value: v, label: v }))]}
+          />
+          <FilterSelect
+            label="Care Setting"
+            value={filters.careSetting}
+            onChange={(v) => setFilters({ ...filters, careSetting: v })}
+            options={CARE_OPTIONS}
+          />
+          <FilterSelect
+            label="Incident Type"
+            value={filters.type}
+            onChange={(v) => setFilters({ ...filters, type: v })}
+            options={TYPE_OPTIONS}
+          />
+          <FilterSelect
+            label="Category"
+            value={filters.category}
+            onChange={(v) => setFilters({ ...filters, category: v })}
+            options={[{ value: 'all', label: 'All Categories' }, ...catOpts.map((v) => ({ value: v, label: v }))]}
+          />
+          <button className="reset-btn" onClick={() => setFilters(DEFAULT_FILTERS)} type="button">
+            ↺ Reset Filters
+          </button>
+        </div>
+      </aside>
+
+      <div className="main">
+        <header className="topbar">
+          <div>
+            <div className="tb-title">Patient Safety Incident Reporting 2026</div>
+            <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · {meta}</div>
           </div>
-        ) : (
-          <>
-            <SummaryCards s={summary} />
+          <div className="rec-badge">
+            {rows == null ? 'Loading…' : `${filtered.length.toLocaleString()} record${filtered.length === 1 ? '' : 's'}`}
+          </div>
+        </header>
 
-            <div className="mt-5 flex flex-wrap gap-1 border-b border-[var(--border)]">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`rounded-t-md px-4 py-2 text-xs font-medium transition-colors ${
-                    tab === t.id
-                      ? 'border border-b-0 border-[var(--border)] bg-white text-[var(--blue)]'
-                      : 'text-[var(--muted)] hover:text-[var(--text)]'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+        <nav className="tab-nav">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+              type="button"
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </nav>
 
-            <div className="-mt-px rounded-b-md rounded-tr-md border border-[var(--border)] bg-white p-5 min-h-[400px]">
-              {tab === 'overview' && <OverviewTab trend={trend} sev={sev} top={top} />}
-              {tab === 'dept' && <DeptTab top={topDepartments(filtered, 20)} total={filtered.length} />}
-              {tab === 'severity' && <SeverityTab sev={sev} cats={cats} />}
-              {tab === 'rca' && <RcaIiTab rows={filtered} />}
-              {tab === 'table' && (
-                <TableTab
-                  rows={filtered}
-                  search={search}
-                  setSearch={setSearch}
-                  page={page}
-                  setPage={setPage}
-                />
-              )}
+        <main className="tab-pane">
+          {rows == null ? (
+            <Loader />
+          ) : loadError ? (
+            <div className="ac red">
+              <div className="ai">⚠️</div>
+              <div>
+                <div className="at">Failed to load incidents</div>
+                <div className="as">{loadError}</div>
+              </div>
             </div>
-          </>
-        )}
-      </main>
-    </AppShell>
+          ) : (
+            <>
+              {tab === 'overview'    && <OverviewTab rows={filtered} />}
+              {tab === 'categories'  && <CategoriesTab rows={filtered} />}
+              {tab === 'severity'    && <SeverityTab rows={filtered} />}
+              {tab === 'ii'          && <IiTab rows={filtered} />}
+              {tab === 'rca'         && <RcaTab rows={filtered} />}
+              {tab === 'reporting'   && <ReportingTab rows={filtered} />}
+              {tab === 'non-psi'     && <NonPsiTab rows={filtered} />}
+              {tab === 'report-card' && <ReportCardTab rows={rows} />}
+              {tab === 'all-records' && <AllRecordsTab rows={filtered} />}
+            </>
+          )}
+        </main>
+      </div>
+    </div>
   )
 }
 
-/* ===================================================================== */
-/* Components                                                            */
-/* ===================================================================== */
+/* =========================================================================
+ * SHARED UI PRIMITIVES
+ * ========================================================================= */
 
 function Loader() {
   return (
-    <div className="flex h-64 items-center justify-center">
-      <div className="flex items-center gap-3 text-sm text-[var(--muted)]">
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--blue)]" />
-        Loading incidents…
+    <div className="loader">
+      <div className="loader-inner">
+        <div className="spin" />
+        <div>Loading incidents…</div>
       </div>
     </div>
   )
 }
 
 function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
+  label, value, onChange, options,
 }: {
   label: string
   value: string
@@ -246,539 +290,1733 @@ function FilterSelect({
   options: { value: string; label: string }[]
 }) {
   return (
-    <div className="mb-2">
-      <label className="mb-0.5 block text-[10px] text-[var(--sidebar-mute)]">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-white/10 bg-[#1E2B3C] px-2 py-1.5 text-xs text-[var(--sidebar-text)] outline-none focus:border-[var(--blue-md)]"
-      >
+    <div className="sf-g">
+      <label>{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-[#1E2B3C] text-[var(--sidebar-text)]">
-            {o.label}
-          </option>
+          <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
     </div>
   )
 }
 
-function SummaryCards({ s }: { s: ReturnType<typeof summarize> }) {
-  const cards = [
-    { label: 'Total Incidents', value: s.total, accent: 'var(--blue)', bg: 'var(--blue-lt)' },
-    { label: 'Sentinel Events', value: s.sentinel, accent: 'var(--purple)', bg: 'var(--purple-lt)' },
-    { label: 'Open Cases', value: s.open, accent: 'var(--red)', bg: 'var(--red-lt)' },
-    { label: 'RCA Required', value: s.rcaRequired, accent: 'var(--amber)', bg: 'var(--amber-lt)' },
-    { label: 'II Required', value: s.iiRequired, accent: 'var(--teal)', bg: 'var(--teal-lt)' },
-    { label: 'Near Miss', value: s.nearMiss, accent: 'var(--green)', bg: 'var(--green-lt)' },
-  ]
+function MetricCard({ tone, label, value, sub }: { tone: 'blue'|'red'|'amber'|'green'|'gray'|'teal'|'purple'; label: string; value: number | string; sub?: string }) {
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          className="rounded-[10px] border border-[var(--border)] bg-white p-4 shadow-sm"
-        >
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-            {c.label}
+    <div className={`mc ${tone}`}>
+      <div className="ml">{label}</div>
+      <div className="mv">{typeof value === 'number' ? value.toLocaleString() : value}</div>
+      {sub && <div className="ms">{sub}</div>}
+    </div>
+  )
+}
+
+function Panel({ title, subtitle, children, height }: { title: string; subtitle?: string; children: React.ReactNode; height?: number }) {
+  return (
+    <div className="panel">
+      <div className="pf">
+        <div>
+          <div className="pt">{title}</div>
+          {subtitle && <div className="psub">{subtitle}</div>}
+        </div>
+      </div>
+      <div className="cw" style={height ? { height } : undefined}>{children}</div>
+    </div>
+  )
+}
+
+function ProgressList({ items, color = '#378ADD' }: { items: { label: string; value: number; color?: string }[]; color?: string }) {
+  const max = Math.max(1, ...items.map((i) => i.value))
+  return (
+    <div>
+      {items.map((it) => (
+        <div className="pr-row" key={it.label}>
+          <div className="pr-lbl" title={it.label}>{it.label}</div>
+          <div className="pr-trk">
+            <div className="pr-fill" style={{ width: `${(it.value / max) * 100}%`, background: it.color ?? color }} />
           </div>
-          <div className="mt-1 text-2xl font-bold" style={{ color: c.accent }}>
-            {c.value.toLocaleString()}
-          </div>
-          <div
-            className="mt-2 inline-block rounded-md px-2 py-0.5 text-[10px] font-semibold"
-            style={{ background: c.bg, color: c.accent }}
-          >
-            {c.value === 0 ? '—' : `${Math.round((c.value / Math.max(s.total, 1)) * 100)}% of total`}
-          </div>
+          <div className="pr-n">{it.value}</div>
         </div>
       ))}
+      {items.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 12, padding: '8px 0' }}>No data</div>}
     </div>
   )
 }
 
-function ChartCard({ title, children, height = 280 }: { title: string; children: React.ReactNode; height?: number }) {
-  return (
-    <div className="rounded-[10px] border border-[var(--border)] bg-white p-4">
-      <div className="mb-2 text-sm font-semibold text-[var(--text)]">{title}</div>
-      <div style={{ height }}>{children}</div>
-    </div>
-  )
+function SevBadge({ sev }: { sev: string | null }) {
+  const s = (sev ?? '').toUpperCase()
+  if (!s) return <span className="b b-gray">—</span>
+  const bg = SEVERITY_BG[s] ?? '#888780'
+  const fg = SEVERITY_FG[s] ?? '#fff'
+  return <span className="b" style={{ background: bg, color: fg }}>{s}</span>
 }
 
-function OverviewTab({
-  trend,
-  sev,
-  top,
-}: {
-  trend: ReturnType<typeof monthlyTrend>
-  sev: ReturnType<typeof severityDistribution>
-  top: ReturnType<typeof topDepartments>
-}) {
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <ChartCard title="Monthly trend">
-        <Line
-          data={{
-            labels: trend.labels,
-            datasets: [
-              {
-                label: 'Incidents',
-                data: trend.data,
-                borderColor: '#185FA5',
-                backgroundColor: 'rgba(55,138,221,0.18)',
-                fill: true,
-                tension: 0.35,
-                pointRadius: 3,
-                pointBackgroundColor: '#185FA5',
-              },
-            ],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              y: { beginAtZero: true, grid: { color: '#E0DED6' } },
-              x: { grid: { display: false } },
-            },
-          }}
-        />
-      </ChartCard>
-
-      <ChartCard title="Severity distribution">
-        <Doughnut
-          data={{
-            labels: sev.labels,
-            datasets: [{ data: sev.data, backgroundColor: sev.colors, borderWidth: 0 }],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'right' } },
-            cutout: '62%',
-          }}
-        />
-      </ChartCard>
-
-      <ChartCard title="Top departments by incidents">
-        <Bar
-          data={{
-            labels: top.labels,
-            datasets: [
-              {
-                label: 'Incidents',
-                data: top.data,
-                backgroundColor: '#378ADD',
-                borderRadius: 4,
-              },
-            ],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              y: { beginAtZero: true, grid: { color: '#E0DED6' } },
-              x: { grid: { display: false } },
-            },
-          }}
-        />
-      </ChartCard>
-
-      <ChartCard title="Top categories">
-        <Bar
-          data={{
-            labels: top.labels.slice(0, 6),
-            datasets: [
-              {
-                label: 'Incidents',
-                data: top.data.slice(0, 6),
-                backgroundColor: '#1D9E75',
-                borderRadius: 4,
-              },
-            ],
-          }}
-          options={{
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { beginAtZero: true, grid: { color: '#E0DED6' } },
-              y: { grid: { display: false } },
-            },
-          }}
-        />
-      </ChartCard>
-    </div>
-  )
+function StatusBadge({ status, kind }: { status: string; kind: 'ii' | 'rca' }) {
+  const tone = kind === 'ii' ? toneForIi(status) : toneForRca(status)
+  return <span className={`b b-${tone}`}>{status}</span>
 }
 
-function DeptTab({ top, total }: { top: ReturnType<typeof topDepartments>; total: number }) {
-  const max = Math.max(1, ...top.data)
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <ChartCard title="Incidents by department" height={Math.max(320, top.labels.length * 22)}>
-        <Bar
-          data={{
-            labels: top.labels,
-            datasets: [
-              {
-                label: 'Incidents',
-                data: top.data,
-                backgroundColor: '#185FA5',
-                borderRadius: 4,
-              },
-            ],
-          }}
-          options={{
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { beginAtZero: true, grid: { color: '#E0DED6' } },
-              y: { grid: { display: false } },
-            },
-          }}
-        />
-      </ChartCard>
-
-      <div className="rounded-[10px] border border-[var(--border)] bg-white p-4">
-        <div className="mb-3 text-sm font-semibold">Department share</div>
-        <div className="space-y-3">
-          {top.labels.map((l, i) => {
-            const v = top.data[i]
-            const pct = (v / max) * 100
-            const sharePct = total ? (v / total) * 100 : 0
-            return (
-              <div key={l}>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-medium text-[var(--text)]">{l}</span>
-                  <span className="text-[var(--muted)]">
-                    {v} ({sharePct.toFixed(1)}%)
-                  </span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg)]">
-                  <div className="h-full rounded-full bg-[var(--blue-md)]" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
+function toneForIi(s: string): string {
+  if (s === 'Overdue') return 'red'
+  if (s === 'Pending') return 'amber'
+  if (s === 'On Time') return 'green'
+  if (s === 'Late') return 'blue'
+  return 'gray'
+}
+function toneForRca(s: string): string {
+  if (s === 'Overdue') return 'red'
+  if (s === 'Pending') return 'amber'
+  if (s === 'Completed') return 'green'
+  return 'gray'
 }
 
-function SeverityTab({
-  sev,
-  cats,
-}: {
-  sev: ReturnType<typeof severityDistribution>
-  cats: ReturnType<typeof categoryBreakdown>
-}) {
-  const total = sev.data.reduce((a, b) => a + b, 0) || 1
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <ChartCard title="Severity distribution" height={320}>
-        <Doughnut
-          data={{
-            labels: sev.labels,
-            datasets: [{ data: sev.data, backgroundColor: sev.colors, borderWidth: 0 }],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'right' } },
-            cutout: '62%',
-          }}
-        />
-      </ChartCard>
+function CaseBadge({ closed }: { closed: boolean | null }) {
+  return closed
+    ? <span className="b b-green">Closed</span>
+    : <span className="b b-amber">Open</span>
+}
 
-      <div className="rounded-[10px] border border-[var(--border)] bg-white p-4">
-        <div className="mb-3 text-sm font-semibold">Severity breakdown</div>
-        <div className="space-y-3">
-          {sev.labels.map((l, i) => (
-            <div key={l} className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-3 w-3 rounded-full" style={{ background: sev.colors[i] }} />
-                <SeverityBadge sev={l} />
-              </div>
-              <div className="text-right">
-                <div className="font-semibold text-[var(--text)]">{sev.data[i]}</div>
-                <div className="text-[11px] text-[var(--muted)]">{((sev.data[i] / total) * 100).toFixed(1)}%</div>
-              </div>
-            </div>
-          ))}
-        </div>
+function SentinelBadge({ on }: { on: boolean | null }) {
+  return on ? <span className="b b-purple">YES</span> : <span className="b b-gray">NO</span>
+}
+
+function TypeBadge({ t }: { t: string | null }) {
+  const v = (t ?? '').toUpperCase().replace(/\s+/g, '')
+  if (v === 'ACTUAL') return <span className="b b-blue">ACTUAL</span>
+  if (v === 'NEARMISS') return <span className="b b-teal">NEAR MISS</span>
+  return <span className="b b-gray">{t ?? '—'}</span>
+}
+
+function fmtMonth(iso: string | null): string {
+  const k = monthKey(iso); return k ? monthLabel(k) : '—'
+}
+
+
+/* =========================================================================
+ * TAB 1 — OVERVIEW
+ * ========================================================================= */
+
+function OverviewTab({ rows }: { rows: Incident[] }) {
+  const m = useMemo(() => overviewMetrics(rows), [rows])
+
+  // monthly trend (PSI vs Non-PSI)
+  const monthly = useMemo(() => {
+    const acc = new Map<string, { psi: number; nonPsi: number }>()
+    for (const r of rows) {
+      const k = monthKey(r.incident_month); if (!k) continue
+      if (!acc.has(k)) acc.set(k, { psi: 0, nonPsi: 0 })
+      const a = acc.get(k)!
+      if (isPsi(r)) a.psi++; else a.nonPsi++
+    }
+    const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
+    return {
+      labels: sorted.map(([k]) => monthLabel(k)),
+      psi: sorted.map(([, v]) => v.psi),
+      nonPsi: sorted.map(([, v]) => v.nonPsi),
+    }
+  }, [rows])
+
+  const careCounts = useMemo(() => {
+    const c = counts(rows, (r) => (r.care_setting ?? '').toUpperCase())
+    return Array.from(c.entries())
+  }, [rows])
+
+  const topDept = useMemo(() => sortedTop(counts(rows, (r) => r.dept_code), 12), [rows])
+  const typeCounts = useMemo(() => {
+    let actual = 0, near = 0
+    for (const r of rows) {
+      const t = (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '')
+      if (t === 'ACTUAL') actual++
+      else if (t === 'NEARMISS') near++
+    }
+    return { actual, near }
+  }, [rows])
+  const actionTaken = useMemo(() => sortedTop(counts(rows.filter(isPsi), (r) => r.action_taken), 12), [rows])
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="blue"   label="Total Incidents"    value={m.total} />
+        <MetricCard tone="teal"   label="Patient Safety PSI" value={m.psi} />
+        <MetricCard tone="gray"   label="Non-PSI"            value={m.nonPsi} />
+        <MetricCard tone="amber"  label="Open Cases"         value={m.open} />
+        <MetricCard tone="red"    label="Sentinel Events"    value={m.sentinel} sub={`${m.deaths} Death case(s)`} />
+        <MetricCard tone="green"  label="Near Miss"          value={m.nearMiss} sub="PSI — intercepted" />
+        <MetricCard tone="red"    label="Severe (Real)"      value={m.severe} />
       </div>
 
-      <div className="lg:col-span-2">
-        <ChartCard title="Categories with most incidents" height={Math.max(280, cats.labels.length * 26)}>
-          <Bar
-            data={{
-              labels: cats.labels,
-              datasets: [
-                {
-                  label: 'Incidents',
-                  data: cats.data,
-                  backgroundColor: '#A32D2D',
-                  borderRadius: 4,
+      <div className="g2">
+        <Panel title="Monthly Incident Trend">
+          <div style={{ height: 210 }}>
+            <Bar
+              data={{
+                labels: monthly.labels,
+                datasets: [
+                  { label: 'PSI',     data: monthly.psi,    backgroundColor: '#378ADD', borderRadius: 4 },
+                  { label: 'Non-PSI', data: monthly.nonPsi, backgroundColor: '#B4B2A9', borderRadius: 4 },
+                ],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
                 },
+              }}
+            />
+          </div>
+        </Panel>
+
+        <Panel title="Care Setting">
+          <div style={{ height: 210 }}>
+            <Doughnut
+              data={{
+                labels: careCounts.map(([k]) => k),
+                datasets: [{
+                  data: careCounts.map(([, v]) => v),
+                  backgroundColor: ['#185FA5', '#E24B4A', '#1D9E75', '#EF9F27'],
+                  borderWidth: 0,
+                }],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false, cutout: '60%',
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+              }}
+            />
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title="Incident Trend by Month">
+        <div style={{ height: 220 }}>
+          <Line
+            data={{
+              labels: monthly.labels,
+              datasets: [
+                { label: 'PSI',     data: monthly.psi,    borderColor: '#378ADD', backgroundColor: '#378ADD', tension: 0.3, fill: false, pointRadius: 3 },
+                { label: 'Non-PSI', data: monthly.nonPsi, borderColor: '#B4B2A9', backgroundColor: '#B4B2A9', tension: 0.3, fill: false, pointRadius: 3 },
               ],
             }}
             options={{
-              indexAxis: 'y',
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
               scales: {
-                x: { beginAtZero: true, grid: { color: '#E0DED6' } },
-                y: { grid: { display: false } },
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
               },
             }}
           />
-        </ChartCard>
+        </div>
+      </Panel>
+
+      <div className="g2">
+        <Panel title="Top Departments (Primary)">
+          <ProgressList items={topDept.labels.map((l, i) => ({ label: l, value: topDept.data[i] }))} color="#378ADD" />
+        </Panel>
+
+        <Panel title="Actual vs Near Miss">
+          <div style={{ height: 220 }}>
+            <Doughnut
+              data={{
+                labels: ['Actual', 'Near Miss'],
+                datasets: [{
+                  data: [typeCounts.actual, typeCounts.near],
+                  backgroundColor: ['#185FA5', '#1D9E75'],
+                  borderWidth: 0,
+                }],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false, cutout: '60%',
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+              }}
+            />
+          </div>
+        </Panel>
       </div>
+
+      <Panel title="Action Taken — PSI Incidents Only">
+        <div style={{ height: 220 }}>
+          <Bar
+            data={{
+              labels: actionTaken.labels,
+              datasets: [{ label: 'Count', data: actionTaken.data, backgroundColor: '#1D9E75', borderRadius: 4 }],
+            }}
+            options={{
+              indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                y: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+
+      <Panel title="⚠️ Alerts & Watch Items">
+        {m.sentinel > 0 && (
+          <div className="ac red">
+            <div className="ai">⚠️</div>
+            <div>
+              <div className="at">{m.sentinel} Sentinel Event{m.sentinel === 1 ? '' : 's'} reported</div>
+              <div className="as">Includes {m.deaths} death{m.deaths === 1 ? '' : 's'}. Requires immediate review.</div>
+            </div>
+          </div>
+        )}
+        {m.open > 10 && (
+          <div className="ac amber">
+            <div className="ai">⏰</div>
+            <div>
+              <div className="at">{m.open} cases still open</div>
+              <div className="as">Requires follow-up to close out outstanding actions.</div>
+            </div>
+          </div>
+        )}
+        {m.nearMiss > 0 && (
+          <div className="ac green">
+            <div className="ai">✓</div>
+            <div>
+              <div className="at">{m.nearMiss} Near Miss incidents successfully intercepted</div>
+              <div className="as">Demonstrates strong proactive safety culture.</div>
+            </div>
+          </div>
+        )}
+        {m.sentinel === 0 && m.open <= 10 && m.nearMiss === 0 && (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>No items requiring attention.</div>
+        )}
+      </Panel>
+    </>
+  )
+}
+
+/* =========================================================================
+ * TAB 2 — PSI CATEGORIES
+ * ========================================================================= */
+
+function CategoriesTab({ rows }: { rows: Incident[] }) {
+  const psi = useMemo(() => rows.filter(isPsi), [rows])
+  const cats = useMemo(() => sortedTop(counts(psi, (r) => r.category)), [psi])
+  const top3 = useMemo(() => cats.labels.slice(0, 3).map((l, i) => ({ label: l, value: cats.data[i] })), [cats])
+
+  const others = useMemo(() => sortedTop(counts(psi.filter((r) => (r.category ?? '').trim() === 'Others'), (r) => r.sub_category)), [psi])
+
+  const trend = useMemo(() => categoryByMonth(psi), [psi])
+  const orderedCats = useMemo(() =>
+    cats.labels.length > 0
+      ? cats.labels
+      : trend.categories,
+    [cats.labels, trend.categories]
+  )
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="teal" label="Total PSI" value={psi.length} />
+        {top3.map((c, i) => (
+          <MetricCard
+            key={c.label}
+            tone={i === 0 ? 'red' : i === 1 ? 'amber' : 'blue'}
+            label={`#${i + 1} Category`}
+            value={c.value}
+            sub={c.label}
+          />
+        ))}
+      </div>
+
+      <div className="g2">
+        <Panel title="Incidents by Category">
+          <div style={{ height: 300 }}>
+            <Bar
+              data={{
+                labels: cats.labels,
+                datasets: [{
+                  label: 'Count',
+                  data: cats.data,
+                  backgroundColor: cats.labels.map((l) => CATEGORY_COLORS[l] ?? '#888780'),
+                  borderRadius: 4,
+                }],
+              }}
+              options={{
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  y: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        </Panel>
+
+        <Panel title="“Others” Sub-Category Breakdown" subtitle="Sub-categories for incidents classified as Others">
+          <ProgressList items={others.labels.map((l, i) => ({ label: l, value: others.data[i] }))} color="#B4B2A9" />
+        </Panel>
+      </div>
+
+      <Panel title="Category Trend by Month">
+        <div className="legend">
+          {orderedCats.map((c) => (
+            <div className="ld" key={c}>
+              <span className="ld-sw" style={{ background: CATEGORY_COLORS[c] ?? '#888780' }} />
+              {c}
+            </div>
+          ))}
+        </div>
+        <div style={{ height: 260, marginTop: 6 }}>
+          <Bar
+            data={{
+              labels: trend.months,
+              datasets: trend.categories.map((c, i) => ({
+                label: c,
+                data: trend.matrix[i],
+                backgroundColor: CATEGORY_COLORS[c] ?? '#888780',
+                stack: 's',
+              })),
+            }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { stacked: true, ticks: { font: { size: 11 } }, grid: { display: false } },
+                y: { stacked: true, beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+    </>
+  )
+}
+
+/* =========================================================================
+ * TAB 3 — SEVERITY
+ * ========================================================================= */
+
+function SeverityTab({ rows }: { rows: Incident[] }) {
+  const psi = useMemo(() => rows.filter(isPsi), [rows])
+  const sevReal = useMemo(() => severityCounts(psi, (r) => r.severity_real), [psi])
+  const sevPot = useMemo(() => severityCounts(psi, (r) => r.severity_potential), [psi])
+  const sentinels = useMemo(() => psi.filter((r) => r.sentinel), [psi])
+  const byCat = useMemo(() => severityByCategory(psi), [psi])
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        {SEVERITY_ORDER.map((s) => (
+          <div key={s} className="mc">
+            <div className="ml">{s}</div>
+            <div className="mv" style={{ color: s === 'DEATH' || s === 'SEVERE' ? 'var(--red)' : s === 'MODERATE' ? 'var(--amber)' : s === 'MILD' ? 'var(--blue)' : 'var(--green)' }}>
+              {sevReal[s].toLocaleString()}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="g2">
+        <Panel title="Severity of Outcome (Real)">
+          <SeverityDoughnut counts={sevReal} />
+        </Panel>
+        <Panel title="Severity of Outcome (Potential)">
+          <SeverityDoughnut counts={sevPot} />
+        </Panel>
+      </div>
+
+      <div className="g2">
+        <Panel title="Sentinel Events">
+          {sentinels.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>No sentinel events in current selection.</div>
+          ) : (
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>IR No</th><th>Month</th><th>Dept</th><th>Category</th><th>Severity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sentinels.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+                      <td>{fmtMonth(r.incident_month)}</td>
+                      <td>{r.dept_code ?? '—'}</td>
+                      <td>{r.category ?? '—'}</td>
+                      <td>
+                        <SevBadge sev={r.severity_real} />
+                        {(r.severity_real ?? '').toUpperCase() === 'DEATH' && (
+                          <div style={{ color: 'var(--red)', fontSize: 10, marginTop: 3 }}>⚠️ Death recorded</div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Severity by Category">
+          {Array.from(byCat.entries()).length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 12 }}>No data.</div>
+          ) : (
+            <div>
+              {Array.from(byCat.entries())
+                .sort(([, a], [, b]) => Object.values(b).reduce((x, y) => x + y, 0) - Object.values(a).reduce((x, y) => x + y, 0))
+                .map(([cat, sevs]) => {
+                  const total = Object.values(sevs).reduce((a, b) => a + b, 0)
+                  if (total === 0) return null
+                  return (
+                    <div key={cat} style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 3 }}>{cat}</div>
+                      <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--bg)' }}>
+                        {SEVERITY_ORDER.map((s) => sevs[s] > 0 && (
+                          <div
+                            key={s}
+                            title={`${s}: ${sevs[s]}`}
+                            style={{ width: `${(sevs[s] / total) * 100}%`, background: SEVERITY_BG[s] }}
+                          />
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                        Total: {total}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </>
+  )
+}
+
+function SeverityDoughnut({ counts: c }: { counts: Record<Severity, number> }) {
+  const labels = SEVERITY_ORDER.filter((s) => c[s] > 0)
+  if (labels.length === 0) {
+    return <div style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center', padding: 40 }}>No data</div>
+  }
+  return (
+    <div style={{ height: 230 }}>
+      <Doughnut
+        data={{
+          labels,
+          datasets: [{
+            data: labels.map((l) => c[l]),
+            backgroundColor: labels.map((l) => SEVERITY_BG[l]),
+            borderWidth: 0,
+          }],
+        }}
+        options={{
+          responsive: true, maintainAspectRatio: false, cutout: '60%',
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const total = (ctx.dataset.data as number[]).reduce((a, b) => a + b, 0) || 1
+                  const v = ctx.parsed as number
+                  return `${ctx.label}: ${v} (${((v/total)*100).toFixed(1)}%)`
+                },
+              },
+            },
+          },
+        }}
+      />
     </div>
   )
 }
 
-function RcaIiTab({ rows }: { rows: Incident[] }) {
-  const tracker = rows.filter((r) => (r.is_rca ?? 0) > 0 || (r.is_ii ?? 0) > 0)
-  if (tracker.length === 0) {
-    return <div className="text-sm text-[var(--muted)]">No incidents currently flagged for RCA or II.</div>
-  }
+/* =========================================================================
+ * TAB 4 — INTERNAL INVESTIGATION
+ * ========================================================================= */
+
+function IiTab({ rows }: { rows: Incident[] }) {
+  const b = useMemo(() => iiBuckets(rows), [rows])
+
+  const overdueByDept = useMemo(() => sortedTop(counts(b.overdue, (r) => r.action_dept)), [b.overdue])
+  const pendingByDept = useMemo(() => sortedTop(counts(b.pending, (r) => r.action_dept)), [b.pending])
+  const iiByDept = useMemo(() => {
+    const ii = rows.filter((r) => parseIiStatus(r.ii_status) !== 'Non-II' && parseIiStatus(r.ii_status) !== 'Unknown')
+    return sortedTop(counts(ii, (r) => r.action_dept), 12)
+  }, [rows])
+  const iiTrend = useMemo(() => {
+    const ii = rows.filter((r) => parseIiStatus(r.ii_status) !== 'Non-II' && parseIiStatus(r.ii_status) !== 'Unknown')
+    const acc = new Map<string, number>()
+    for (const r of ii) {
+      const k = monthKey(r.incident_month); if (!k) continue
+      acc.set(k, (acc.get(k) ?? 0) + 1)
+    }
+    const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
+    return { labels: sorted.map(([k]) => monthLabel(k)), data: sorted.map(([, v]) => v) }
+  }, [rows])
+
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--border)]">
-      <table className="min-w-full text-xs">
-        <thead className="bg-[var(--bg)] text-left text-[var(--muted)]">
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="blue"  label="Total II"   value={b.total} />
+        <MetricCard tone="red"   label="Overdue"    value={b.overdue.length} />
+        <MetricCard tone="amber" label="Pending"    value={b.pending.length} />
+        <MetricCard tone="green" label="On Time"    value={b.onTime} />
+        <MetricCard tone="blue"  label="Late"       value={b.late} />
+        <MetricCard tone="gray"  label="Non-II"     value={b.nonII} />
+      </div>
+
+      <Panel title="Investigation Status Summary">
+        <StatusRow color="var(--red)"   label="Overdue" n={b.overdue.length} />
+        <StatusRow color="var(--amber)" label="Pending" n={b.pending.length} />
+        <StatusRow color="var(--green)" label="On Time" n={b.onTime} />
+        <StatusRow color="var(--blue)"  label="Late"    n={b.late} />
+        <StatusRow color="var(--gray)"  label="Non-II"  n={b.nonII} />
+      </Panel>
+
+      <div className="g2">
+        <Panel title="Overdue by Department">
+          {overdueByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue cases ✓</div>
+          ) : (
+            <div className="dept-heat">
+              {overdueByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-red" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{overdueByDept.data[i]}</div>
+                  <div className="dh-label">Overdue</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Pending by Department">
+          {pendingByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending cases ✓</div>
+          ) : (
+            <div className="dept-heat">
+              {pendingByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-amber" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{pendingByDept.data[i]}</div>
+                  <div className="dh-label">Pending</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Overdue Cases — Requires Immediate Action">
+        {b.overdue.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+        ) : (
+          <CaseTable rows={b.overdue} statusKind="ii" forceStatus="Overdue" />
+        )}
+      </Panel>
+
+      <Panel title="Pending Cases">
+        {b.pending.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+        ) : (
+          <CaseTable rows={b.pending} statusKind="ii" forceStatus="Pending" />
+        )}
+      </Panel>
+
+      <div className="g2">
+        <Panel title="II by Department (Action Dept)">
+          <div style={{ height: 240 }}>
+            <Bar
+              data={{
+                labels: iiByDept.labels,
+                datasets: [{ label: 'II Cases', data: iiByDept.data, backgroundColor: '#185FA5', borderRadius: 4 }],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        </Panel>
+        <Panel title="II Trend by Month">
+          <div style={{ height: 240 }}>
+            <Line
+              data={{
+                labels: iiTrend.labels,
+                datasets: [{ label: 'II', data: iiTrend.data, borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        </Panel>
+      </div>
+    </>
+  )
+}
+
+function StatusRow({ color, label, n }: { color: string; label: string; n: number }) {
+  return (
+    <div className="sts-row">
+      <div className="sts-left">
+        <div className="sts-dot" style={{ background: color }} />
+        <div className="sts-label">{label}</div>
+      </div>
+      <div className="sts-num" style={{ color }}>{n}</div>
+    </div>
+  )
+}
+
+function CaseTable({ rows, statusKind, forceStatus }: { rows: Incident[]; statusKind: 'ii' | 'rca'; forceStatus: string }) {
+  return (
+    <div className="tw">
+      <table>
+        <thead>
           <tr>
-            <Th>IR No</Th>
-            <Th>Dept</Th>
-            <Th>Category</Th>
-            <Th>Severity</Th>
-            <Th>RCA</Th>
-            <Th>RCA Status</Th>
-            <Th>II</Th>
-            <Th>II Status</Th>
-            <Th>Due</Th>
+            <th>Incident ID</th><th>Month</th><th>Primary Dept</th><th>Action Dept</th>
+            <th>Category</th><th>Sub-Category</th><th>Severity</th><th>Status</th>
           </tr>
         </thead>
         <tbody>
-          {tracker.map((r) => {
-            const overdue = isOverdue(r.action_due_date)
-            return (
-              <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[var(--bg)]">
-                <Td className="font-mono">{r.incident_id ?? '—'}</Td>
-                <Td>{r.dept_code ?? '—'}</Td>
-                <Td>{r.category ?? '—'}</Td>
-                <Td>
-                  <SeverityBadge sev={r.severity_real ?? ''} />
-                </Td>
-                <Td>{(r.is_rca ?? 0) > 0 ? <FlagBadge color="amber">RCA</FlagBadge> : '—'}</Td>
-                <Td>{r.rca_status ?? '—'}</Td>
-                <Td>{(r.is_ii ?? 0) > 0 ? <FlagBadge color="teal">II</FlagBadge> : '—'}</Td>
-                <Td>{r.ii_status ?? '—'}</Td>
-                <Td className={overdue ? 'font-semibold text-[var(--red)]' : ''}>
-                  {r.action_due_date ?? '—'}
-                  {overdue && <span className="ml-1 rounded bg-[var(--red-lt)] px-1 text-[10px]">overdue</span>}
-                </Td>
-              </tr>
-            )
-          })}
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+              <td>{fmtMonth(r.incident_month)}</td>
+              <td>{r.dept_code ?? '—'}</td>
+              <td>{r.action_dept ?? '—'}</td>
+              <td>{r.category ?? '—'}</td>
+              <td>{r.sub_category ?? '—'}</td>
+              <td><SevBadge sev={r.severity_real} /></td>
+              <td><StatusBadge kind={statusKind} status={forceStatus} /></td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
   )
 }
 
-function TableTab({
-  rows,
-  search,
-  setSearch,
-  page,
-  setPage,
-}: {
-  rows: Incident[]
-  search: string
-  setSearch: (s: string) => void
-  page: number
-  setPage: (n: number) => void
-}) {
-  const q = search.trim().toLowerCase()
-  const matched = useMemo(
-    () =>
-      q
-        ? rows.filter((r) =>
-            [
-              r.incident_id,
-              r.dept_code,
-              r.ward,
-              r.category,
-              r.sub_category,
-              r.severity_real,
-              r.incident_type,
-            ]
-              .filter(Boolean)
-              .some((v) => String(v).toLowerCase().includes(q))
-          )
-        : rows,
-    [rows, q]
+/* =========================================================================
+ * TAB 5 — RCA
+ * ========================================================================= */
+
+function RcaTab({ rows }: { rows: Incident[] }) {
+  const b = useMemo(() => rcaBuckets(rows), [rows])
+  const overdueByDept = useMemo(() => sortedTop(counts(b.overdue, (r) => r.action_dept)), [b.overdue])
+  const pendingByDept = useMemo(() => sortedTop(counts(b.pending, (r) => r.action_dept)), [b.pending])
+  const rcaCases = useMemo(() => rows.filter((r) => parseRcaStatus(r.rca_status) !== 'Non-RCA' && parseRcaStatus(r.rca_status) !== 'Unknown'), [rows])
+  const rcaSev = useMemo(() => severityCounts(rcaCases), [rcaCases])
+  const rcaCat = useMemo(() => sortedTop(counts(rcaCases, (r) => r.category), 8), [rcaCases])
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="blue"  label="Total RCA" value={b.total} />
+        <MetricCard tone="red"   label="Overdue"   value={b.overdue.length} />
+        <MetricCard tone="amber" label="Pending"   value={b.pending.length} />
+        <MetricCard tone="green" label="Completed" value={b.completed} />
+        <MetricCard tone="gray"  label="Non-RCA"   value={b.nonRCA} />
+      </div>
+
+      <Panel title="RCA Status Summary">
+        <StatusRow color="var(--red)"   label="Overdue"   n={b.overdue.length} />
+        <StatusRow color="var(--amber)" label="Pending"   n={b.pending.length} />
+        <StatusRow color="var(--green)" label="Completed" n={b.completed} />
+      </Panel>
+
+      <div className="g2">
+        <Panel title="Overdue RCA by Department">
+          {overdueByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Overdue RCA cases ✓</div>
+          ) : (
+            <div className="dept-heat">
+              {overdueByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-red" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{overdueByDept.data[i]}</div>
+                  <div className="dh-label">Overdue</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        <Panel title="Pending RCA by Department">
+          {pendingByDept.labels.length === 0 ? (
+            <div style={{ color: 'var(--green)', fontSize: 12 }}>No Pending RCA cases ✓</div>
+          ) : (
+            <div className="dept-heat">
+              {pendingByDept.labels.map((d, i) => (
+                <div className="dh-cell dh-amber" key={d}>
+                  <div className="dh-dept">{d}</div>
+                  <div className="dh-num">{pendingByDept.data[i]}</div>
+                  <div className="dh-label">Pending</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Overdue & Pending RCA Cases">
+        {b.overdue.length + b.pending.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+        ) : (
+          <div className="tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Incident ID</th><th>Month</th><th>Dept</th><th>Category</th><th>Severity</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...b.overdue.map((r) => ({ r, status: 'Overdue' })), ...b.pending.map((r) => ({ r, status: 'Pending' }))].map(({ r, status }) => (
+                  <tr key={r.id}>
+                    <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+                    <td>{fmtMonth(r.incident_month)}</td>
+                    <td>{r.dept_code ?? '—'}</td>
+                    <td>{r.category ?? '—'}</td>
+                    <td><SevBadge sev={r.severity_real} /></td>
+                    <td><StatusBadge kind="rca" status={status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <div className="g2">
+        <Panel title="RCA by Severity">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div
+                key={s}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--rs)',
+                  background: SEVERITY_BG[s],
+                  color: SEVERITY_FG[s],
+                }}
+              >
+                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{rcaSev[s]}</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="RCA by Category">
+          <ProgressList items={rcaCat.labels.map((l, i) => ({ label: l, value: rcaCat.data[i], color: CATEGORY_COLORS[l] }))} />
+        </Panel>
+      </div>
+    </>
   )
+}
+
+/* =========================================================================
+ * TAB 6 — REPORTING CULTURE
+ * ========================================================================= */
+
+function ReportingTab({ rows }: { rows: Incident[] }) {
+  const psi = useMemo(() => rows.filter(isPsi), [rows])
+  const reporters = useMemo(() => sortedTop(counts(psi, (r) => r.reporting_dept), 12), [psi])
+  const totalReporters = useMemo(() => Array.from(counts(psi, (r) => r.reporting_dept).keys()).length, [psi])
+  const mostActive = reporters.labels[0] ?? '—'
+
+  const pvr = useMemo(() => primaryVsReporting(psi, 8), [psi])
+  const trend = useMemo(() => reportingTrend(psi, 5), [psi])
+  const actions = useMemo(() => sortedTop(counts(psi, (r) => r.action_taken), 12), [psi])
+
+  const colors = ['#185FA5', '#1D9E75', '#EF9F27', '#A32D2D', '#534AB7']
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="blue" label="Total PSI Reporters" value={psi.length} />
+        <MetricCard tone="teal" label="Unique Depts Reporting" value={totalReporters} />
+        <MetricCard tone="amber" label="Most Active Dept" value={mostActive} />
+      </div>
+
+      <div className="g2">
+        <Panel title="Primary Dept vs Reporting Dept">
+          <div style={{ height: 260 }}>
+            <Bar
+              data={{
+                labels: pvr.depts,
+                datasets: [
+                  { label: 'Primary',   data: pvr.primary,   backgroundColor: '#185FA5', borderRadius: 4 },
+                  { label: 'Reporting', data: pvr.reporting, backgroundColor: '#1D9E75', borderRadius: 4 },
+                ],
+              }}
+              options={{
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        </Panel>
+        <Panel title="Top Reporting Departments">
+          <ProgressList items={reporters.labels.map((l, i) => ({ label: l, value: reporters.data[i] }))} color="#1D9E75" />
+        </Panel>
+      </div>
+
+      <Panel title="Reporting Trend by Month (Top 5 Reporting Depts)">
+        <div className="legend">
+          {trend.series.map((s, i) => (
+            <div className="ld" key={s.dept}>
+              <span className="ld-sw" style={{ background: colors[i % colors.length] }} />
+              {s.dept}
+            </div>
+          ))}
+        </div>
+        <div style={{ height: 240, marginTop: 6 }}>
+          <Line
+            data={{
+              labels: trend.months,
+              datasets: trend.series.map((s, i) => ({
+                label: s.dept,
+                data: s.data,
+                borderColor: colors[i % colors.length],
+                backgroundColor: colors[i % colors.length],
+                tension: 0.3,
+                fill: false,
+                pointRadius: 3,
+              })),
+            }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+
+      <Panel title="Action Taken Breakdown">
+        <div style={{ height: 240 }}>
+          <Bar
+            data={{
+              labels: actions.labels,
+              datasets: [{ label: 'Count', data: actions.data, backgroundColor: '#185FA5', borderRadius: 4 }],
+            }}
+            options={{
+              indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                y: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+    </>
+  )
+}
+
+/* =========================================================================
+ * TAB 7 — NON-PSI
+ * ========================================================================= */
+
+function NonPsiTab({ rows }: { rows: Incident[] }) {
+  const nonPsi = useMemo(() => rows.filter((r) => !isPsi(r)), [rows])
+  const open = nonPsi.filter((r) => !r.case_closed).length
+  const closed = nonPsi.filter((r) => r.case_closed).length
+  const subCats = useMemo(() => sortedTop(counts(nonPsi, (r) => r.sub_category), 12), [nonPsi])
+  const byDept = useMemo(() => sortedTop(counts(nonPsi, (r) => r.dept_code), 12), [nonPsi])
+  const byMonth = useMemo(() => {
+    const acc = new Map<string, number>()
+    for (const r of nonPsi) {
+      const k = monthKey(r.incident_month); if (!k) continue
+      acc.set(k, (acc.get(k) ?? 0) + 1)
+    }
+    const sorted = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
+    return { labels: sorted.map(([k]) => monthLabel(k)), data: sorted.map(([, v]) => v) }
+  }, [nonPsi])
+
+  return (
+    <>
+      <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        <MetricCard tone="gray"  label="Total Non-PSI"  value={nonPsi.length} />
+        <MetricCard tone="amber" label="Open Non-PSI"   value={open} />
+        <MetricCard tone="green" label="Closed Non-PSI" value={closed} />
+      </div>
+
+      <div className="g2">
+        <Panel title="Non-PSI by Sub-Category">
+          <div style={{ height: 280 }}>
+            <Bar
+              data={{
+                labels: subCats.labels,
+                datasets: [{ label: 'Count', data: subCats.data, backgroundColor: '#888780', borderRadius: 4 }],
+              }}
+              options={{
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                  y: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        </Panel>
+        <Panel title="Non-PSI by Department">
+          <ProgressList items={byDept.labels.map((l, i) => ({ label: l, value: byDept.data[i] }))} color="#888780" />
+        </Panel>
+      </div>
+
+      <Panel title="Non-PSI Trend by Month">
+        <div style={{ height: 220 }}>
+          <Bar
+            data={{
+              labels: byMonth.labels,
+              datasets: [{ label: 'Non-PSI', data: byMonth.data, backgroundColor: '#888780', borderRadius: 4 }],
+            }}
+            options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: '#E0DED6' } },
+                x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+              },
+            }}
+          />
+        </div>
+      </Panel>
+    </>
+  )
+}
+
+/* =========================================================================
+ * TAB 8 — REPORT CARD
+ * ========================================================================= */
+
+type ReportMode = 'dept' | 'whole'
+
+function ReportCardTab({ rows }: { rows: Incident[] }) {
+  const [dept, setDept] = useState<string>(PRIMARY_DEPTS[0])
+  const [period, setPeriod] = useState<PeriodKey>('YTD')
+  const [generated, setGenerated] = useState<{ mode: ReportMode; dept: string; period: PeriodKey } | null>(null)
+
+  const periodRows = useMemo(() => filterByPeriod(rows, period), [rows, period])
+
+  function generate(mode: ReportMode) {
+    setGenerated({ mode, dept, period })
+  }
+
+  function downloadPdf() {
+    if (typeof window === 'undefined') return
+    const preview = document.getElementById('rc-preview')
+    if (!preview) return
+    const pages = Array.from(preview.querySelectorAll<HTMLElement>('.rc-page'))
+    if (pages.length === 0) return
+    const pageHtml = pages.map((p) => p.outerHTML).join('\n')
+    const css = Array.from(document.styleSheets)
+      .map((s) => {
+        try { return Array.from(s.cssRules).map((r) => r.cssText).join('\n') }
+        catch { return '' }
+      })
+      .join('\n')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Report Card</title><style>${css}\n@page{size:A4;margin:0}body{margin:0;padding:0;background:#fff;}</style></head><body>${pageHtml}<script>window.onload=()=>window.print()</script></body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.open()
+    w.document.write(html)
+    w.document.close()
+  }
+
+  return (
+    <>
+      <div className="rc-controls">
+        <div className="pf">
+          <div>
+            <div className="pt">Department Report Card 2026</div>
+            <div className="psub">Select department and period to generate. Includes IR Overview, RCA, and Internal Investigation sections.</div>
+          </div>
+        </div>
+        <div className="row">
+          <div>
+            <label>Department</label>
+            <select value={dept} onChange={(e) => setDept(e.target.value)}>
+              <optgroup label="Primary Departments">
+                {PRIMARY_DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </optgroup>
+              <optgroup label="Action Departments">
+                {ACTION_DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </optgroup>
+            </select>
+          </div>
+          <div>
+            <label>Period</label>
+            <select value={period} onChange={(e) => setPeriod(e.target.value as PeriodKey)}>
+              {PERIOD_OPTIONS.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <button className="btn" type="button" onClick={() => generate('dept')}>Generate Report</button>
+          <button className="btn ghost" type="button" onClick={() => generate('whole')}>🏥 Whole Hospital</button>
+          <button className="btn ghost" type="button" onClick={downloadPdf} disabled={!generated}>⬇ Download PDF</button>
+        </div>
+      </div>
+
+      <div className="rc-preview" id="rc-preview">
+        {!generated && (
+          <div style={{ background: '#fff', padding: 30, borderRadius: 6, color: 'var(--muted)', textAlign: 'center', fontSize: 13 }}>
+            Choose a department + period and press <b>Generate Report</b>.
+          </div>
+        )}
+        {generated?.mode === 'whole' && <HospitalReport rows={periodRows} period={generated.period} />}
+        {generated?.mode === 'dept' && PRIMARY_DEPTS.includes(generated.dept) && (
+          <PrimaryDeptReport rows={periodRows} dept={generated.dept} period={generated.period} />
+        )}
+        {generated?.mode === 'dept' && ACTION_DEPTS.includes(generated.dept) && (
+          <ActionDeptReport rows={periodRows} dept={generated.dept} period={generated.period} />
+        )}
+      </div>
+    </>
+  )
+}
+
+function ReportFooter() {
+  const today = new Date().toISOString().slice(0, 10)
+  return (
+    <div className="rc-foot">
+      Clinical Risk Unit RMCQ · Confidential · Not for circulation · Generated: {today}
+    </div>
+  )
+}
+
+function periodLabelFor(p: PeriodKey): string {
+  for (const g of PERIOD_OPTIONS) {
+    const o = g.options.find((x) => x.value === p)
+    if (o) return o.label
+  }
+  return p
+}
+
+function tlForRate(value: number, target: number, higherIsBetter: boolean): string {
+  if (higherIsBetter ? value >= target : value <= target) return '🟢'
+  if (higherIsBetter ? value >= target * 0.7 : value <= target * 1.3) return '🟡'
+  return '🔴'
+}
+
+function HospitalReport({ rows, period }: { rows: Incident[]; period: PeriodKey }) {
+  const psi = rows.filter(isPsi)
+  const sentinel = psi.filter((r) => r.sentinel).length
+  const nearMiss = psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'NEARMISS').length
+  const ii = iiBuckets(rows)
+  const rca = rcaBuckets(rows)
+  const cats = sortedTop(counts(psi, (r) => r.category), 10)
+  const depts = sortedTop(counts(psi, (r) => r.dept_code), 10)
+  const sev = severityCounts(psi)
+
+  // monthly trend
+  const acc = new Map<string, number>()
+  for (const r of psi) { const k = monthKey(r.incident_month); if (k) acc.set(k, (acc.get(k) ?? 0) + 1) }
+  const monthly = Array.from(acc.entries()).sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">Hospital-Wide Summary</div>
+        <div className="t2">Hospital Al-Sultan Abdullah UiTM · {periodLabelFor(period)}</div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 1 — Key Performance Indicators</div>
+        <div className="rc-kpis">
+          <div className="rc-kpi"><div className="l">Total PSI</div><div className="v" style={{ color: 'var(--blue)' }}>{psi.length}</div></div>
+          <div className="rc-kpi"><div className="l">Sentinel</div><div className="v" style={{ color: 'var(--red)' }}>{sentinel}</div></div>
+          <div className="rc-kpi"><div className="l">Near Miss</div><div className="v" style={{ color: 'var(--green)' }}>{nearMiss}</div></div>
+          <div className="rc-kpi"><div className="l">II Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{ii.overdue.length}</div></div>
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 2 — Monthly Trend</div>
+        <div style={{ height: 130 }}>
+          <Line
+            data={{
+              labels: monthly.map(([k]) => monthLabel(k)),
+              datasets: [{ label: 'PSI', data: monthly.map(([, v]) => v), borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }],
+            }}
+            options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 } } } } }}
+          />
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 3 — PSI by Category</div>
+        <div style={{ height: 140 }}>
+          <Bar
+            data={{ labels: cats.labels, datasets: [{ data: cats.data, backgroundColor: '#1D9E75', borderRadius: 3 }] }}
+            options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } } } } }}
+          />
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 4 — PSI by Department</div>
+        <div style={{ height: 130 }}>
+          <Bar
+            data={{ labels: depts.labels, datasets: [{ data: depts.data, backgroundColor: '#378ADD', borderRadius: 3 }] }}
+            options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 } } } } }}
+          />
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 5 — Severity Breakdown</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+          {SEVERITY_ORDER.map((s) => (
+            <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
+              <div style={{ fontSize: 8, opacity: 0.85, fontWeight: 700 }}>{s}</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{sev[s]}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Section 6 — II & RCA Summary</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 3 }}>Internal Investigation</div>
+            <SmallStatusRow color="var(--red)"   label="Overdue" n={ii.overdue.length} />
+            <SmallStatusRow color="var(--amber)" label="Pending" n={ii.pending.length} />
+            <SmallStatusRow color="var(--green)" label="On Time" n={ii.onTime} />
+            <SmallStatusRow color="var(--blue)"  label="Late"    n={ii.late} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 3 }}>Root Cause Analysis</div>
+            <SmallStatusRow color="var(--red)"   label="Overdue"   n={rca.overdue.length} />
+            <SmallStatusRow color="var(--amber)" label="Pending"   n={rca.pending.length} />
+            <SmallStatusRow color="var(--green)" label="Completed" n={rca.completed} />
+          </div>
+        </div>
+      </div>
+
+      <ReportFooter />
+    </div>
+  )
+}
+
+function SmallStatusRow({ color, label, n }: { color: string; label: string; n: number }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', border: '1px solid var(--border)', borderRadius: 4, marginBottom: 3, fontSize: 10 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+        {label}
+      </span>
+      <span style={{ color, fontWeight: 700 }}>{n}</span>
+    </div>
+  )
+}
+
+function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: string; period: PeriodKey }) {
+  const deptRows = rows.filter((r) => r.dept_code === dept)
+  const psi = deptRows.filter(isPsi)
+  const sentinel = psi.filter((r) => r.sentinel).length
+  const deaths = psi.filter((r) => (r.severity_real ?? '').toUpperCase() === 'DEATH').length
+  const actual = psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'ACTUAL').length
+  const near = psi.filter((r) => (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') === 'NEARMISS').length
+
+  // Monthly
+  const monthAcc = new Map<string, number>()
+  for (const r of psi) { const k = monthKey(r.incident_month); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
+  const monthly = Array.from(monthAcc.entries()).sort(([a], [b]) => a.localeCompare(b))
+
+  const byStaff = sortedTop(counts(deptRows, (r) => r.action_dept), 10)
+  const byCat = sortedTop(counts(psi, (r) => r.category), 10)
+  const byWard = sortedTop(counts(psi, (r) => r.ward), 10)
+  const sev = severityCounts(psi)
+  const actionTaken = sortedTop(counts(psi, (r) => r.action_taken), 10)
+
+  // Section 8 — Incidents under department management (action_dept = selected)
+  const underMgmt = rows.filter((r) => r.action_dept === dept)
+
+  // II + RCA for dept (cases where action_dept = dept)
+  const deptIi = iiBuckets(underMgmt)
+  const deptRca = rcaBuckets(underMgmt)
+
+  // Section 11 — IR under other dept management (action_dept=dept, dept_code≠dept), filtered to II/RCA/Internal Inquiry/M&M
+  const otherMgmt = rows.filter((r) => {
+    if (r.action_dept !== dept || r.dept_code === dept) return false
+    const a = (r.action_taken ?? '').toUpperCase()
+    return a.includes('II') || a.includes('RCA') || a.includes('INTERNAL INQUIRY') || a.includes('M&M')
+  })
+
+  return (
+    <>
+      {/* PAGE 1 */}
+      <div className="rc-page">
+        <div className="rc-h">
+          <div className="t1">{dept} — Department Report</div>
+          <div className="t2">{periodLabelFor(period)} · Patient Safety Incidents Only</div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 1 — Department KPIs</div>
+          <div className="rc-kpis">
+            <div className="rc-kpi"><div className="l">Total PSI</div><div className="v" style={{ color: 'var(--blue)' }}>{tlForRate(psi.length, 5, false)} {psi.length}</div></div>
+            <div className="rc-kpi"><div className="l">Sentinel</div><div className="v" style={{ color: 'var(--red)' }}>{sentinel === 0 ? '🟢' : '🔴'} {sentinel}</div><div className="s">{deaths} death(s)</div></div>
+            <div className="rc-kpi"><div className="l">Actual</div><div className="v" style={{ color: 'var(--blue)' }}>{actual}</div></div>
+            <div className="rc-kpi"><div className="l">Near Miss</div><div className="v" style={{ color: 'var(--green)' }}>🟢 {near}</div></div>
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 2 — Monthly Trend (PSI per Month)</div>
+          <div style={{ height: 130 }}>
+            <Line
+              data={{
+                labels: monthly.map(([k]) => monthLabel(k)),
+                datasets: [{ label: 'PSI', data: monthly.map(([, v]) => v), borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 } } } } }}
+            />
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 3 — IR by Staff (Action Dept Breakdown)</div>
+          <div style={{ height: 130 }}>
+            <Bar
+              data={{ labels: byStaff.labels, datasets: [{ data: byStaff.data, backgroundColor: '#378ADD', borderRadius: 3 }] }}
+              options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } } } } }}
+            />
+          </div>
+        </div>
+
+        <ReportFooter />
+      </div>
+
+      {/* PAGE 2 */}
+      <div className="rc-page">
+        <div className="rc-h"><div className="t1">{dept} — Page 2</div></div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 4 — Incidents by Category</div>
+          <div style={{ height: 150 }}>
+            <Bar
+              data={{ labels: byCat.labels, datasets: [{ data: byCat.data, backgroundColor: byCat.labels.map((c) => CATEGORY_COLORS[c] ?? '#888780'), borderRadius: 3 }] }}
+              options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } } } } }}
+            />
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 5 — Location / Ward Breakdown</div>
+          <CompactProgressList items={byWard.labels.map((l, i) => ({ label: l, value: byWard.data[i] }))} color="#185FA5" />
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 6 — Severity of Outcome (Real)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
+                <div style={{ fontSize: 8, opacity: 0.85, fontWeight: 700 }}>{s}</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{sev[s]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <ReportFooter />
+      </div>
+
+      {/* PAGE 3 */}
+      <div className="rc-page">
+        <div className="rc-h"><div className="t1">{dept} — Page 3</div></div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 7 — Action Taken</div>
+          <div style={{ height: 150 }}>
+            <Bar
+              data={{ labels: actionTaken.labels, datasets: [{ data: actionTaken.data, backgroundColor: '#1D9E75', borderRadius: 3 }] }}
+              options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } } } } }}
+            />
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 8 — Incidents Under Department Management ({underMgmt.length})</div>
+          <SmallTable rows={underMgmt.slice(0, 14)} />
+          {underMgmt.length > 14 && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>… and {underMgmt.length - 14} more</div>}
+        </div>
+
+        <ReportFooter />
+      </div>
+
+      {/* PAGE 4 — II */}
+      <DeptIiPage dept={dept} ii={deptIi} />
+
+      {/* PAGE 5 — RCA */}
+      <DeptRcaPage dept={dept} rca={deptRca} />
+
+      {/* PAGE 6 — IR under other dept mgmt */}
+      <div className="rc-page">
+        <div className="rc-h"><div className="t1">{dept} — Page 6</div></div>
+        <div className="rc-section">
+          <div className="rc-st">Section 11 — IR Under Other Department Management ({otherMgmt.length})</div>
+          <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 6 }}>Filtered: action = II, RCA, Internal Inquiry, or M&M; primary dept ≠ {dept}</div>
+          <SmallTable rows={otherMgmt.slice(0, 18)} />
+          {otherMgmt.length > 18 && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>… and {otherMgmt.length - 18} more</div>}
+        </div>
+        <ReportFooter />
+      </div>
+    </>
+  )
+}
+
+function CompactProgressList({ items, color }: { items: { label: string; value: number }[]; color: string }) {
+  const max = Math.max(1, ...items.map((i) => i.value))
+  return (
+    <div>
+      {items.map((it) => (
+        <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, marginBottom: 3 }}>
+          <div style={{ width: 80, textAlign: 'right', color: 'var(--text)' }}>{it.label}</div>
+          <div style={{ flex: 1, height: 8, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${(it.value / max) * 100}%`, background: color }} />
+          </div>
+          <div style={{ width: 24, color: 'var(--muted)', textAlign: 'right' }}>{it.value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SmallTable({ rows }: { rows: Incident[] }) {
+  if (rows.length === 0) return <div style={{ fontSize: 9, color: 'var(--muted)' }}>None.</div>
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
+      <thead>
+        <tr style={{ background: 'var(--bg)' }}>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>IR No</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Month</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Dept</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Category</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Severity</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+            <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{fmtMonth(r.incident_month)}</td>
+            <td style={{ padding: '3px 5px' }}>{r.dept_code ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.category ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.severity_real ?? '—'}</td>
+            <td style={{ padding: '3px 5px' }}>{r.action_taken ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function DeptIiPage({ dept, ii }: { dept: string; ii: ReturnType<typeof iiBuckets> }) {
+  const overduePending = [...ii.overdue, ...ii.pending]
+  const overdueCases = ii.overdue
+  const sev = severityCounts(overduePending)
+  const cats = sortedTop(counts(overduePending, (r) => r.category), 6)
+  return (
+    <div className="rc-page">
+      <div className="rc-h"><div className="t1">{dept} — Section 9: Internal Investigation</div></div>
+      <div className="rc-section">
+        <div className="rc-kpis">
+          <div className="rc-kpi"><div className="l">Total II</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.total}</div></div>
+          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{ii.overdue.length}</div></div>
+          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{ii.pending.length}</div></div>
+          <div className="rc-kpi"><div className="l">On Time</div><div className="v" style={{ color: 'var(--green)' }}>{ii.onTime}</div></div>
+        </div>
+        <div className="rc-kpis" style={{ gridTemplateColumns: '1fr', marginTop: 6 }}>
+          <div className="rc-kpi"><div className="l">Late</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.late}</div></div>
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Severity of II Cases</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+          {SEVERITY_ORDER.map((s) => (
+            <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
+              <div style={{ fontSize: 8, opacity: 0.85, fontWeight: 700 }}>{s}</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{sev[s]}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Category of II Cases</div>
+        <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#185FA5" />
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Overdue & Pending II Cases</div>
+        <SmallTable rows={overdueCases.slice(0, 12)} />
+      </div>
+
+      <ReportFooter />
+    </div>
+  )
+}
+
+function DeptRcaPage({ dept, rca }: { dept: string; rca: ReturnType<typeof rcaBuckets> }) {
+  const overduePending = [...rca.overdue, ...rca.pending]
+  const sev = severityCounts(overduePending)
+  const cats = sortedTop(counts(overduePending, (r) => r.category), 6)
+  return (
+    <div className="rc-page">
+      <div className="rc-h"><div className="t1">{dept} — Section 10: Root Cause Analysis</div></div>
+      <div className="rc-section">
+        <div className="rc-kpis">
+          <div className="rc-kpi"><div className="l">Total RCA</div><div className="v" style={{ color: 'var(--blue)' }}>{rca.total}</div></div>
+          <div className="rc-kpi"><div className="l">Overdue</div><div className="v" style={{ color: 'var(--red)' }}>{rca.overdue.length}</div></div>
+          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--amber)' }}>{rca.pending.length}</div></div>
+          <div className="rc-kpi"><div className="l">Completed</div><div className="v" style={{ color: 'var(--green)' }}>{rca.completed}</div></div>
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Severity of RCA Cases</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+          {SEVERITY_ORDER.map((s) => (
+            <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
+              <div style={{ fontSize: 8, opacity: 0.85, fontWeight: 700 }}>{s}</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{sev[s]}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Category of RCA Cases</div>
+        <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#185FA5" />
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">Overdue & Pending RCA Cases</div>
+        <SmallTable rows={overduePending.slice(0, 12)} />
+      </div>
+
+      <ReportFooter />
+    </div>
+  )
+}
+
+function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: string; period: PeriodKey }) {
+  const assigned = rows.filter((r) => r.action_dept === dept)
+  const psi = assigned.filter(isPsi)
+  const ii = iiBuckets(assigned)
+  const rca = rcaBuckets(assigned)
+  const sev = severityCounts(psi)
+  const cats = sortedTop(counts(psi, (r) => r.category), 8)
+  const actionTaken = sortedTop(counts(psi, (r) => r.action_taken), 8)
+  const primaryDepts = sortedTop(counts(assigned, (r) => r.dept_code), 8)
+
+  const monthAcc = new Map<string, number>()
+  for (const r of assigned) { const k = monthKey(r.incident_month); if (k) monthAcc.set(k, (monthAcc.get(k) ?? 0) + 1) }
+  const monthly = Array.from(monthAcc.entries()).sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <>
+      <div className="rc-page">
+        <div className="rc-h">
+          <div className="t1">{dept} — Action Department Report</div>
+          <div className="t2">{periodLabelFor(period)}</div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 1 — Summary</div>
+          <div className="rc-kpis">
+            <div className="rc-kpi"><div className="l">Total Assigned</div><div className="v" style={{ color: 'var(--blue)' }}>{assigned.length}</div></div>
+            <div className="rc-kpi"><div className="l">II Total</div><div className="v" style={{ color: 'var(--blue)' }}>{ii.total}</div></div>
+            <div className="rc-kpi"><div className="l">RCA Total</div><div className="v" style={{ color: 'var(--blue)' }}>{rca.total}</div></div>
+            <div className="rc-kpi"><div className="l">Overdue (II+RCA)</div><div className="v" style={{ color: 'var(--red)' }}>{ii.overdue.length + rca.overdue.length}</div></div>
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 2 — Monthly Trend</div>
+          <div style={{ height: 130 }}>
+            <Line
+              data={{ labels: monthly.map(([k]) => monthLabel(k)), datasets: [{ data: monthly.map(([, v]) => v), borderColor: '#185FA5', backgroundColor: '#185FA5', tension: 0.3, fill: false, pointRadius: 3 }] }}
+              options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 } } } } }}
+            />
+          </div>
+        </div>
+
+        <ReportFooter />
+      </div>
+
+      <div className="rc-page">
+        <div className="rc-h"><div className="t1">{dept} — Page 2</div></div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 3 — Categories</div>
+          <CompactProgressList items={cats.labels.map((l, i) => ({ label: l, value: cats.data[i] }))} color="#1D9E75" />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">Section 4 — Severity (PSI)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div key={s} style={{ background: SEVERITY_BG[s], color: SEVERITY_FG[s], padding: 6, borderRadius: 4 }}>
+                <div style={{ fontSize: 8, opacity: 0.85, fontWeight: 700 }}>{s}</div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{sev[s]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">Section 5 — Action Types</div>
+          <CompactProgressList items={actionTaken.labels.map((l, i) => ({ label: l, value: actionTaken.data[i] }))} color="#378ADD" />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">Section 6 — Primary Dept Breakdown</div>
+          <CompactProgressList items={primaryDepts.labels.map((l, i) => ({ label: l, value: primaryDepts.data[i] }))} color="#185FA5" />
+        </div>
+
+        <ReportFooter />
+      </div>
+
+      <DeptIiPage dept={dept} ii={ii} />
+      <DeptRcaPage dept={dept} rca={rca} />
+    </>
+  )
+}
+
+/* =========================================================================
+ * TAB 9 — ALL RECORDS
+ * ========================================================================= */
+
+function AllRecordsTab({ rows }: { rows: Incident[] }) {
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => { setPage(1) }, [search, rows])
+
+  const q = search.trim().toLowerCase()
+  const matched = useMemo(() =>
+    q
+      ? rows.filter((r) =>
+          [r.incident_id, r.dept_code, r.category, r.ward]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(q))
+        )
+      : rows
+  , [rows, q])
+
   const totalPages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
   const start = (safePage - 1) * PAGE_SIZE
   const slice = matched.slice(start, start + PAGE_SIZE)
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="panel">
+      <div className="pf">
+        <div>
+          <div className="pt">All Records</div>
+          <div className="psub">Showing {matched.length === 0 ? 0 : start + 1}–{Math.min(start + PAGE_SIZE, matched.length)} of {matched.length} records</div>
+        </div>
         <input
           type="search"
-          placeholder="Search incidents (IR no, dept, ward, category…)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full max-w-sm rounded-md border border-[var(--border)] bg-white px-3 py-1.5 text-xs outline-none focus:border-[var(--blue-md)]"
+          placeholder="Search IR No, dept, category, ward…"
+          style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 12, width: 280, fontFamily: 'inherit' }}
         />
-        <div className="text-xs text-[var(--muted)]">
-          Showing {matched.length === 0 ? 0 : start + 1}–{Math.min(start + PAGE_SIZE, matched.length)} of{' '}
-          {matched.length}
-        </div>
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-[var(--border)]">
-        <table className="min-w-full text-xs">
-          <thead className="bg-[var(--bg)] text-left text-[var(--muted)]">
+      <div className="tw" style={{ overflowX: 'auto' }}>
+        <table>
+          <thead>
             <tr>
-              <Th>IR No</Th>
-              <Th>Month</Th>
-              <Th>Dept</Th>
-              <Th>Ward</Th>
-              <Th>Category</Th>
-              <Th>Severity</Th>
-              <Th>Type</Th>
-              <Th>Sentinel</Th>
-              <Th>Case</Th>
-              <Th>RCA</Th>
-              <Th>II</Th>
-              <Th>Due</Th>
+              <th>IR No</th><th>Month</th><th>Dept</th><th>Ward</th>
+              <th>Category</th><th>Sub-Category</th><th>Severity Real</th>
+              <th>Type</th><th>Sentinel</th><th>Case</th>
+              <th>RCA</th><th>II</th><th>Due Date</th>
             </tr>
           </thead>
           <tbody>
             {slice.map((r) => {
+              const rcaState = parseRcaStatus(r.rca_status)
+              const iiState = parseIiStatus(r.ii_status)
               const overdue = isOverdue(r.action_due_date)
               return (
-                <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[var(--bg)]">
-                  <Td className="font-mono">{r.incident_id ?? '—'}</Td>
-                  <Td>{r.incident_month ?? '—'}</Td>
-                  <Td>{r.dept_code ?? '—'}</Td>
-                  <Td>{r.ward ?? '—'}</Td>
-                  <Td className="max-w-[220px] truncate" title={r.category ?? ''}>{r.category ?? '—'}</Td>
-                  <Td><SeverityBadge sev={r.severity_real ?? ''} /></Td>
-                  <Td>{r.incident_type ?? '—'}</Td>
-                  <Td>{r.sentinel ? <FlagBadge color="purple">SENTINEL</FlagBadge> : '—'}</Td>
-                  <Td>
-                    {r.case_closed ? (
-                      <FlagBadge color="green">CLOSED</FlagBadge>
-                    ) : (
-                      <FlagBadge color="red">OPEN</FlagBadge>
-                    )}
-                  </Td>
-                  <Td>{(r.is_rca ?? 0) > 0 ? <FlagBadge color="amber">RCA</FlagBadge> : '—'}</Td>
-                  <Td>{(r.is_ii ?? 0) > 0 ? <FlagBadge color="teal">II</FlagBadge> : '—'}</Td>
-                  <Td className={overdue ? 'font-semibold text-[var(--red)]' : ''}>
+                <tr key={r.id}>
+                  <td style={{ fontFamily: 'monospace' }}>{r.incident_id ?? '—'}</td>
+                  <td>{fmtMonth(r.incident_month)}</td>
+                  <td>{r.dept_code ?? '—'}</td>
+                  <td>{r.ward ?? '—'}</td>
+                  <td title={r.category ?? ''} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.category ?? '—'}</td>
+                  <td title={r.sub_category ?? ''} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub_category ?? '—'}</td>
+                  <td><SevBadge sev={r.severity_real} /></td>
+                  <td><TypeBadge t={r.incident_type} /></td>
+                  <td><SentinelBadge on={r.sentinel} /></td>
+                  <td><CaseBadge closed={r.case_closed} /></td>
+                  <td>
+                    {(r.is_rca ?? 0) === 1 && rcaState !== 'Non-RCA' && rcaState !== 'Unknown'
+                      ? <StatusBadge kind="rca" status={rcaState} />
+                      : <span className="b b-gray">Non-RCA</span>}
+                  </td>
+                  <td>
+                    {(r.is_ii ?? 0) === 1 && iiState !== 'Non-II' && iiState !== 'Unknown'
+                      ? <StatusBadge kind="ii" status={iiState} />
+                      : <span className="b b-gray">Non-II</span>}
+                  </td>
+                  <td style={overdue ? { color: 'var(--red)', fontWeight: 600 } : undefined}>
                     {r.action_due_date ?? '—'}
-                  </Td>
+                  </td>
                 </tr>
               )
             })}
             {slice.length === 0 && (
               <tr>
-                <td colSpan={12} className="p-4 text-center text-[var(--muted)]">
-                  No matching incidents.
-                </td>
+                <td colSpan={13} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No records.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="flex items-center justify-end gap-2 text-xs">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 10, fontSize: 11 }}>
         <button
+          className="reset-btn"
+          style={{ width: 'auto', padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)' }}
           onClick={() => setPage(Math.max(1, safePage - 1))}
           disabled={safePage <= 1}
-          className="rounded-md border border-[var(--border)] bg-white px-3 py-1 disabled:opacity-50"
         >
           Prev
         </button>
-        <span className="text-[var(--muted)]">
-          Page {safePage} of {totalPages}
-        </span>
+        <span style={{ color: 'var(--muted)' }}>Page {safePage} of {totalPages}</span>
         <button
+          className="reset-btn"
+          style={{ width: 'auto', padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)' }}
           onClick={() => setPage(Math.min(totalPages, safePage + 1))}
           disabled={safePage >= totalPages}
-          className="rounded-md border border-[var(--border)] bg-white px-3 py-1 disabled:opacity-50"
         >
           Next
         </button>
       </div>
     </div>
-  )
-}
-
-/* ===================================================================== */
-/* Tiny helpers                                                          */
-/* ===================================================================== */
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide">{children}</th>
-}
-function Td({ children, className = '', title }: { children: React.ReactNode; className?: string; title?: string }) {
-  return (
-    <td className={`px-3 py-2 align-middle ${className}`} title={title}>
-      {children}
-    </td>
-  )
-}
-
-function SeverityBadge({ sev }: { sev: string }) {
-  if (!sev) return <span className="text-[var(--muted)]">—</span>
-  const color = severityHex(sev)
-  return (
-    <span
-      className="inline-block rounded-md px-2 py-0.5 text-[10px] font-semibold"
-      style={{ background: `${color}1F`, color }}
-    >
-      {sev}
-    </span>
-  )
-}
-
-function FlagBadge({
-  color,
-  children,
-}: {
-  color: 'red' | 'green' | 'amber' | 'purple' | 'teal' | 'blue'
-  children: React.ReactNode
-}) {
-  const map: Record<typeof color, { bg: string; fg: string }> = {
-    red: { bg: 'var(--red-lt)', fg: 'var(--red)' },
-    green: { bg: 'var(--green-lt)', fg: 'var(--green)' },
-    amber: { bg: 'var(--amber-lt)', fg: 'var(--amber)' },
-    purple: { bg: 'var(--purple-lt)', fg: 'var(--purple)' },
-    teal: { bg: 'var(--teal-lt)', fg: 'var(--teal)' },
-    blue: { bg: 'var(--blue-lt)', fg: 'var(--blue)' },
-  }
-  const c = map[color]
-  return (
-    <span
-      className="inline-block rounded-md px-2 py-0.5 text-[10px] font-semibold"
-      style={{ background: c.bg, color: c.fg }}
-    >
-      {children}
-    </span>
   )
 }
