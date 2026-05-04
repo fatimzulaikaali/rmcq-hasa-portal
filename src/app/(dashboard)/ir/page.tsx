@@ -1629,8 +1629,8 @@ function PrimaryDeptReport({ rows, dept, period }: { rows: Incident[]; dept: str
   const sev = severityCounts(psi)
   const actionTaken = sortedTop(counts(psi, (r) => r.action_taken), 10)
 
-  // Section 8 — Incidents Under Department Management (action_dept = selected dept)
-  const underMgmt = rows.filter((r) => r.action_dept === dept)
+  // Section 8 — Incidents Under Department Management (action_dept = selected dept), PSI only
+  const underMgmt = rows.filter((r) => r.action_dept === dept && isPsi(r))
 
   // Section 9/10 — II & RCA (cases where action_dept = dept)
   const iiAll = underMgmt.filter((r) => (r.is_ii ?? 0) === 1)
@@ -2042,8 +2042,8 @@ function DeptRcaPageDetail({ dept, all, overdue, pending, onTime, late }: { dept
 }
 
 function ActionDeptReport({ rows, dept, period }: { rows: Incident[]; dept: string; period: PeriodKey }) {
-  // ALL incidents assigned to this dept (Action Dept)
-  const allResp = rows.filter((r) => r.action_dept === dept)
+  // PSI ONLY incidents assigned to this dept (Action Dept)
+  const allResp = rows.filter((r) => r.action_dept === dept && isPsi(r))
 
   // II / RCA computed inline
   const iiAll = allResp.filter((r) => (r.is_ii ?? 0) === 1)

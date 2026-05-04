@@ -22,6 +22,7 @@ export interface IncidentRow {
   is_rca: number
   rca_status: string | null
   is_ii: number
+  ii_status: string | null
   action_due_date: string | null
   submission_date: string | null
 }
@@ -85,6 +86,7 @@ const HEADER_MAP: Record<string, keyof IncidentRow> = {
   'IsRCA': 'is_rca',
   'RCA_Status_Summary': 'rca_status',
   'IsInternalInvestigation': 'is_ii',
+  'InternalInvestigation_Status_summary': 'ii_status',
   'Action Due Date': 'action_due_date',
   'Date Reported': 'submission_date',
 }
@@ -125,6 +127,7 @@ export function mapRow(raw: Record<string, unknown>): IncidentRow {
     is_rca: toInt(get('IsRCA')),
     rca_status: trimStr(get('RCA_Status_Summary')),
     is_ii: toInt(get('IsInternalInvestigation')),
+    ii_status: trimStr(get('InternalInvestigation_Status_summary')),
     action_due_date: toIsoDate(get('Action Due Date')),
     submission_date:
       toIsoDate(get('Date Reported')) ?? toIsoDate(get('Submission Date')),
