@@ -19,6 +19,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           >
             KPI Monitor
           </Link>
+          <Link
+            href="/upload"
+            className="rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+          >
+            Upload IR Database
+          </Link>
         </nav>
       </aside>
       <main className="flex-1 p-8">{children}</main>
