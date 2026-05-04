@@ -51,8 +51,8 @@ export default function UploadPage() {
       const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true })
       const s = parseRows(rawRows, headerRow.map(String))
       setSummary(s)
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to parse file')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to parse file')
     } finally {
       setParsing(false)
     }
@@ -115,8 +115,8 @@ export default function UploadPage() {
       }
 
       setResult({ inserted, skipped, errors })
-    } catch (e: any) {
-      setError(e?.message ?? 'Import failed')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed')
     } finally {
       setImporting(false)
     }

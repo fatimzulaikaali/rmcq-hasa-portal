@@ -166,8 +166,8 @@ export function parseRows(
         return
       }
       valid.push(mapped)
-    } catch (e: any) {
-      errors.push({ row: idx + 2, reason: e?.message ?? 'Parse error' })
+    } catch (e) {
+      errors.push({ row: idx + 2, reason: e instanceof Error ? e.message : 'Parse error' })
     }
   })
 
