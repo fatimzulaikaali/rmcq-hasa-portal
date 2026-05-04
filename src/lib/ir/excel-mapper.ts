@@ -53,17 +53,24 @@ const toIsoDate = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return null
-    // YYYY-MM-DD
-    const y = v.getUTCFullYear()
-    const m = String(v.getUTCMonth() + 1).padStart(2, '0')
-    const d = String(v.getUTCDate()).padStart(2, '0')
+    // SheetJS with cellDates:true produces midnight LOCAL time of the cell,
+    // so use local getters to get the spreadsheet's calendar day (no timezone shift).
+    const y = v.getFullYear()
+    const m = String(v.getMonth() + 1).padStart(2, '0')
+    const d = String(v.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
   const s = String(v).trim()
   if (!s || s.toUpperCase() === 'NA' || s === '-') return null
+  // YYYY-MM-DD strings parse as UTC midnight; treat them as calendar dates as-is.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
   const d = new Date(s)
   if (Number.isNaN(d.getTime())) return null
-  return toIsoDate(d)
+  const y = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mm}-${dd}`
 }
 
 /** Source column → target field. Source headers are normalized (collapsed whitespace, trimmed). */
