@@ -174,3 +174,15 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
   .rc-page{box-shadow:none;margin:0;page-break-after:always;}
   body{background:#fff;}
 }
+
+/* KPI dept compliance cards (Submission Compliance tab) */
+.dept-compliance-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;}
+.dept-comp-card{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:var(--rs);border:1px solid;cursor:pointer;font-family:inherit;text-align:left;transition:transform .08s;}
+.dept-comp-card:hover{transform:translateY(-1px);}
+.dept-comp-card .dc-head{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.dept-comp-card .dc-dept{font-size:12px;font-weight:700;}
+.dept-comp-card .dc-pct{font-size:13px;font-weight:700;}
+.dept-comp-card .dc-bar{height:6px;background:rgba(0,0,0,0.08);border-radius:3px;overflow:hidden;}
+.dept-comp-card .dc-bar-fill{height:100%;border-radius:3px;transition:width .3s;}
+.dept-comp-card .dc-stats{display:flex;justify-content:space-between;gap:6px;font-size:10px;opacity:.85;}
+

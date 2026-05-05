@@ -16,7 +16,7 @@ import {
   Frequency, Period, AchievementStatus, FREQUENCIES, PERIODS,
 } from '@/lib/kpi/types'
 import {
-  compliance, deptCompliance, deadlineFor, isOverdueDeadline,
+  compliance, deptCompliance, isOverdueDeadline,
   computeAchievement, scheduledPeriodsFor, detectSiqTrigger,
   KpiPeriodKey, KPI_PERIOD_OPTIONS, kpiPeriodLabel, kpiPeriodMonths, fmtDate,
 } from '@/lib/kpi/dashboard-helpers'
@@ -515,80 +515,180 @@ function ByDeptTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiDataR
  * ========================================================================= */
 
 function ComplianceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiDataRow[]; year: number }) {
-  const today = new Date()
+  const today = useMemo(() => new Date(), [])
+  const [search, setSearch] = useState('')
 
-  // Build list of all (def, period) pairs that are past deadline + their submission status
-  type Row = { def: KpiDefinition; period: Period; due: Date; submitted: boolean; result: string | null }
-  const rows: Row[] = []
-  for (const def of defs) {
-    const periods = scheduledPeriodsFor(def.frequency)
-    for (const p of periods) {
-      if (!isOverdueDeadline(year, p, today)) continue
-      const dataRow = data.find((r) => r.kpi_id === def.kpi_id && r.year === year && r.period === p)
-      const submitted = !!(dataRow && dataRow.result !== null && dataRow.result !== '')
-      rows.push({ def, period: p, due: deadlineFor(year, p), submitted, result: dataRow?.result ?? null })
+  // Roll-up per dept
+  const deptStats = useMemo(() => {
+    const acc = new Map<string, { kpis: number; due: number; submitted: number; pending: number }>()
+    for (const def of defs) {
+      const e = acc.get(def.dept_code) ?? { kpis: 0, due: 0, submitted: 0, pending: 0 }
+      e.kpis++
+      const periods = scheduledPeriodsFor(def.frequency)
+      for (const p of periods) {
+        if (!isOverdueDeadline(year, p, today)) continue
+        e.due++
+        const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
+        if (r && r.result) e.submitted++
+        else e.pending++
+      }
+      acc.set(def.dept_code, e)
     }
-  }
-  const overdue = rows.filter((r) => !r.submitted)
-  const submittedRows = rows.filter((r) => r.submitted)
+    return Array.from(acc.entries())
+      .map(([dept, s]) => ({ dept, ...s, pct: s.due ? Math.round((s.submitted / s.due) * 100) : 100 }))
+      // Critical first (lowest pct), then by absolute pending count
+      .sort((a, b) => (a.pct - b.pct) || (b.pending - a.pending))
+  }, [defs, data, year, today])
 
-  // Group overdue by dept for heatmap
-  const overdueByDept = new Map<string, number>()
-  for (const r of overdue) overdueByDept.set(r.def.dept_code, (overdueByDept.get(r.def.dept_code) ?? 0) + 1)
-  const heatItems = Array.from(overdueByDept.entries()).sort(([, a], [, b]) => b - a)
+  // KPIs that have at least one overdue period — for the grid below
+  const overdueDefs = useMemo(() => {
+    const filtered = defs.filter((def) => {
+      const periods = scheduledPeriodsFor(def.frequency)
+      for (const p of periods) {
+        if (!isOverdueDeadline(year, p, today)) continue
+        const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
+        if (!r || !r.result) return true
+      }
+      return false
+    })
+    if (!search.trim()) return filtered
+    const q = search.trim().toLowerCase()
+    return filtered.filter((d) => `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q))
+  }, [defs, data, year, today, search])
+
+  const dataByKey = useMemo(() => {
+    const m = new Map<string, KpiDataRow>()
+    for (const r of data) m.set(`${r.kpi_id}|${r.year}|${r.period}`, r)
+    return m
+  }, [data])
+
+  // Hospital totals
+  const total = deptStats.reduce((s, d) => s + d.due, 0)
+  const submittedTotal = deptStats.reduce((s, d) => s + d.submitted, 0)
+  const pendingTotal = deptStats.reduce((s, d) => s + d.pending, 0)
+  const overallPct = total ? Math.round((submittedTotal / total) * 100) : 0
 
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-        <MetricCard tone="blue"  label="Past Deadline"     value={rows.length} sub="Periods due" />
-        <MetricCard tone="green" label="Submitted"          value={submittedRows.length} />
-        <MetricCard tone="red"   label="Overdue (No Data)" value={overdue.length} />
-        <MetricCard tone="teal"  label="On-time %"          value={`${rows.length ? Math.round((submittedRows.length / rows.length) * 100) : 0}%`} />
+        <MetricCard tone="blue"  label="Past Deadline"      value={total} sub="Periods due" />
+        <MetricCard tone="green" label="Submitted"          value={submittedTotal} />
+        <MetricCard tone="red"   label="Overdue (No Data)"  value={pendingTotal} />
+        <MetricCard tone={overallPct >= 80 ? 'green' : overallPct >= 50 ? 'amber' : 'red'} label="Overall On-time %" value={`${overallPct}%`} />
       </div>
 
-      <Panel title="🚨 Overdue Submissions — by Department" subtitle="KPI periods past 25th deadline with no result">
-        {heatItems.length === 0 ? (
-          <div style={{ color: 'var(--green)', fontSize: 12 }}>All due submissions are in ✓</div>
+      <Panel title="🚨 Overdue Submission — by Department" subtitle="Worst compliance first · click a dept name to filter the grid below">
+        {deptStats.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>No data.</div>
         ) : (
-          <div className="dept-heat">
-            {heatItems.map(([d, n]) => (
-              <div className="dh-cell dh-red" key={d}>
-                <div className="dh-dept">{d}</div>
-                <div className="dh-num">{n}</div>
-                <div className="dh-label">Overdue</div>
-              </div>
-            ))}
+          <div className="dept-compliance-grid">
+            {deptStats.map((d) => {
+              const tone = d.pct >= 80 ? 'green' : d.pct >= 50 ? 'amber' : 'red'
+              const hex = tone === 'green' ? '#3B6D11' : tone === 'amber' ? '#854F0B' : '#A32D2D'
+              const bg  = tone === 'green' ? '#EAF3DE' : tone === 'amber' ? '#FAEEDA' : '#FCEBEB'
+              return (
+                <button
+                  key={d.dept}
+                  type="button"
+                  onClick={() => setSearch(d.dept)}
+                  className="dept-comp-card"
+                  style={{ background: bg, color: hex, borderColor: hex }}
+                  title={`Click to filter overdue grid below to ${d.dept}`}
+                >
+                  <div className="dc-head">
+                    <div className="dc-dept">{d.dept}</div>
+                    <div className="dc-pct">{d.due ? `${d.pct}%` : '—'}</div>
+                  </div>
+                  <div className="dc-bar"><div className="dc-bar-fill" style={{ width: `${d.due ? d.pct : 0}%`, background: hex }} /></div>
+                  <div className="dc-stats">
+                    <span><b>{d.kpis}</b> KPIs</span>
+                    <span><b>{d.submitted}</b> submitted</span>
+                    <span style={{ color: d.pending > 0 ? hex : 'inherit', fontWeight: d.pending > 0 ? 700 : 400 }}>
+                      <b>{d.pending}</b> pending
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </Panel>
 
-      <Panel title="Overdue Submission Details">
-        {overdue.length === 0 ? (
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>None.</div>
+      <Panel
+        title="🗓️ Overdue Submission Details"
+        subtitle={`${overdueDefs.length} KPI${overdueDefs.length === 1 ? '' : 's'} with at least one overdue period · cells: ! = overdue, value = submitted, — = not yet due, × = not scheduled`}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by KPI ID, dept, or name… (or click a dept card above)"
+            style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 12, width: 380, fontFamily: 'inherit' }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')}
+              style={{ padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 11 }}>
+              Clear filter
+            </button>
+          )}
+          <PerfLegend />
+        </div>
+
+        {overdueDefs.length === 0 ? (
+          <div style={{ color: 'var(--green)', fontSize: 12, padding: 12 }}>
+            {search ? 'No overdue KPIs match your search.' : 'All due submissions are in ✓'}
+          </div>
         ) : (
-          <div className="tw">
-            <table>
+          <div className="tw" style={{ overflowX: 'auto' }}>
+            <table style={{ minWidth: 1200 }}>
               <thead>
                 <tr>
-                  <th>KPI ID</th><th>Dept</th><th>KPI</th><th>Frequency</th><th>Period</th><th>Deadline</th><th>Days Past</th>
+                  <th style={{ minWidth: 260 }}>KPI</th>
+                  <th style={{ minWidth: 60 }}>Dept</th>
+                  <th style={{ minWidth: 80 }}>Freq</th>
+                  <th style={{ minWidth: 70 }}>Target</th>
+                  {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 64 }}>{p}</th>)}
+                  <th style={{ textAlign: 'center', minWidth: 90 }}>Compliance</th>
                 </tr>
               </thead>
               <tbody>
-                {overdue.slice(0, 200).map((r) => {
-                  const days = Math.floor((today.getTime() - r.due.getTime()) / (1000 * 60 * 60 * 24))
+                {overdueDefs.slice(0, 100).map((d) => {
+                  const scheduled = new Set(scheduledPeriodsFor(d.frequency))
+                  const c = compliance(d, data, year, today)
                   return (
-                    <tr key={`${r.def.kpi_id}-${r.period}`}>
-                      <td style={{ fontFamily: 'monospace' }}>{r.def.kpi_id}</td>
-                      <td>{r.def.dept_code}</td>
-                      <td title={r.def.kpi_name} style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.def.kpi_name}</td>
-                      <td><FreqBadge freq={r.def.frequency} /></td>
-                      <td>{r.period}</td>
-                      <td>{fmtDate(r.due)}</td>
-                      <td><span className="b b-red">{days} days</span></td>
+                    <tr key={d.kpi_id}>
+                      <td>
+                        <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)' }}>{d.kpi_id}</div>
+                        <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.kpi_name}</div>
+                      </td>
+                      <td>{d.dept_code}</td>
+                      <td><FreqBadge freq={d.frequency} /></td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.target ?? '—'}</td>
+                      {PERIODS.map((p) => (
+                        <PerfCell
+                          key={p}
+                          def={d}
+                          year={year}
+                          period={p}
+                          scheduled={scheduled.has(p)}
+                          row={dataByKey.get(`${d.kpi_id}|${year}|${p}`)}
+                          today={today}
+                        />
+                      ))}
+                      <td style={{ textAlign: 'center' }}>
+                        {c.scheduledDue ? (
+                          <span className={`b b-${complianceTone(c.pct)}`}>{c.pct}%</span>
+                        ) : (
+                          <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
+                        )}
+                      </td>
                     </tr>
                   )
                 })}
-                {overdue.length > 200 && <tr><td colSpan={7} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {overdue.length - 200} more</td></tr>}
+                {overdueDefs.length > 100 && (
+                  <tr><td colSpan={17} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {overdueDefs.length - 100} more — refine the search to see them all</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1438,7 +1538,7 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
                 return (
                   <tr key={d.kpi_id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{d.kpi_id}</td>
-                    <td style={{ padding: '3px 5px', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.kpi_name}>{d.kpi_name}</td>
+                    <td style={{ padding: '3px 5px', minWidth: 180, lineHeight: 1.3 }}>{d.kpi_name}</td>
                     <td style={{ padding: '3px 5px' }}>{d.frequency}</td>
                     <td style={{ padding: '3px 5px' }}>{d.target ?? '—'}</td>
                     <td style={{ padding: '3px 5px' }}>{a}</td>
@@ -1480,7 +1580,7 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
                   return (
                     <tr key={d.kpi_id} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{d.kpi_id}</td>
-                      <td style={{ padding: '3px 5px', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.kpi_name}>{d.kpi_name}</td>
+                      <td style={{ padding: '3px 5px', minWidth: 220, lineHeight: 1.3 }}>{d.kpi_name}</td>
                       <td style={{ padding: '3px 5px' }}>{d.frequency}</td>
                       <td style={{ padding: '3px 5px' }}>{t.consecutive} consecutive Not Achieved → {t.triggerPeriod}</td>
                     </tr>
@@ -1511,7 +1611,7 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
                 {storedSiqs.map((s) => (
                   <tr key={s.id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{s.siq_id ?? '—'}</td>
-                    <td style={{ padding: '3px 5px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.kpi_name ?? ''}>{s.kpi_name ?? '—'}</td>
+                    <td style={{ padding: '3px 5px', minWidth: 200, lineHeight: 1.3 }}>{s.kpi_name ?? '—'}</td>
                     <td style={{ padding: '3px 5px' }}>{s.trigger_period ?? '—'}</td>
                     <td style={{ padding: '3px 5px' }}>{fmtDate(s.date_issued)}</td>
                     <td style={{ padding: '3px 5px' }}>{fmtDate(s.due_date)}</td>
