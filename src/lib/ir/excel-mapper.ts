@@ -49,12 +49,23 @@ const toInt = (v: unknown): number => {
   return Number.isFinite(n) ? Math.trunc(n) : 0
 }
 
+/**
+ * Convert a cell value to YYYY-MM-DD.
+ * Handles both midnight-UTC and midnight-LOCAL Date objects (SheetJS version-dependent):
+ *   - if UTC time is 00:00 → it's midnight UTC, use UTC getters
+ *   - else → it's midnight local, use local getters
+ * In both cases the returned string is the calendar day shown in the spreadsheet.
+ */
 const toIsoDate = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return null
-    // SheetJS with cellDates:true produces midnight LOCAL time of the cell,
-    // so use local getters to get the spreadsheet's calendar day (no timezone shift).
+    if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0) {
+      const y = v.getUTCFullYear()
+      const m = String(v.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(v.getUTCDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
     const y = v.getFullYear()
     const m = String(v.getMonth() + 1).padStart(2, '0')
     const d = String(v.getDate()).padStart(2, '0')
@@ -62,15 +73,14 @@ const toIsoDate = (v: unknown): string | null => {
   }
   const s = String(v).trim()
   if (!s || s.toUpperCase() === 'NA' || s === '-') return null
-  // YYYY-MM-DD strings parse as UTC midnight; treat them as calendar dates as-is.
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
   if (m) return `${m[1]}-${m[2]}-${m[3]}`
   const d = new Date(s)
   if (Number.isNaN(d.getTime())) return null
-  const y = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${y}-${mm}-${dd}`
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** Source column → target field. Source headers are normalized (collapsed whitespace, trimmed). */

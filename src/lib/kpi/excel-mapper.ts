@@ -88,10 +88,19 @@ const toNum = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
+/**
+ * Convert a cell value to YYYY-MM-DD. Smart-handles midnight-UTC vs midnight-LOCAL Dates.
+ */
 const toIsoDate = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return null
+    if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0) {
+      const y = v.getUTCFullYear()
+      const m = String(v.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(v.getUTCDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
     const y = v.getFullYear()
     const m = String(v.getMonth() + 1).padStart(2, '0')
     const d = String(v.getDate()).padStart(2, '0')
