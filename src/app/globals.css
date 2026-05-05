@@ -186,3 +186,10 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .dept-comp-card .dc-bar-fill{height:100%;border-radius:3px;transition:width .3s;}
 .dept-comp-card .dc-stats{display:flex;justify-content:space-between;gap:6px;font-size:10px;opacity:.85;}
 
+/* KPI grid tables — tighter padding so the 12 month cells fit at 100% zoom */
+.kpi-grid{width:100%;border-collapse:collapse;}
+.kpi-grid th,.kpi-grid td{padding:5px 6px;font-size:11px;}
+.kpi-grid th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--bg);position:sticky;top:0;}
+.kpi-grid tbody tr{border-bottom:1px solid var(--border);}
+.kpi-grid tbody tr:hover td{background:var(--bg);}
+

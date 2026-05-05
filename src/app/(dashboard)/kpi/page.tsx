@@ -641,15 +641,14 @@ function ComplianceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiD
           </div>
         ) : (
           <div className="tw" style={{ overflowX: 'auto' }}>
-            <table style={{ minWidth: 1200 }}>
+            <table className="kpi-grid">
               <thead>
                 <tr>
-                  <th style={{ minWidth: 260 }}>KPI</th>
-                  <th style={{ minWidth: 60 }}>Dept</th>
-                  <th style={{ minWidth: 80 }}>Freq</th>
-                  <th style={{ minWidth: 70 }}>Target</th>
-                  {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 64 }}>{p}</th>)}
-                  <th style={{ textAlign: 'center', minWidth: 90 }}>Compliance</th>
+                  <th style={{ minWidth: 200, maxWidth: 240 }}>KPI</th>
+                  <th style={{ minWidth: 50 }}>Dept</th>
+                  <th style={{ minWidth: 56 }}>Target</th>
+                  {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 38 }}>{p}</th>)}
+                  <th style={{ textAlign: 'center', minWidth: 60 }}>Compl.</th>
                 </tr>
               </thead>
               <tbody>
@@ -659,11 +658,13 @@ function ComplianceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiD
                   return (
                     <tr key={d.kpi_id}>
                       <td>
-                        <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)' }}>{d.kpi_id}</div>
-                        <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.kpi_name}</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>{d.kpi_id}</span>
+                          <FreqBadge freq={d.frequency} />
+                        </div>
+                        <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.3 }}>{d.kpi_name}</div>
                       </td>
-                      <td>{d.dept_code}</td>
-                      <td><FreqBadge freq={d.frequency} /></td>
+                      <td style={{ fontSize: 11 }}>{d.dept_code}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.target ?? '—'}</td>
                       {PERIODS.map((p) => (
                         <PerfCell
@@ -687,7 +688,7 @@ function ComplianceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiD
                   )
                 })}
                 {overdueDefs.length > 100 && (
-                  <tr><td colSpan={17} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {overdueDefs.length - 100} more — refine the search to see them all</td></tr>
+                  <tr><td colSpan={16} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {overdueDefs.length - 100} more — refine the search to see them all</td></tr>
                 )}
               </tbody>
             </table>
@@ -1004,15 +1005,14 @@ function PerformanceTab({ defs, data, year }: { defs: KpiDefinition[]; data: Kpi
       </div>
 
       <div className="tw" style={{ overflowX: 'auto' }}>
-        <table style={{ minWidth: 1200 }}>
+        <table className="kpi-grid">
           <thead>
             <tr>
-              <th style={{ minWidth: 260 }}>KPI</th>
-              <th style={{ minWidth: 60 }}>Dept</th>
-              <th style={{ minWidth: 80 }}>Freq</th>
-              <th style={{ minWidth: 70 }}>Target</th>
-              {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 64 }}>{p}</th>)}
-              <th style={{ textAlign: 'center', minWidth: 90 }}>Compliance</th>
+              <th style={{ minWidth: 200, maxWidth: 240 }}>KPI</th>
+              <th style={{ minWidth: 50 }}>Dept</th>
+              <th style={{ minWidth: 56 }}>Target</th>
+              {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 38 }}>{p}</th>)}
+              <th style={{ textAlign: 'center', minWidth: 60 }}>Compl.</th>
             </tr>
           </thead>
           <tbody>
@@ -1022,11 +1022,13 @@ function PerformanceTab({ defs, data, year }: { defs: KpiDefinition[]; data: Kpi
               return (
                 <tr key={d.kpi_id}>
                   <td>
-                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)' }}>{d.kpi_id}</div>
-                    <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.kpi_name}</div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span>{d.kpi_id}</span>
+                      <FreqBadge freq={d.frequency} />
+                    </div>
+                    <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.3 }}>{d.kpi_name}</div>
                   </td>
-                  <td>{d.dept_code}</td>
-                  <td><FreqBadge freq={d.frequency} /></td>
+                  <td style={{ fontSize: 11 }}>{d.dept_code}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.target ?? '—'}</td>
                   {PERIODS.map((p) => (
                     <PerfCell
@@ -1050,7 +1052,7 @@ function PerformanceTab({ defs, data, year }: { defs: KpiDefinition[]; data: Kpi
               )
             })}
             {slice.length === 0 && (
-              <tr><td colSpan={17} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>No KPIs match your search.</td></tr>
+              <tr><td colSpan={16} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>No KPIs match your search.</td></tr>
             )}
           </tbody>
         </table>
@@ -1438,7 +1440,7 @@ function ReportCardTab({ defs, data, siq }: { defs: KpiDefinition[]; data: KpiDa
 
 function ReportFooter() {
   const today = new Date().toISOString().slice(0, 10)
-  return <div className="rc-foot">Clinical Risk Unit RMCQ · Confidential · Not for circulation · Generated: {today}</div>
+  return <div className="rc-foot">Quality Assurance and Document Management Unit · Confidential · Not for circulation · Generated: {today}</div>
 }
 
 function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefinition[]; data: KpiDataRow[]; siq: KpiSiqRecord[]; dept: string; year: number; period: KpiPeriodKey }) {
@@ -1480,6 +1482,14 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
   const fByFreq: Record<Frequency, number> = { Monthly: 0, Quarterly: 0, Biannual: 0, Yearly: 0 }
   for (const d of deptDefs) fByFreq[d.frequency]++
 
+  // Paginate KPIs across multiple A4 pages
+  const KPIS_PER_PAGE = 22
+  const kpiPages: KpiDefinition[][] = []
+  for (let i = 0; i < deptDefs.length; i += KPIS_PER_PAGE) {
+    kpiPages.push(deptDefs.slice(i, i + KPIS_PER_PAGE))
+  }
+  if (kpiPages.length === 0) kpiPages.push([])
+
   return (
     <>
       <div className="rc-page">
@@ -1510,53 +1520,24 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
         </div>
 
         <div className="rc-section">
-          <div className="rc-st">Section 3 — KPI Performance Detail</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
-            <thead>
-              <tr style={{ background: 'var(--bg)' }}>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPI ID</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPI</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Freq</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Target</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Achieved</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Not Ach.</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>Compl.</th>
-                <th style={{ textAlign: 'left', padding: '3px 5px' }}>SIQ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deptDefs.slice(0, 24).map((d) => {
-                const periods = scheduledPeriodsFor(d.frequency).filter((p) => periodMonths.includes(p))
-                let a = 0, na2 = 0
-                for (const p of periods) {
-                  const r = data.find((x) => x.kpi_id === d.kpi_id && x.year === year && x.period === p)
-                  const s = computeAchievement(r?.result ?? null, d.target_operator, d.target_value)
-                  if (s === 'Achieved') a++; else if (s === 'Not Achieved') na2++
-                }
-                const c = compliance(d, data, year, today)
-                const t = detectSiqTrigger(d, data, year)
-                return (
-                  <tr key={d.kpi_id} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{d.kpi_id}</td>
-                    <td style={{ padding: '3px 5px', minWidth: 180, lineHeight: 1.3 }}>{d.kpi_name}</td>
-                    <td style={{ padding: '3px 5px' }}>{d.frequency}</td>
-                    <td style={{ padding: '3px 5px' }}>{d.target ?? '—'}</td>
-                    <td style={{ padding: '3px 5px' }}>{a}</td>
-                    <td style={{ padding: '3px 5px', color: na2 > 0 ? 'var(--red)' : undefined, fontWeight: na2 > 0 ? 700 : undefined }}>{na2}</td>
-                    <td style={{ padding: '3px 5px', color: c.pct >= 80 ? 'var(--green)' : c.pct >= 50 ? 'var(--amber)' : 'var(--red)', fontWeight: 700 }}>{c.scheduledDue ? `${c.pct}%` : '—'}</td>
-                    <td style={{ padding: '3px 5px', color: t.triggered ? 'var(--red)' : undefined, fontWeight: t.triggered ? 700 : undefined }}>{t.triggered ? '⚠ Yes' : '—'}</td>
-                  </tr>
-                )
-              })}
-              {deptDefs.length > 24 && <tr><td colSpan={8} style={{ padding: 4, fontSize: 9, color: 'var(--muted)' }}>… {deptDefs.length - 24} more KPIs (full list in dashboard)</td></tr>}
-            </tbody>
-          </table>
+          <div className="rc-st">Section 3 — KPI Performance Detail (page 1 of {kpiPages.length})</div>
+          <KpiDetailTable rows={kpiPages[0]} data={data} year={year} periodMonths={periodMonths} />
         </div>
 
         <ReportFooter />
       </div>
 
-      {/* Page 2 — SIQ section */}
+      {kpiPages.slice(1).map((chunk, idx) => (
+        <div className="rc-page" key={`detail-page-${idx + 2}`}>
+          <div className="rc-h"><div className="t1">{dept} — KPI Performance Detail (page {idx + 2} of {kpiPages.length})</div></div>
+          <div className="rc-section">
+            <KpiDetailTable rows={chunk} data={data} year={year} periodMonths={periodMonths} />
+          </div>
+          <ReportFooter />
+        </div>
+      ))}
+
+      {/* Page — SIQ section */}
       <div className="rc-page">
         <div className="rc-h"><div className="t1">{dept} — SIQ Status</div></div>
 
@@ -1626,6 +1607,56 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
         <ReportFooter />
       </div>
     </>
+  )
+}
+
+function KpiDetailTable({ rows, data, year, periodMonths }: {
+  rows: KpiDefinition[]
+  data: KpiDataRow[]
+  year: number
+  periodMonths: Period[]
+}) {
+  const today = useMemo(() => new Date(), [])
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
+      <thead>
+        <tr style={{ background: 'var(--bg)' }}>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPI ID</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPI</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Freq</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Target</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Achieved</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Not Ach.</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Compl.</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>SIQ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((d) => {
+          const periods = scheduledPeriodsFor(d.frequency).filter((p) => periodMonths.includes(p))
+          let a = 0, na2 = 0
+          for (const p of periods) {
+            const r = data.find((x) => x.kpi_id === d.kpi_id && x.year === year && x.period === p)
+            const s = computeAchievement(r?.result ?? null, d.target_operator, d.target_value)
+            if (s === 'Achieved') a++; else if (s === 'Not Achieved') na2++
+          }
+          const c = compliance(d, data, year, today)
+          const t = detectSiqTrigger(d, data, year)
+          return (
+            <tr key={d.kpi_id} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top' }}>
+              <td style={{ padding: '3px 5px', fontFamily: 'monospace' }}>{d.kpi_id}</td>
+              <td style={{ padding: '3px 5px', minWidth: 180, lineHeight: 1.3 }}>{d.kpi_name}</td>
+              <td style={{ padding: '3px 5px' }}>{d.frequency}</td>
+              <td style={{ padding: '3px 5px' }}>{d.target ?? '—'}</td>
+              <td style={{ padding: '3px 5px' }}>{a}</td>
+              <td style={{ padding: '3px 5px', color: na2 > 0 ? 'var(--red)' : undefined, fontWeight: na2 > 0 ? 700 : undefined }}>{na2}</td>
+              <td style={{ padding: '3px 5px', color: c.pct >= 80 ? 'var(--green)' : c.pct >= 50 ? 'var(--amber)' : 'var(--red)', fontWeight: 700 }}>{c.scheduledDue ? `${c.pct}%` : '—'}</td>
+              <td style={{ padding: '3px 5px', color: t.triggered ? 'var(--red)' : undefined, fontWeight: t.triggered ? 700 : undefined }}>{t.triggered ? '⚠ Yes' : '—'}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }
 
