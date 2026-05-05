@@ -26,18 +26,18 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 type TabId =
   | 'overview' | 'by-dept' | 'compliance' | 'achievement'
-  | 'siq' | 'kpi-list' | 'report-card' | 'upload' | 'all-records'
+  | 'performance' | 'siq' | 'kpi-list' | 'report-card' | 'upload'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'overview',    label: 'Overview',             icon: '📊' },
   { id: 'by-dept',     label: 'By Department',        icon: '🏢' },
   { id: 'compliance',  label: 'Submission Compliance',icon: '📅' },
   { id: 'achievement', label: 'Achievement',          icon: '🎯' },
+  { id: 'performance', label: 'Performance Grid',     icon: '📈' },
   { id: 'siq',         label: 'SIQ Tracker',          icon: '⚠️' },
   { id: 'kpi-list',    label: 'KPI List',             icon: '📋' },
   { id: 'report-card', label: 'Report Card',          icon: '📄' },
   { id: 'upload',      label: 'Upload Workbook',      icon: '⬆' },
-  { id: 'all-records', label: 'All Records',          icon: '🗂️' },
 ]
 
 interface KpiFilters {
@@ -225,7 +225,7 @@ export default function KpiPage() {
               {tab === 'kpi-list'    && <KpiListTab defs={filteredDefs} data={filteredData} year={filters.year} achievementFilter={filters.achievement} />}
               {tab === 'report-card' && <ReportCardTab defs={defs!} data={data!} siq={siq!} />}
               {tab === 'upload'      && <UploadTab onUploaded={() => setRefreshTick((t) => t + 1)} />}
-              {tab === 'all-records' && <AllRecordsTab defs={filteredDefs} data={filteredData} />}
+              {tab === 'performance' && <PerformanceTab defs={filteredDefs} data={filteredData} year={filters.year} />}
             </>
           )}
         </main>
@@ -857,68 +857,105 @@ function KpiListTab({ defs, data, year, achievementFilter }: { defs: KpiDefiniti
 }
 
 /* =========================================================================
- * TAB — ALL RECORDS
+ * TAB — PERFORMANCE GRID
+ * One row per KPI · 12 month columns · color-coded cells.
+ * - Cell shows the result string when submitted
+ * - "—" gray = scheduled but not yet due (deadline future)
+ * - red empty cell = scheduled, deadline passed, still no data (overdue)
+ * - "×" gray = month not scheduled for this KPI (e.g. Yearly only DEC)
+ * - Cell tinted green if Achieved, red if Not Achieved
  * ========================================================================= */
 
-function AllRecordsTab({ defs, data }: { defs: KpiDefinition[]; data: KpiDataRow[] }) {
+function PerformanceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiDataRow[]; year: number }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  useEffect(() => { setPage(1) }, [search])
-  const defMap = useMemo(() => new Map(defs.map((d) => [d.kpi_id, d])), [defs])
-  const q = search.trim().toLowerCase()
-  const filtered = useMemo(() => {
-    return data.filter((r) => {
-      const def = defMap.get(r.kpi_id)
-      if (!def) return false
-      if (q && !`${r.kpi_id} ${def.dept_code} ${def.kpi_name} ${r.period}`.toLowerCase().includes(q)) return false
-      return true
-    })
-  }, [data, defMap, q])
+  const PER_PAGE = 30
+  useEffect(() => { setPage(1) }, [search, defs])
+  const today = useMemo(() => new Date(), [])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const dataByKey = useMemo(() => {
+    const m = new Map<string, KpiDataRow>()
+    for (const r of data) m.set(`${r.kpi_id}|${r.year}|${r.period}`, r)
+    return m
+  }, [data])
+
+  const q = search.trim().toLowerCase()
+  const filtered = useMemo(() => defs.filter((d) =>
+    !q || `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q)
+  ), [defs, q])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
   const safePage = Math.min(page, totalPages)
-  const start = (safePage - 1) * PAGE_SIZE
-  const slice = filtered.slice(start, start + PAGE_SIZE)
+  const start = (safePage - 1) * PER_PAGE
+  const slice = filtered.slice(start, start + PER_PAGE)
 
   return (
-    <Panel title="All KPI Data Records" subtitle={`Showing ${filtered.length === 0 ? 0 : start + 1}–${Math.min(start + PAGE_SIZE, filtered.length)} of ${filtered.length.toLocaleString()}`}>
-      <div style={{ marginBottom: 8 }}>
-        <input type="search" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search KPI ID, dept, name, period…"
+    <Panel
+      title="KPI Performance Grid"
+      subtitle={`Showing ${filtered.length === 0 ? 0 : start + 1}–${Math.min(start + PER_PAGE, filtered.length)} of ${filtered.length} KPIs · ${year}`}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="search" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search KPI ID, dept, or name…"
           style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 12, width: 320, fontFamily: 'inherit' }}
         />
+        <PerfLegend />
       </div>
-      <div className="tw">
-        <table>
+
+      <div className="tw" style={{ overflowX: 'auto' }}>
+        <table style={{ minWidth: 1200 }}>
           <thead>
             <tr>
-              <th>KPI ID</th><th>Dept</th><th>KPI</th><th>Year</th><th>Period</th>
-              <th>Target</th><th>Result</th><th>Status</th>
+              <th style={{ minWidth: 260 }}>KPI</th>
+              <th style={{ minWidth: 60 }}>Dept</th>
+              <th style={{ minWidth: 80 }}>Freq</th>
+              <th style={{ minWidth: 70 }}>Target</th>
+              {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 64 }}>{p}</th>)}
+              <th style={{ textAlign: 'center', minWidth: 90 }}>Compliance</th>
             </tr>
           </thead>
           <tbody>
-            {slice.map((r) => {
-              const def = defMap.get(r.kpi_id)
-              const status = def ? computeAchievement(r.result, def.target_operator, def.target_value) : 'No Data'
+            {slice.map((d) => {
+              const scheduled = new Set(scheduledPeriodsFor(d.frequency))
+              const c = compliance(d, data, year, today)
               return (
-                <tr key={r.id}>
-                  <td style={{ fontFamily: 'monospace' }}>{r.kpi_id}</td>
-                  <td>{def?.dept_code ?? '—'}</td>
-                  <td title={def?.kpi_name ?? ''} style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def?.kpi_name ?? '—'}</td>
-                  <td>{r.year}</td>
-                  <td>{r.period}</td>
-                  <td>{def?.target ?? '—'}</td>
-                  <td>{r.result ?? '—'}</td>
-                  <td><AchBadge status={status} /></td>
+                <tr key={d.kpi_id}>
+                  <td>
+                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)' }}>{d.kpi_id}</div>
+                    <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.kpi_name}</div>
+                  </td>
+                  <td>{d.dept_code}</td>
+                  <td><FreqBadge freq={d.frequency} /></td>
+                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.target ?? '—'}</td>
+                  {PERIODS.map((p) => (
+                    <PerfCell
+                      key={p}
+                      def={d}
+                      year={year}
+                      period={p}
+                      scheduled={scheduled.has(p)}
+                      row={dataByKey.get(`${d.kpi_id}|${year}|${p}`)}
+                      today={today}
+                    />
+                  ))}
+                  <td style={{ textAlign: 'center' }}>
+                    {c.scheduledDue ? (
+                      <span className={`b b-${complianceTone(c.pct)}`}>{c.pct}%</span>
+                    ) : (
+                      <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
+                    )}
+                  </td>
                 </tr>
               )
             })}
             {slice.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>No records.</td></tr>
+              <tr><td colSpan={17} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>No KPIs match your search.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 10, fontSize: 11 }}>
         <button onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}
           style={{ padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--rs)' }}>Prev</button>
@@ -927,6 +964,90 @@ function AllRecordsTab({ defs, data }: { defs: KpiDefinition[]; data: KpiDataRow
           style={{ padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--rs)' }}>Next</button>
       </div>
     </Panel>
+  )
+}
+
+function PerfCell({
+  def, year, period, scheduled, row, today,
+}: {
+  def: KpiDefinition; year: number; period: Period; scheduled: boolean
+  row: KpiDataRow | undefined; today: Date
+}) {
+  // Not scheduled — × gray
+  if (!scheduled) {
+    return (
+      <td style={{ textAlign: 'center', background: '#F1EFE8', color: '#888780', fontSize: 11 }}>
+        <span title="Not scheduled">×</span>
+      </td>
+    )
+  }
+
+  const overdue = isOverdueDeadline(year, period, today)
+  const hasResult = row && row.result !== null && row.result !== ''
+
+  // Submitted — show result, color by achievement
+  if (hasResult) {
+    const status = computeAchievement(row!.result, def.target_operator, def.target_value)
+    if (status === 'Achieved') {
+      return (
+        <td style={{ textAlign: 'center', background: '#EAF3DE', color: '#3B6D11', fontWeight: 700, fontSize: 11 }}>
+          <span title={`Achieved: ${row!.result}`}>{row!.result}</span>
+        </td>
+      )
+    }
+    if (status === 'Not Achieved') {
+      return (
+        <td style={{ textAlign: 'center', background: '#FCEBEB', color: '#A32D2D', fontWeight: 700, fontSize: 11 }}>
+          <span title={`Not Achieved: ${row!.result} (target ${def.target ?? ''})`}>{row!.result}</span>
+        </td>
+      )
+    }
+    if (status === 'Not Applicable') {
+      return (
+        <td style={{ textAlign: 'center', background: '#F1EFE8', color: '#5F5E5A', fontSize: 11 }}>
+          <span title="Not Applicable">N/A</span>
+        </td>
+      )
+    }
+    // No Data fallback (unparseable result string)
+    return (
+      <td style={{ textAlign: 'center', color: '#5F5E5A', fontSize: 11 }}>
+        <span title={`Result: ${row!.result}`}>{row!.result}</span>
+      </td>
+    )
+  }
+
+  // Scheduled & overdue, no data — red empty
+  if (overdue) {
+    return (
+      <td style={{ textAlign: 'center', background: '#FCEBEB', color: '#A32D2D', fontWeight: 700, fontSize: 13 }}>
+        <span title="Overdue — no data submitted">!</span>
+      </td>
+    )
+  }
+
+  // Scheduled but not yet due — gray dash
+  return (
+    <td style={{ textAlign: 'center', color: '#888780', fontSize: 13 }}>
+      <span title="Not yet due">—</span>
+    </td>
+  )
+}
+
+function PerfLegend() {
+  const Item = ({ bg, fg, txt, label }: { bg: string; fg: string; txt: string; label: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10 }}>
+      <span style={{ background: bg, color: fg, fontWeight: 700, padding: '1px 6px', borderRadius: 4, minWidth: 28, textAlign: 'center' }}>{txt}</span>
+      <span style={{ color: 'var(--muted)' }}>{label}</span>
+    </div>
+  )
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      <Item bg="#EAF3DE" fg="#3B6D11" txt="✓" label="Achieved" />
+      <Item bg="#FCEBEB" fg="#A32D2D" txt="!" label="Not achieved / Overdue" />
+      <Item bg="transparent" fg="#888780" txt="—" label="Not yet due" />
+      <Item bg="#F1EFE8" fg="#888780" txt="×" label="Not scheduled" />
+    </div>
   )
 }
 
