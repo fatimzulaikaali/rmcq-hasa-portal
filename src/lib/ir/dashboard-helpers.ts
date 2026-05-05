@@ -59,6 +59,16 @@ export const SEVERITY_FG: Record<string, string> = {
   'NO HARM': '#3B6D11',
 }
 
+// Chart-specific palette — medium-intensity, vivid versions for donuts/stacked bars
+// (keeps SEVERITY_BG/FG above for pills and category-row segments).
+export const SEVERITY_CHART: Record<string, string> = {
+  DEATH: '#501313',
+  SEVERE: '#A32D2D',
+  MODERATE: '#EF9F27',
+  MILD: '#378ADD',
+  'NO HARM': '#639922',
+}
+
 export const CATEGORY_COLORS: Record<string, string> = {
   'Not Patient Safety Incident': '#888780',
   'Pressure Injury': '#D85A30',

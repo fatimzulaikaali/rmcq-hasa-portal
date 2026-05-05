@@ -44,6 +44,7 @@ import {
   reportingTrend,
   SEVERITY_BG,
   SEVERITY_FG,
+  SEVERITY_CHART,
   SEVERITY_ORDER,
   severityByCategory,
   severityCounts,
@@ -776,7 +777,7 @@ function SeverityTab({ rows }: { rows: Incident[] }) {
                           <div
                             key={s}
                             title={`${s}: ${sevs[s]}`}
-                            style={{ width: `${(sevs[s] / total) * 100}%`, background: SEVERITY_BG[s] }}
+                            style={{ width: `${(sevs[s] / total) * 100}%`, background: SEVERITY_CHART[s] }}
                           />
                         ))}
                       </div>
@@ -806,7 +807,7 @@ function SeverityDoughnut({ counts: c }: { counts: Record<Severity, number> }) {
           labels,
           datasets: [{
             data: labels.map((l) => c[l]),
-            backgroundColor: labels.map((l) => SEVERITY_BG[l]),
+            backgroundColor: labels.map((l) => SEVERITY_CHART[l]),
             borderWidth: 0,
           }],
         }}
@@ -871,8 +872,20 @@ function IiTab({ rows }: { rows: Incident[] }) {
 
       <Panel title="Internal Investigations by Submission Month">
         <div style={{ height: 220 }}>
-          <Bar
-            data={{ labels: byMonth.labels, datasets: [{ label: 'II', data: byMonth.data, backgroundColor: '#185FA5', borderRadius: 4 }] }}
+          <Line
+            data={{
+              labels: byMonth.labels,
+              datasets: [{
+                label: 'II',
+                data: byMonth.data,
+                borderColor: '#185FA5',
+                backgroundColor: 'rgba(55, 138, 221, 0.18)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 3,
+                pointBackgroundColor: '#185FA5',
+              }],
+            }}
             options={{
               responsive: true, maintainAspectRatio: false,
               plugins: { legend: { display: false } },
@@ -884,6 +897,22 @@ function IiTab({ rows }: { rows: Incident[] }) {
           />
         </div>
       </Panel>
+
+      <div className="g2">
+        <Panel title="Severity of II Cases">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
+                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{sevSummary[s]}</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Category of II Cases">
+          <ProgressList items={catSummary.labels.map((l, i) => ({ label: l, value: catSummary.data[i], color: CATEGORY_COLORS[l] }))} />
+        </Panel>
+      </div>
 
       <Panel title="🚨 Overdue Cases — Requires Immediate Action">
         {iiOverdue.length === 0 ? (
@@ -960,21 +989,6 @@ function IiTab({ rows }: { rows: Incident[] }) {
         </Panel>
       </div>
 
-      <div className="g2">
-        <Panel title="Severity of II Cases">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-            {SEVERITY_ORDER.map((s) => (
-              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
-                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{sevSummary[s]}</div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-        <Panel title="Category of II Cases">
-          <ProgressList items={catSummary.labels.map((l, i) => ({ label: l, value: catSummary.data[i], color: CATEGORY_COLORS[l] }))} />
-        </Panel>
-      </div>
     </>
   )
 }
@@ -1046,8 +1060,20 @@ function RcaTab({ rows }: { rows: Incident[] }) {
 
       <Panel title="RCA by Submission Month">
         <div style={{ height: 220 }}>
-          <Bar
-            data={{ labels: byMonth.labels, datasets: [{ label: 'RCA', data: byMonth.data, backgroundColor: '#534AB7', borderRadius: 4 }] }}
+          <Line
+            data={{
+              labels: byMonth.labels,
+              datasets: [{
+                label: 'RCA',
+                data: byMonth.data,
+                borderColor: '#534AB7',
+                backgroundColor: 'rgba(83, 74, 183, 0.18)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 3,
+                pointBackgroundColor: '#534AB7',
+              }],
+            }}
             options={{
               responsive: true, maintainAspectRatio: false,
               plugins: { legend: { display: false } },
@@ -1059,6 +1085,22 @@ function RcaTab({ rows }: { rows: Incident[] }) {
           />
         </div>
       </Panel>
+
+      <div className="g2">
+        <Panel title="Severity of RCA Cases">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+            {SEVERITY_ORDER.map((s) => (
+              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
+                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{rcaSev[s]}</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Category of RCA Cases">
+          <ProgressList items={rcaCat.labels.map((l, i) => ({ label: l, value: rcaCat.data[i], color: CATEGORY_COLORS[l] }))} />
+        </Panel>
+      </div>
 
       <Panel title="🚨 Overdue RCA Cases — Requires Immediate Action">
         {rcaOverdue.length === 0 ? (
@@ -1135,21 +1177,6 @@ function RcaTab({ rows }: { rows: Incident[] }) {
         </Panel>
       </div>
 
-      <div className="g2">
-        <Panel title="Severity of RCA Cases">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-            {SEVERITY_ORDER.map((s) => (
-              <div key={s} style={{ padding: '10px 12px', borderRadius: 'var(--rs)', background: SEVERITY_BG[s], color: SEVERITY_FG[s] }}>
-                <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{s}</div>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{rcaSev[s]}</div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-        <Panel title="Category of RCA Cases">
-          <ProgressList items={rcaCat.labels.map((l, i) => ({ label: l, value: rcaCat.data[i], color: CATEGORY_COLORS[l] }))} />
-        </Panel>
-      </div>
     </>
   )
 }
