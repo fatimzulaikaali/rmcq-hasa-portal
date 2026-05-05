@@ -294,11 +294,6 @@ function FreqBadge({ freq }: { freq: Frequency }) {
   return <span className={`b b-${tone}`}>{freq}</span>
 }
 
-function AchBadge({ status }: { status: AchievementStatus }) {
-  const tone = status === 'Achieved' ? 'green' : status === 'Not Achieved' ? 'red' : status === 'Not Applicable' ? 'gray' : 'gray'
-  return <span className={`b b-${tone}`}>{status}</span>
-}
-
 function complianceTone(pct: number): string {
   if (pct >= 80) return 'green'
   if (pct >= 50) return 'amber'
@@ -704,24 +699,48 @@ function ComplianceTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiD
  * ========================================================================= */
 
 function AchievementTab({ defs, data, year, achievementFilter }: { defs: KpiDefinition[]; data: KpiDataRow[]; year: number; achievementFilter: string }) {
-  type Row = { def: KpiDefinition; period: Period; result: string | null; status: AchievementStatus }
-  const rows: Row[] = []
+  const today = useMemo(() => new Date(), [])
+  const [search, setSearch] = useState('')
+
+  // Status counts across all (KPI x scheduled period) cells
+  const counts: Record<AchievementStatus, number> = { Achieved: 0, 'Not Achieved': 0, 'No Data': 0, 'Not Applicable': 0 }
+  // Heatmap: not-achieved count per dept
+  const notAchievedByDept = new Map<string, number>()
   for (const def of defs) {
     const periods = scheduledPeriodsFor(def.frequency)
     for (const p of periods) {
-      const dataRow = data.find((r) => r.kpi_id === def.kpi_id && r.year === year && r.period === p)
-      const status = computeAchievement(dataRow?.result ?? null, def.target_operator, def.target_value)
-      if (achievementFilter !== 'all' && status !== achievementFilter) continue
-      rows.push({ def, period: p, result: dataRow?.result ?? null, status })
+      const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
+      const status = computeAchievement(r?.result ?? null, def.target_operator, def.target_value)
+      counts[status]++
+      if (status === 'Not Achieved') notAchievedByDept.set(def.dept_code, (notAchievedByDept.get(def.dept_code) ?? 0) + 1)
     }
   }
-
-  const counts: Record<AchievementStatus, number> = { Achieved: 0, 'Not Achieved': 0, 'No Data': 0, 'Not Applicable': 0 }
-  for (const r of rows) counts[r.status]++
-
-  const notAchievedByDept = new Map<string, number>()
-  for (const r of rows) if (r.status === 'Not Achieved') notAchievedByDept.set(r.def.dept_code, (notAchievedByDept.get(r.def.dept_code) ?? 0) + 1)
   const dHeat = Array.from(notAchievedByDept.entries()).sort(([, a], [, b]) => b - a)
+
+  // KPIs to show in the grid
+  const filteredDefs = useMemo(() => {
+    let pool = defs
+    if (achievementFilter !== 'all') {
+      pool = defs.filter((def) => {
+        const periods = scheduledPeriodsFor(def.frequency)
+        for (const p of periods) {
+          const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
+          const status = computeAchievement(r?.result ?? null, def.target_operator, def.target_value)
+          if (status === achievementFilter) return true
+        }
+        return false
+      })
+    }
+    if (!search.trim()) return pool
+    const q = search.trim().toLowerCase()
+    return pool.filter((d) => `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q))
+  }, [defs, data, year, achievementFilter, search])
+
+  const dataByKey = useMemo(() => {
+    const m = new Map<string, KpiDataRow>()
+    for (const r of data) m.set(`${r.kpi_id}|${r.year}|${r.period}`, r)
+    return m
+  }, [data])
 
   return (
     <>
@@ -732,46 +751,107 @@ function AchievementTab({ defs, data, year, achievementFilter }: { defs: KpiDefi
         <MetricCard tone="gray"  label="Not Applicable"  value={counts['Not Applicable']} />
       </div>
 
-      <Panel title="🚨 'Not Achieved' by Department">
+      <Panel title="🚨 &apos;Not Achieved&apos; by Department" subtitle="Click a dept card to filter the grid below">
         {dHeat.length === 0 ? (
           <div style={{ color: 'var(--green)', fontSize: 12 }}>No &apos;Not Achieved&apos; results ✓</div>
         ) : (
           <div className="dept-heat">
             {dHeat.map(([d, n]) => (
-              <div className="dh-cell dh-red" key={d}>
+              <button
+                type="button"
+                className="dh-cell dh-red"
+                key={d}
+                onClick={() => setSearch(d)}
+                style={{ cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+                title={`Click to filter grid below to ${d}`}
+              >
                 <div className="dh-dept">{d}</div>
                 <div className="dh-num">{n}</div>
                 <div className="dh-label">Not Achieved</div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </Panel>
 
-      <Panel title={`Achievement Details (${rows.length} results)`}>
-        <div className="tw">
-          <table>
-            <thead>
-              <tr>
-                <th>KPI ID</th><th>Dept</th><th>KPI</th><th>Period</th><th>Target</th><th>Result</th><th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 300).map((r, i) => (
-                <tr key={`${r.def.kpi_id}-${r.period}-${i}`}>
-                  <td style={{ fontFamily: 'monospace' }}>{r.def.kpi_id}</td>
-                  <td>{r.def.dept_code}</td>
-                  <td title={r.def.kpi_name} style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.def.kpi_name}</td>
-                  <td>{r.period}</td>
-                  <td>{r.def.target ?? '—'}</td>
-                  <td>{r.result ?? '—'}</td>
-                  <td><AchBadge status={r.status} /></td>
-                </tr>
-              ))}
-              {rows.length > 300 && <tr><td colSpan={7} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {rows.length - 300} more</td></tr>}
-            </tbody>
-          </table>
+      <Panel
+        title="🎯 Achievement Details"
+        subtitle={`${filteredDefs.length} KPI${filteredDefs.length === 1 ? '' : 's'}${achievementFilter !== 'all' ? ` with at least one '${achievementFilter}' period` : ''} · cells colored by achievement status`}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by KPI ID, dept, or name… (or click a dept card above)"
+            style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 12, width: 380, fontFamily: 'inherit' }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')}
+              style={{ padding: '5px 12px', background: '#fff', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--rs)', fontSize: 11 }}>
+              Clear filter
+            </button>
+          )}
+          <PerfLegend />
         </div>
+
+        {filteredDefs.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12, padding: 12 }}>No KPIs match.</div>
+        ) : (
+          <div className="tw" style={{ overflowX: 'auto' }}>
+            <table className="kpi-grid">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 200, maxWidth: 240 }}>KPI</th>
+                  <th style={{ minWidth: 50 }}>Dept</th>
+                  <th style={{ minWidth: 56 }}>Target</th>
+                  {PERIODS.map((p) => <th key={p} style={{ textAlign: 'center', minWidth: 38 }}>{p}</th>)}
+                  <th style={{ textAlign: 'center', minWidth: 60 }}>Compl.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDefs.slice(0, 100).map((d) => {
+                  const scheduled = new Set(scheduledPeriodsFor(d.frequency))
+                  const c = compliance(d, data, year, today)
+                  return (
+                    <tr key={d.kpi_id}>
+                      <td>
+                        <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>{d.kpi_id}</span>
+                          <FreqBadge freq={d.frequency} />
+                        </div>
+                        <div title={d.kpi_name} style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.3 }}>{d.kpi_name}</div>
+                      </td>
+                      <td style={{ fontSize: 11 }}>{d.dept_code}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.target ?? '—'}</td>
+                      {PERIODS.map((p) => (
+                        <PerfCell
+                          key={p}
+                          def={d}
+                          year={year}
+                          period={p}
+                          scheduled={scheduled.has(p)}
+                          row={dataByKey.get(`${d.kpi_id}|${year}|${p}`)}
+                          today={today}
+                        />
+                      ))}
+                      <td style={{ textAlign: 'center' }}>
+                        {c.scheduledDue ? (
+                          <span className={`b b-${complianceTone(c.pct)}`}>{c.pct}%</span>
+                        ) : (
+                          <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {filteredDefs.length > 100 && (
+                  <tr><td colSpan={16} style={{ color: 'var(--muted)', textAlign: 'center', padding: 8 }}>… and {filteredDefs.length - 100} more — refine the search to see them all</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
     </>
   )
