@@ -100,6 +100,30 @@ const HEADER_MAP: Record<string, keyof IncidentRow> = {
 
 export const MAPPED_HEADERS = Object.keys(HEADER_MAP)
 
+/**
+ * Scan the first few rows of a sheet (as a 2D array) and return the row index
+ * that best matches our known IR headers. Returns 0 if no row beats row 0.
+ */
+export function detectHeaderRow(rows: unknown[][], maxScan = 6): number {
+  const known = new Set(MAPPED_HEADERS.map((h) => h.replace(/\s+/g, ' ').trim().toLowerCase()))
+  let bestIdx = 0
+  let bestScore = -1
+  for (let i = 0; i < Math.min(maxScan, rows.length); i++) {
+    const row = rows[i] ?? []
+    let score = 0
+    for (const cell of row) {
+      if (typeof cell !== 'string') continue
+      const k = cell.replace(/\s+/g, ' ').trim().toLowerCase()
+      if (k && known.has(k)) score++
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+  return bestIdx
+}
+
 /** Extra fields we read but that aren't in HEADER_MAP (used as fallbacks). */
 const FALLBACK_HEADERS = [
   'Date of Incident', // fallback for incident_month

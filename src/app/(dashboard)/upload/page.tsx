@@ -11,6 +11,7 @@ import {
   type IncidentRow,
   type ParseSummary,
   MAPPED_HEADERS,
+  detectHeaderRow,
 } from '@/lib/ir/excel-mapper'
 
 type ImportMode = 'skip' | 'replace'
@@ -45,11 +46,51 @@ export default function UploadPage() {
     try {
       const buf = await file.arrayBuffer()
       const wb = XLSX.read(buf, { type: 'array', cellDates: true })
-      const sheetName = wb.SheetNames[0]
-      if (!sheetName) throw new Error('Workbook has no sheets')
-      const ws = wb.Sheets[sheetName]
-      const headerRow = (XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false })[0] ?? []) as string[]
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true })
+      if (wb.SheetNames.length === 0) throw new Error('Workbook has no sheets')
+
+      // Score each sheet by how many MAPPED_HEADERS appear in its first few rows.
+      // Pick the highest-scoring sheet — handles workbooks where the data isn't on sheet 1
+      // (e.g. pivot summaries first, raw data on a later tab).
+      const known = new Set(MAPPED_HEADERS.map((h) => h.replace(/\s+/g, ' ').trim().toLowerCase()))
+      let bestSheet = wb.SheetNames[0]
+      let bestScore = -1
+      let bestAoa: unknown[][] = []
+      for (const name of wb.SheetNames) {
+        const sheet = wb.Sheets[name]
+        if (!sheet) continue
+        const aoaCandidate = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false }) as unknown[][]
+        let score = 0
+        for (let i = 0; i < Math.min(6, aoaCandidate.length); i++) {
+          for (const cell of aoaCandidate[i] ?? []) {
+            if (typeof cell !== 'string') continue
+            const k = cell.replace(/\s+/g, ' ').trim().toLowerCase()
+            if (k && known.has(k)) score++
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score
+          bestSheet = name
+          bestAoa = aoaCandidate
+        }
+      }
+
+      const ws = wb.Sheets[bestSheet]
+      const aoa = bestAoa
+      const headerIdx = detectHeaderRow(aoa)
+      const headerRow = (aoa[headerIdx] ?? []) as string[]
+
+      if (bestScore <= 0) {
+        throw new Error(
+          `No sheet matched the expected IR headers. Sheets in this workbook: ${wb.SheetNames.join(', ')}.`
+        )
+      }
+
+      // Re-parse rows starting from the detected header row, on the chosen sheet.
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        defval: null,
+        raw: true,
+        range: headerIdx,
+      })
       const s = parseRows(rawRows, headerRow.map(String))
       setSummary(s)
     } catch (e) {
