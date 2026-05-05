@@ -717,24 +717,24 @@ function AchievementTab({ defs, data, year, achievementFilter }: { defs: KpiDefi
   }
   const dHeat = Array.from(notAchievedByDept.entries()).sort(([, a], [, b]) => b - a)
 
-  // KPIs to show in the grid
+  // KPIs to show in the grid:
+  // - if sidebar achievement filter set to a specific status → use that
+  // - otherwise default to 'Not Achieved' (since Performance Grid covers the all-status case)
+  const effectiveFilter = achievementFilter === 'all' ? 'Not Achieved' : achievementFilter
   const filteredDefs = useMemo(() => {
-    let pool = defs
-    if (achievementFilter !== 'all') {
-      pool = defs.filter((def) => {
-        const periods = scheduledPeriodsFor(def.frequency)
-        for (const p of periods) {
-          const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
-          const status = computeAchievement(r?.result ?? null, def.target_operator, def.target_value)
-          if (status === achievementFilter) return true
-        }
-        return false
-      })
-    }
+    const pool = defs.filter((def) => {
+      const periods = scheduledPeriodsFor(def.frequency)
+      for (const p of periods) {
+        const r = data.find((x) => x.kpi_id === def.kpi_id && x.year === year && x.period === p)
+        const status = computeAchievement(r?.result ?? null, def.target_operator, def.target_value)
+        if (status === effectiveFilter) return true
+      }
+      return false
+    })
     if (!search.trim()) return pool
     const q = search.trim().toLowerCase()
     return pool.filter((d) => `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q))
-  }, [defs, data, year, achievementFilter, search])
+  }, [defs, data, year, effectiveFilter, search])
 
   const dataByKey = useMemo(() => {
     const m = new Map<string, KpiDataRow>()
@@ -776,7 +776,7 @@ function AchievementTab({ defs, data, year, achievementFilter }: { defs: KpiDefi
 
       <Panel
         title="🎯 Achievement Details"
-        subtitle={`${filteredDefs.length} KPI${filteredDefs.length === 1 ? '' : 's'}${achievementFilter !== 'all' ? ` with at least one '${achievementFilter}' period` : ''} · cells colored by achievement status`}
+        subtitle={`${filteredDefs.length} KPI${filteredDefs.length === 1 ? '' : 's'} with at least one '${effectiveFilter}' period · cells colored by achievement status${achievementFilter === 'all' ? ' · use sidebar filter to view other statuses' : ''}`}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <input
@@ -1520,7 +1520,7 @@ function ReportCardTab({ defs, data, siq }: { defs: KpiDefinition[]; data: KpiDa
 
 function ReportFooter() {
   const today = new Date().toISOString().slice(0, 10)
-  return <div className="rc-foot">Quality Assurance and Document Management Unit · Confidential · Not for circulation · Generated: {today}</div>
+  return <div className="rc-foot">Quality Assurance and Document Management Unit, RMCQ · Confidential · Not for circulation · Generated: {today}</div>
 }
 
 function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefinition[]; data: KpiDataRow[]; siq: KpiSiqRecord[]; dept: string; year: number; period: KpiPeriodKey }) {
@@ -1766,61 +1766,101 @@ function KpiHospitalReport({ defs, data, siq, year, period }: { defs: KpiDefinit
   const liveSiqs = allDefs.filter((d) => detectSiqTrigger(d, data, year).triggered).length
   const storedOpen = siq.filter((s) => s.status === 'Open' || s.status === 'In Progress' || s.status === 'Pending Department Feedback').length
 
-  // Top problem depts
+  // ALL depts (no slice). Sorted: critical first (lowest compliance), then by KPI count desc.
   const deptSet = new Set<string>(); allDefs.forEach((d) => deptSet.add(d.dept_code))
-  const deptComp = Array.from(deptSet).map((dc) => {
+  const allDeptComp = Array.from(deptSet).map((dc) => {
     const c = deptCompliance(allDefs, data, dc, year, today)
     return { dept: dc, ...c }
-  }).filter((d) => d.scheduledDue > 0).sort((a, b) => a.pct - b.pct).slice(0, 12)
+  }).sort((a, b) => {
+    // Depts with no due periods get sorted at the end
+    if (a.scheduledDue === 0 && b.scheduledDue !== 0) return 1
+    if (b.scheduledDue === 0 && a.scheduledDue !== 0) return -1
+    return (a.pct - b.pct) || (b.kpiCount - a.kpiCount)
+  })
+
+  // Paginate dept rows across A4 pages — first page also has the KPI summary,
+  // so it gets fewer dept rows. Subsequent pages are dept-only.
+  const FIRST_PAGE_DEPTS = 18
+  const MORE_PAGE_DEPTS = 30
+  const deptPages: typeof allDeptComp[] = []
+  if (allDeptComp.length === 0) {
+    deptPages.push([])
+  } else {
+    deptPages.push(allDeptComp.slice(0, FIRST_PAGE_DEPTS))
+    let i = FIRST_PAGE_DEPTS
+    while (i < allDeptComp.length) {
+      deptPages.push(allDeptComp.slice(i, i + MORE_PAGE_DEPTS))
+      i += MORE_PAGE_DEPTS
+    }
+  }
+
+  const renderDeptTable = (rows: typeof allDeptComp) => (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
+      <thead>
+        <tr style={{ background: 'var(--bg)' }}>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Dept</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPIs</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Due</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Submitted</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Pending</th>
+          <th style={{ textAlign: 'left', padding: '3px 5px' }}>Compliance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((d) => (
+          <tr key={d.dept} style={{ borderTop: '1px solid var(--border)' }}>
+            <td style={{ padding: '3px 5px', fontWeight: 600 }}>{d.dept}</td>
+            <td style={{ padding: '3px 5px' }}>{d.kpiCount}</td>
+            <td style={{ padding: '3px 5px' }}>{d.scheduledDue}</td>
+            <td style={{ padding: '3px 5px' }}>{d.submitted}</td>
+            <td style={{ padding: '3px 5px', color: d.pending > 0 ? 'var(--red)' : undefined }}>{d.pending}</td>
+            <td style={{ padding: '3px 5px', color: d.scheduledDue === 0 ? 'var(--muted)' : (d.pct >= 80 ? 'var(--green)' : d.pct >= 50 ? 'var(--amber)' : 'var(--red)'), fontWeight: 700 }}>
+              {d.scheduledDue === 0 ? 'No due' : `${d.pct}%`}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
 
   return (
-    <div className="rc-page">
-      <div className="rc-h">
-        <div className="t1">Hospital-Wide KPI Summary</div>
-        <div className="t2">Hospital Al-Sultan Abdullah UiTM · {kpiPeriodLabel(period)} {year}</div>
-      </div>
-
-      <div className="rc-section">
-        <div className="rc-st">Section 1 — Hospital KPIs</div>
-        <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
-          <div className="rc-kpi"><div className="l">Total KPIs</div><div className="v" style={{ color: 'var(--blue)' }}>{allDefs.length}</div></div>
-          <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct}%</div></div>
-          <div className="rc-kpi"><div className="l">Achievement</div><div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct}%</div></div>
-          <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--red)' }}>{pend}</div></div>
-          <div className="rc-kpi"><div className="l">Live SIQs</div><div className="v" style={{ color: 'var(--amber)' }}>{liveSiqs}</div></div>
-          <div className="rc-kpi"><div className="l">Open SIQs</div><div className="v" style={{ color: 'var(--blue)' }}>{storedOpen}</div></div>
+    <>
+      <div className="rc-page">
+        <div className="rc-h">
+          <div className="t1">Hospital-Wide KPI Summary</div>
+          <div className="t2">Hospital Al-Sultan Abdullah UiTM · {kpiPeriodLabel(period)} {year}</div>
         </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 1 — Hospital KPIs</div>
+          <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+            <div className="rc-kpi"><div className="l">Total KPIs</div><div className="v" style={{ color: 'var(--blue)' }}>{allDefs.length}</div></div>
+            <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct}%</div></div>
+            <div className="rc-kpi"><div className="l">Achievement</div><div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct}%</div></div>
+            <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--red)' }}>{pend}</div></div>
+            <div className="rc-kpi"><div className="l">Live SIQs</div><div className="v" style={{ color: 'var(--amber)' }}>{liveSiqs}</div></div>
+            <div className="rc-kpi"><div className="l">Open SIQs</div><div className="v" style={{ color: 'var(--blue)' }}>{storedOpen}</div></div>
+          </div>
+        </div>
+
+        <div className="rc-section">
+          <div className="rc-st">Section 2 — Compliance by Department (lowest first) · page 1 of {deptPages.length}</div>
+          {renderDeptTable(deptPages[0])}
+        </div>
+
+        <ReportFooter />
       </div>
 
-      <div className="rc-section">
-        <div className="rc-st">Section 2 — Compliance by Department (lowest first)</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
-          <thead>
-            <tr style={{ background: 'var(--bg)' }}>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>Dept</th>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>KPIs</th>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>Due</th>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>Submitted</th>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>Pending</th>
-              <th style={{ textAlign: 'left', padding: '3px 5px' }}>Compliance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deptComp.map((d) => (
-              <tr key={d.dept} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '3px 5px', fontWeight: 600 }}>{d.dept}</td>
-                <td style={{ padding: '3px 5px' }}>{d.kpiCount}</td>
-                <td style={{ padding: '3px 5px' }}>{d.scheduledDue}</td>
-                <td style={{ padding: '3px 5px' }}>{d.submitted}</td>
-                <td style={{ padding: '3px 5px', color: d.pending > 0 ? 'var(--red)' : undefined }}>{d.pending}</td>
-                <td style={{ padding: '3px 5px', color: d.pct >= 80 ? 'var(--green)' : d.pct >= 50 ? 'var(--amber)' : 'var(--red)', fontWeight: 700 }}>{d.pct}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <ReportFooter />
-    </div>
+      {deptPages.slice(1).map((rows, idx) => (
+        <div className="rc-page" key={`hw-page-${idx + 2}`}>
+          <div className="rc-h"><div className="t1">Hospital-Wide KPI Summary — page {idx + 2} of {deptPages.length}</div></div>
+          <div className="rc-section">
+            <div className="rc-st">Compliance by Department (continued)</div>
+            {renderDeptTable(rows)}
+          </div>
+          <ReportFooter />
+        </div>
+      ))}
+    </>
   )
 }
