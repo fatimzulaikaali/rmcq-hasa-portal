@@ -1453,7 +1453,34 @@ function ReportCardTab({ rows }: { rows: Incident[] }) {
     if (!preview) return
     const pages = Array.from(preview.querySelectorAll<HTMLElement>('.rc-page'))
     if (pages.length === 0) return
-    const pageHtml = pages.map((p) => p.outerHTML).join('\n')
+
+    // Convert each <canvas> chart to a static <img> data-URL before serializing.
+    // outerHTML preserves the canvas tag but not its bitmap, so Chart.js charts
+    // would otherwise vanish in the new print window (where no JS redraws them).
+    const clonedPages = pages.map((page) => {
+      const clone = page.cloneNode(true) as HTMLElement
+      const originals = Array.from(page.querySelectorAll('canvas'))
+      const clonedCanvases = Array.from(clone.querySelectorAll('canvas'))
+      originals.forEach((orig, i) => {
+        const target = clonedCanvases[i]
+        if (!target) return
+        try {
+          const dataUrl = orig.toDataURL('image/png')
+          const img = clone.ownerDocument!.createElement('img')
+          img.src = dataUrl
+          const rect = orig.getBoundingClientRect()
+          img.style.width = `${rect.width}px`
+          img.style.height = `${rect.height}px`
+          img.style.display = 'block'
+          target.replaceWith(img)
+        } catch {
+          // toDataURL may throw if the canvas is tainted; leave the clone canvas as-is.
+        }
+      })
+      return clone
+    })
+
+    const pageHtml = clonedPages.map((p) => p.outerHTML).join('\n')
     const css = Array.from(document.styleSheets)
       .map((s) => {
         try { return Array.from(s.cssRules).map((r) => r.cssText).join('\n') }

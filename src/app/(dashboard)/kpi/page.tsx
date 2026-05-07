@@ -1475,7 +1475,31 @@ function ReportCardTab({ defs, data, siq }: { defs: KpiDefinition[]; data: KpiDa
     if (!preview) return
     const pages = Array.from(preview.querySelectorAll<HTMLElement>('.rc-page'))
     if (pages.length === 0) return
-    const pageHtml = pages.map((p) => p.outerHTML).join('\n')
+
+    // Convert any <canvas> chart to a static <img> before serializing — outerHTML
+    // captures the canvas tag but not its bitmap, so charts vanish in the print window.
+    const clonedPages = pages.map((page) => {
+      const clone = page.cloneNode(true) as HTMLElement
+      const originals = Array.from(page.querySelectorAll('canvas'))
+      const clonedCanvases = Array.from(clone.querySelectorAll('canvas'))
+      originals.forEach((orig, i) => {
+        const target = clonedCanvases[i]
+        if (!target) return
+        try {
+          const dataUrl = orig.toDataURL('image/png')
+          const img = clone.ownerDocument!.createElement('img')
+          img.src = dataUrl
+          const rect = orig.getBoundingClientRect()
+          img.style.width = `${rect.width}px`
+          img.style.height = `${rect.height}px`
+          img.style.display = 'block'
+          target.replaceWith(img)
+        } catch { /* tainted canvas — leave as-is */ }
+      })
+      return clone
+    })
+
+    const pageHtml = clonedPages.map((p) => p.outerHTML).join('\n')
     const css = Array.from(document.styleSheets).map((s) => {
       try { return Array.from(s.cssRules).map((r) => r.cssText).join('\n') }
       catch { return '' }
