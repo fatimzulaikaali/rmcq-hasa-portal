@@ -193,3 +193,60 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .kpi-grid tbody tr{border-bottom:1px solid var(--border);}
 .kpi-grid tbody tr:hover td{background:var(--bg);}
 
+/* ===========================================================================
+ * Mobile responsiveness (<= 768px)
+ * - sidebar slides in from left when toggled (.sidebar-open class on .shell)
+ * - main content takes full width on mobile (no margin-left)
+ * - stack metric cards / panels
+ * - tab nav scrolls horizontally
+ * =========================================================================== */
+.hamburger{display:none;background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--text);padding:4px 6px;line-height:1;}
+.scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:99;}
+.signout-btn{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:var(--rs);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:4px;}
+.signout-btn:hover{background:var(--bg);color:var(--text);}
+
+@media (max-width: 768px) {
+  .hamburger{display:inline-flex;}
+  .sidebar{transform:translateX(-100%);transition:transform .2s ease;}
+  .shell.sidebar-open .sidebar{transform:translateX(0);}
+  .shell.sidebar-open .scrim{display:block;}
+  .main{margin-left:0;}
+  .topbar{padding:8px 12px;gap:8px;}
+  .tb-title{font-size:13px;}
+  .tb-meta{font-size:10px;}
+  .rec-badge{padding:2px 8px;font-size:10px;}
+  .signout-btn{padding:4px 8px;font-size:10px;}
+  .content,.tab-pane{padding:10px 12px;}
+  .tab-nav{padding:0 6px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;top:0;position:sticky;}
+  .tab-nav::-webkit-scrollbar{display:none;}
+  .tab-btn{flex:0 0 auto;font-size:11px;padding:8px 10px;white-space:nowrap;}
+  .mrow{grid-template-columns:repeat(2, 1fr) !important;gap:6px;}
+  .g2,.g3{grid-template-columns:1fr;gap:8px;}
+  .panel{padding:10px;margin-bottom:10px;}
+  .pt{font-size:12px;}
+  .mc{padding:8px 10px;}
+  .mv{font-size:18px;}
+  .ml{font-size:9px;}
+  .ms{font-size:9px;}
+  .dept-heat{grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;}
+  .dh-cell{padding:6px 7px;}
+  .dh-num{font-size:16px;}
+  .dh-dept{font-size:10px;}
+  .tw{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .tw table{font-size:10px;}
+  .tw th,.tw td{padding:4px 6px;}
+  .pr-lbl{width:90px;font-size:10px;}
+  .pr-n{width:30px;font-size:10px;}
+  /* dept compliance cards - stack to 2 cols */
+  .dept-compliance-grid{grid-template-columns:repeat(2,1fr);gap:6px;}
+  /* report card preview — let A4 pages scale down or scroll */
+  .rc-page{transform:scale(0.85);transform-origin:top center;}
+  .rc-controls .row{flex-direction:column;align-items:stretch;}
+  .rc-controls select,.rc-controls .btn{width:100%;}
+}
+
+@media (max-width: 480px) {
+  .mrow{grid-template-columns:1fr !important;}
+  .tb-title{font-size:12px;}
+}
+

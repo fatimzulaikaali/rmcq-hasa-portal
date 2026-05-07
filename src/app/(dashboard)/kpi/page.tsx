@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement,
@@ -54,6 +55,8 @@ const DEFAULT_FILTERS: KpiFilters = {
 const PAGE_SIZE = 25
 
 export default function KpiPage() {
+  const router = useRouter()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [defs, setDefs] = useState<KpiDefinition[] | null>(null)
   const [data, setData] = useState<KpiDataRow[] | null>(null)
   const [siq, setSiq] = useState<KpiSiqRecord[] | null>(null)
@@ -62,6 +65,12 @@ export default function KpiPage() {
   const [filters, setFilters] = useState<KpiFilters>(DEFAULT_FILTERS)
   const [tab, setTab] = useState<TabId>('overview')
   const [refreshTick, setRefreshTick] = useState(0)
+
+  async function signOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
 
   // initial fetch + on refresh
   useEffect(() => {
@@ -119,7 +128,8 @@ export default function KpiPage() {
   }, [defs])
 
   return (
-    <div className="shell">
+    <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <div className="scrim" onClick={() => setSidebarOpen(false)} />
       <aside className="sidebar">
         <div className="sb-head">
           <div className="sb-logo">📊 KPI Monitor</div>
@@ -131,10 +141,6 @@ export default function KpiPage() {
           <Link href="/ir" className="nav-item">
             <span className="nav-icon">🩺</span>
             <span>IR Dashboard</span>
-          </Link>
-          <Link href="/upload" className="nav-item">
-            <span className="nav-icon">⬆</span>
-            <span>Upload IR Data</span>
           </Link>
         </div>
 
@@ -184,12 +190,23 @@ export default function KpiPage() {
 
       <div className="main">
         <header className="topbar">
-          <div>
-            <div className="tb-title">Performance Indicators Dashboard {filters.year}</div>
-            <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · RMCQ</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="hamburger"
+              aria-label="Toggle navigation"
+              onClick={() => setSidebarOpen((v) => !v)}
+            >☰</button>
+            <div>
+              <div className="tb-title">Performance Indicators Dashboard {filters.year}</div>
+              <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · RMCQ</div>
+            </div>
           </div>
-          <div className="rec-badge">
-            {loading ? 'Loading…' : `${filteredDefs.length.toLocaleString()} KPI${filteredDefs.length === 1 ? '' : 's'}`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="rec-badge">
+              {loading ? 'Loading…' : `${filteredDefs.length.toLocaleString()} KPI${filteredDefs.length === 1 ? '' : 's'}`}
+            </div>
+            <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
 

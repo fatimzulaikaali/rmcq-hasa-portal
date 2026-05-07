@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -18,7 +19,14 @@ import {
   Title,
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
+import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
+import {
+  parseRows as parseIrRows,
+  detectHeaderRow as detectIrHeaderRow,
+  MAPPED_HEADERS as IR_MAPPED_HEADERS,
+  type IncidentRow,
+} from '@/lib/ir/excel-mapper'
 import {
   applyFilters,
   CATEGORY_COLORS,
@@ -74,7 +82,7 @@ ChartJS.register(
 type TabId =
   | 'overview' | 'categories' | 'severity'
   | 'ii' | 'rca' | 'reporting'
-  | 'non-psi' | 'report-card' | 'all-records'
+  | 'non-psi' | 'report-card' | 'all-records' | 'upload'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'overview',     label: 'Overview',              icon: '📊' },
@@ -86,6 +94,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'non-psi',      label: 'Non-PSI Incidents',     icon: '📁' },
   { id: 'report-card',  label: 'Report Card',           icon: '📄' },
   { id: 'all-records',  label: 'All Records',           icon: '📋' },
+  { id: 'upload',       label: 'Upload Workbook',       icon: '⬆' },
 ]
 
 const PAGE_SIZE = 20
@@ -116,10 +125,19 @@ const CARE_OPTIONS = [
  * ========================================================================= */
 
 export default function IrPage() {
+  const router = useRouter()
   const [rows, setRows] = useState<Incident[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [filters, setFilters] = useState<IrFilters>(DEFAULT_FILTERS)
   const [tab, setTab] = useState<TabId>('overview')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  async function signOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
 
   // Initial fetch
   useEffect(() => {
@@ -142,7 +160,7 @@ export default function IrPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [refreshTick])
 
   const filtered = useMemo(() => (rows ? applyFilters(rows, filters) : []), [rows, filters])
 
@@ -152,7 +170,8 @@ export default function IrPage() {
   const meta = useMemo(() => activeMonthRange(rows ?? [], filters), [rows, filters])
 
   return (
-    <div className="shell">
+    <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <div className="scrim" onClick={() => setSidebarOpen(false)} />
       <aside className="sidebar">
         <div className="sb-head">
           <div className="sb-logo">🏥 Patient Safety</div>
@@ -165,10 +184,6 @@ export default function IrPage() {
           <Link href="/kpi" className="nav-item">
             <span className="nav-icon">📈</span>
             <span>KPI Monitor</span>
-          </Link>
-          <Link href="/upload" className="nav-item">
-            <span className="nav-icon">⬆</span>
-            <span>Upload Data</span>
           </Link>
         </div>
 
@@ -212,12 +227,23 @@ export default function IrPage() {
 
       <div className="main">
         <header className="topbar">
-          <div>
-            <div className="tb-title">Patient Safety Incident Reporting 2026</div>
-            <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · {meta}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="hamburger"
+              aria-label="Toggle navigation"
+              onClick={() => setSidebarOpen((v) => !v)}
+            >☰</button>
+            <div>
+              <div className="tb-title">Patient Safety Incident Reporting 2026</div>
+              <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · {meta}</div>
+            </div>
           </div>
-          <div className="rec-badge">
-            {rows == null ? 'Loading…' : `${filtered.length.toLocaleString()} record${filtered.length === 1 ? '' : 's'}`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="rec-badge">
+              {rows == null ? 'Loading…' : `${filtered.length.toLocaleString()} record${filtered.length === 1 ? '' : 's'}`}
+            </div>
+            <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
 
@@ -226,7 +252,7 @@ export default function IrPage() {
             <button
               key={t.id}
               className={`tab-btn ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
+              onClick={() => { setTab(t.id); setSidebarOpen(false); }}
               type="button"
             >
               {t.icon} {t.label}
@@ -256,6 +282,7 @@ export default function IrPage() {
               {tab === 'non-psi'     && <NonPsiTab rows={filtered} />}
               {tab === 'report-card' && <ReportCardTab rows={rows} />}
               {tab === 'all-records' && <AllRecordsTab rows={filtered} />}
+              {tab === 'upload'      && <IrUploadTab onUploaded={() => setRefreshTick((t) => t + 1)} />}
             </>
           )}
         </main>
@@ -2310,6 +2337,217 @@ function AllRecordsTab({ rows }: { rows: Incident[] }) {
           Next
         </button>
       </div>
+    </div>
+  )
+}
+
+
+/* =========================================================================
+ * TAB — UPLOAD WORKBOOK (IR)
+ * Drag-drop xlsx → parse with sheet/header autodetect → bulk upsert into incidents.
+ * Mirrors the layout of the standalone /upload page so dashboard users have it built-in.
+ * ========================================================================= */
+
+interface IrUploadResult {
+  inserted: number
+  skipped: number
+  errors: string[]
+}
+
+function IrUploadTab({ onUploaded }: { onUploaded: () => void }) {
+  const supabase = useMemo(() => createClient(), [])
+  const [filename, setFilename] = useState<string | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [parsed, setParsed] = useState<ReturnType<typeof parseIrRows> | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [result, setResult] = useState<IrUploadResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [drag, setDrag] = useState(false)
+  const [mode, setMode] = useState<'skip' | 'replace'>('skip')
+
+  async function handleFile(f: File) {
+    setError(null); setResult(null); setParsed(null); setFilename(f.name); setParsing(true)
+    try {
+      const buf = await f.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      if (wb.SheetNames.length === 0) throw new Error('Workbook has no sheets')
+
+      // Find best sheet by header-match score
+      const known = new Set(IR_MAPPED_HEADERS.map((h: string) => h.replace(/\s+/g, ' ').trim().toLowerCase()))
+      let bestAoa: unknown[][] = []
+      let bestSheet = wb.SheetNames[0]
+      let bestScore = -1
+      for (const name of wb.SheetNames) {
+        const sheet = wb.Sheets[name]
+        if (!sheet) continue
+        const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false }) as unknown[][]
+        let score = 0
+        for (let i = 0; i < Math.min(6, aoa.length); i++) {
+          for (const cell of aoa[i] ?? []) {
+            if (typeof cell !== 'string') continue
+            const k = cell.replace(/\s+/g, ' ').trim().toLowerCase()
+            if (k && known.has(k)) score++
+          }
+        }
+        if (score > bestScore) { bestScore = score; bestSheet = name; bestAoa = aoa }
+      }
+      if (bestScore <= 0) {
+        throw new Error(`No sheet matched the expected IR headers. Sheets: ${wb.SheetNames.join(', ')}.`)
+      }
+
+      const ws = wb.Sheets[bestSheet]
+      const headerIdx = detectIrHeaderRow(bestAoa)
+      const headerRow = (bestAoa[headerIdx] ?? []) as string[]
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true, range: headerIdx })
+      const s = parseIrRows(rawRows, headerRow.map(String))
+      setParsed(s)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to parse file')
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  async function importNow() {
+    if (!parsed || parsed.validRows.length === 0) return
+    setError(null); setResult(null); setImporting(true)
+    setProgress({ done: 0, total: parsed.validRows.length })
+    try {
+      let inserted = 0, skipped = 0
+      const errors: string[] = []
+
+      if (mode === 'replace') {
+        const ids = parsed.validRows.map((r) => r.incident_id!).filter(Boolean)
+        for (let i = 0; i < ids.length; i += 500) {
+          const slice = ids.slice(i, i + 500)
+          const { error: delErr } = await supabase.from('incidents').delete().in('incident_id', slice)
+          if (delErr) throw new Error(`Delete failed: ${delErr.message}`)
+        }
+      }
+
+      const CHUNK = 200
+      for (let i = 0; i < parsed.validRows.length; i += CHUNK) {
+        const chunk = parsed.validRows.slice(i, i + CHUNK)
+        const { data, error: insErr } = await supabase
+          .from('incidents')
+          .upsert(chunk as IncidentRow[], { onConflict: 'incident_id', ignoreDuplicates: mode === 'skip' })
+          .select('incident_id')
+        if (insErr) {
+          errors.push(`Rows ${i + 1}-${i + chunk.length}: ${insErr.message}`)
+        } else {
+          const c = data?.length ?? 0
+          inserted += c
+          if (mode === 'skip') skipped += chunk.length - c
+        }
+        setProgress({ done: Math.min(i + chunk.length, parsed.validRows.length), total: parsed.validRows.length })
+      }
+
+      setResult({ inserted, skipped, errors })
+      onUploaded()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  function reset() {
+    setFilename(null); setParsed(null); setResult(null); setError(null); setProgress({ done: 0, total: 0 })
+    const input = document.getElementById('ir-upload-input') as HTMLInputElement | null
+    if (input) input.value = ''
+  }
+
+  return (
+    <div style={{ maxWidth: 880, margin: '0 auto' }}>
+      <Panel title="Upload IR Workbook" subtitle="Drop the IR xlsx — sheet and header row are auto-detected.">
+        <div
+          onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) await handleFile(f) }}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+          onDragLeave={() => setDrag(false)}
+          onClick={() => document.getElementById('ir-upload-input')?.click()}
+          style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: 36, border: `2px dashed ${drag ? 'var(--blue)' : 'var(--border)'}`,
+            background: drag ? 'var(--blue-lt)' : '#fff', borderRadius: 'var(--rs)', cursor: 'pointer',
+          }}
+        >
+          <div style={{ fontSize: 32 }}>📥</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{filename ? filename : 'Drag & drop xlsx, or click to browse'}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Workbook stays in your browser until you press Import</div>
+          <input id="ir-upload-input" type="file" accept=".xlsx,.xls" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+        </div>
+        {parsing && <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>Parsing…</div>}
+      </Panel>
+
+      {parsed && (
+        <Panel title="Workbook Preview">
+          <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+            <MetricCard tone="blue"  label="Rows in file"      value={parsed.totalRows} />
+            <MetricCard tone="green" label="Valid (will import)" value={parsed.validRows.length} />
+            <MetricCard tone="amber" label="Skipped at parse"   value={parsed.errors.length} />
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
+            <b>Headers matched:</b> {parsed.matchedHeaders.length} of {IR_MAPPED_HEADERS.length}
+            {parsed.unknownHeaders.length > 0 && (
+              <span> · Ignored: <span style={{ opacity: 0.8 }}>{parsed.unknownHeaders.slice(0, 8).join(', ')}{parsed.unknownHeaders.length > 8 ? '…' : ''}</span></span>
+            )}
+          </div>
+
+          {parsed.errors.length > 0 && (
+            <details style={{ marginTop: 8, background: 'var(--amber-lt)', border: '1px solid #E9D5B2', borderRadius: 'var(--rs)', padding: 8 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>{parsed.errors.length} row issue(s)</summary>
+              <ul style={{ margin: '4px 0 0 18px', fontSize: 11, color: 'var(--amber)' }}>
+                {parsed.errors.slice(0, 12).map((e, i) => <li key={i}>Row {e.row}: {e.reason}</li>)}
+                {parsed.errors.length > 12 && <li>… and {parsed.errors.length - 12} more</li>}
+              </ul>
+            </details>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+            <fieldset style={{ display: 'flex', gap: 12, border: 0, padding: 0, fontSize: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="radio" name="ir-mode" checked={mode === 'skip'} onChange={() => setMode('skip')} />
+                Skip duplicates
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="radio" name="ir-mode" checked={mode === 'replace'} onChange={() => setMode('replace')} />
+                Replace existing
+              </label>
+            </fieldset>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              <button onClick={reset} disabled={importing}
+                style={{ padding: '7px 14px', border: '1px solid var(--border)', background: '#fff', borderRadius: 'var(--rs)', fontSize: 12, fontWeight: 600 }}>Reset</button>
+              <button onClick={importNow} disabled={importing}
+                style={{ padding: '7px 14px', border: 0, background: 'var(--blue)', color: '#fff', borderRadius: 'var(--rs)', fontSize: 12, fontWeight: 600 }}>
+                {importing ? `Importing… ${progress.done}/${progress.total}` : `Import ${parsed.validRows.length} rows`}
+              </button>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {error && (
+        <div className="ac red" style={{ marginTop: 8 }}>
+          <div className="ai">⚠️</div>
+          <div><div className="at">Import error</div><div className="as">{error}</div></div>
+        </div>
+      )}
+      {result && (
+        <div className="ac green" style={{ marginTop: 8 }}>
+          <div className="ai">✓</div>
+          <div>
+            <div className="at">Import complete</div>
+            <div className="as">
+              {result.inserted} row(s) inserted
+              {mode === 'skip' && ` · ${result.skipped} duplicate(s) skipped`}
+              {result.errors.length > 0 && <span style={{ color: 'var(--red)' }}> · {result.errors.length} batch error(s)</span>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
