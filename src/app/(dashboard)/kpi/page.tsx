@@ -1888,14 +1888,3 @@ function KpiHospitalReport({ defs, data, siq, year, period }: { defs: KpiDefinit
     </>
   )
 }
-e {idx + 2} of {deptPages.length}</div></div>
-          <div className="rc-section">
-            <div className="rc-st">Compliance by Department (continued)</div>
-            {renderDeptTable(rows)}
-          </div>
-          <ReportFooter />
-        </div>
-      ))}
-    </>
-  )
-}
