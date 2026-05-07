@@ -45,7 +45,11 @@ export default function UploadPage() {
     setParsing(true)
     try {
       const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      // Note: NO cellDates — we want date cells to come through as raw Excel
+      // serial numbers, which we convert in toIsoDate() via UTC math. This
+      // sidesteps every JS Date timezone quirk (the previous source of the
+      // intermittent "Dec 2025" bug for Jan-1 dates in non-UTC browsers).
+      const wb = XLSX.read(buf, { type: 'array' })
       if (wb.SheetNames.length === 0) throw new Error('Workbook has no sheets')
 
       // Score each sheet by how many MAPPED_HEADERS appear in its first few rows.

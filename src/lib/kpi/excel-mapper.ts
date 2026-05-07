@@ -89,22 +89,29 @@ const toNum = (v: unknown): number | null => {
 }
 
 /**
- * Convert a cell value to YYYY-MM-DD. Smart-handles midnight-UTC vs midnight-LOCAL Dates.
+ * Convert any plausible cell value (Excel serial number, JS Date, or string)
+ * to a YYYY-MM-DD calendar day. Timezone-independent.
  */
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30) // 1899-12-30 UTC
+
+function excelSerialToYmd(serial: number): string | null {
+  if (!Number.isFinite(serial)) return null
+  const days = Math.floor(serial)
+  const ms = EXCEL_EPOCH_MS + days * 86400000
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return null
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
 const toIsoDate = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'number') return excelSerialToYmd(v)
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return null
     if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0) {
-      const y = v.getUTCFullYear()
-      const m = String(v.getUTCMonth() + 1).padStart(2, '0')
-      const d = String(v.getUTCDate()).padStart(2, '0')
-      return `${y}-${m}-${d}`
+      return `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}-${String(v.getUTCDate()).padStart(2, '0')}`
     }
-    const y = v.getFullYear()
-    const m = String(v.getMonth() + 1).padStart(2, '0')
-    const d = String(v.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
   }
   const s = String(v).trim()
   if (!s || s.toUpperCase() === 'NA' || s === '-') return null
@@ -161,7 +168,9 @@ function getCol(row: Record<string, unknown>, ...keys: string[]): unknown {
 import * as XLSX from 'xlsx'
 
 export function parseKpiWorkbook(buf: ArrayBuffer): KpiParseResult {
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+  // No cellDates — date cells come through as raw Excel serials, converted in toIsoDate()
+  // via UTC math (timezone-bulletproof).
+  const wb = XLSX.read(buf, { type: 'array' })
   const errors: string[] = []
   const sheetCounts: Record<string, number> = {}
 

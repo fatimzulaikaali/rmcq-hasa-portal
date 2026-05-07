@@ -50,27 +50,42 @@ const toInt = (v: unknown): number => {
 }
 
 /**
- * Convert a cell value to YYYY-MM-DD.
- * Handles both midnight-UTC and midnight-LOCAL Date objects (SheetJS version-dependent):
- *   - if UTC time is 00:00 → it's midnight UTC, use UTC getters
- *   - else → it's midnight local, use local getters
- * In both cases the returned string is the calendar day shown in the spreadsheet.
+ * Convert any plausible cell value (Excel serial number, JS Date, or string)
+ * to a YYYY-MM-DD calendar day. **Timezone-independent.**
+ *
+ * The primary path is the Excel serial number: SheetJS produces this when
+ * `cellDates: true` is NOT set, so we read date cells as raw numbers and
+ * convert via UTC math (Excel epoch = 1899-12-30 UTC). The Date fallback is
+ * only used if a Date somehow slips through; we still smart-detect midnight
+ * UTC vs midnight LOCAL there, but the number path is the bulletproof one.
  */
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30) // 1899-12-30 UTC
+
+function excelSerialToYmd(serial: number): string | null {
+  if (!Number.isFinite(serial)) return null
+  const days = Math.floor(serial)
+  const ms = EXCEL_EPOCH_MS + days * 86400000
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return null
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
 const toIsoDate = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
+
+  // Excel serial number — primary path when cellDates is off.
+  if (typeof v === 'number') return excelSerialToYmd(v)
+
+  // JS Date — fallback. Smart-detect midnight UTC vs midnight LOCAL.
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return null
     if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0) {
-      const y = v.getUTCFullYear()
-      const m = String(v.getUTCMonth() + 1).padStart(2, '0')
-      const d = String(v.getUTCDate()).padStart(2, '0')
-      return `${y}-${m}-${d}`
+      return `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}-${String(v.getUTCDate()).padStart(2, '0')}`
     }
-    const y = v.getFullYear()
-    const m = String(v.getMonth() + 1).padStart(2, '0')
-    const d = String(v.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
   }
+
+  // String
   const s = String(v).trim()
   if (!s || s.toUpperCase() === 'NA' || s === '-') return null
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
