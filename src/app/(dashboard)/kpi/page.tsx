@@ -1877,4 +1877,25 @@ function KpiHospitalReport({ defs, data, siq, year, period }: { defs: KpiDefinit
 
       {deptPages.slice(1).map((rows, idx) => (
         <div className="rc-page" key={`hw-page-${idx + 2}`}>
-          <div className="rc-h"><div className="t1">Hospital-Wide KPI Summary — pag
+          <div className="rc-h"><div className="t1">Hospital-Wide KPI Summary — page {idx + 2} of {deptPages.length}</div></div>
+          <div className="rc-section">
+            <div className="rc-st">Compliance by Department (continued)</div>
+            {renderDeptTable(rows)}
+          </div>
+          <ReportFooter />
+        </div>
+      ))}
+    </>
+  )
+}
+e {idx + 2} of {deptPages.length}</div></div>
+          <div className="rc-section">
+            <div className="rc-st">Compliance by Department (continued)</div>
+            {renderDeptTable(rows)}
+          </div>
+          <ReportFooter />
+        </div>
+      ))}
+    </>
+  )
+}
