@@ -89,7 +89,9 @@ export default function KpiPage() {
         if (d2.error) throw new Error(`KPI data: ${d2.error.message}`)
         if (d3.error) throw new Error(`SIQ records: ${d3.error.message}`)
         if (d4.error) throw new Error(`KPI departments: ${d4.error.message}`)
-        setDefs(d1.data as KpiDefinition[])
+        // Only show KPIs marked active. Use `?? true` so rows missing an active flag default to active.
+        const allDefs = (d1.data ?? []) as KpiDefinition[]
+        setDefs(allDefs.filter((d) => d.active ?? true))
         setData(d2.data as KpiDataRow[])
         setSiq(d3.data as KpiSiqRecord[])
         setDepts(d4.data as KpiDepartment[])
@@ -987,13 +989,15 @@ function KpiListTab({ defs, data, year, achievementFilter }: { defs: KpiDefiniti
   })
   }, [defs, data, year])
 
-  const filtered = enriched.filter(({ def, ach, nach }) => {
-    if (q && !`${def.kpi_id} ${def.dept_code} ${def.kpi_name}`.toLowerCase().includes(q)) return false
-    if (achievementFilter === 'Achieved' && ach === 0) return false
-    if (achievementFilter === 'Not Achieved' && nach === 0) return false
-    if (achievementFilter === 'No Data' && ach + nach > 0) return false
-    return true
-  })
+  const filtered = enriched
+    .filter(({ def, ach, nach }) => {
+      if (q && !`${def.kpi_id} ${def.dept_code} ${def.kpi_name}`.toLowerCase().includes(q)) return false
+      if (achievementFilter === 'Achieved' && ach === 0) return false
+      if (achievementFilter === 'Not Achieved' && nach === 0) return false
+      if (achievementFilter === 'No Data' && ach + nach > 0) return false
+      return true
+    })
+    .sort((a, b) => a.def.kpi_id.localeCompare(b.def.kpi_id, undefined, { numeric: true }))
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
@@ -1078,9 +1082,10 @@ function PerformanceTab({ defs, data, year }: { defs: KpiDefinition[]; data: Kpi
   }, [data])
 
   const q = search.trim().toLowerCase()
-  const filtered = useMemo(() => defs.filter((d) =>
-    !q || `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q)
-  ), [defs, q])
+  const filtered = useMemo(() => defs
+    .filter((d) => !q || `${d.kpi_id} ${d.dept_code} ${d.kpi_name}`.toLowerCase().includes(q))
+    .sort((a, b) => a.kpi_id.localeCompare(b.kpi_id, undefined, { numeric: true })),
+  [defs, q])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
   const safePage = Math.min(page, totalPages)
@@ -1543,7 +1548,9 @@ function ReportFooter() {
 function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefinition[]; data: KpiDataRow[]; siq: KpiSiqRecord[]; dept: string; year: number; period: KpiPeriodKey }) {
   const today = new Date()
   const periodMonths = kpiPeriodMonths(period)
-  const deptDefs = defs.filter((d) => d.dept_code === dept && d.active)
+  const deptDefs = defs
+    .filter((d) => d.dept_code === dept && d.active)
+    .sort((a, b) => a.kpi_id.localeCompare(b.kpi_id, undefined, { numeric: true }))
 
   // Compliance for the period
   let due = 0, sub = 0, pend = 0
@@ -1870,14 +1877,4 @@ function KpiHospitalReport({ defs, data, siq, year, period }: { defs: KpiDefinit
 
       {deptPages.slice(1).map((rows, idx) => (
         <div className="rc-page" key={`hw-page-${idx + 2}`}>
-          <div className="rc-h"><div className="t1">Hospital-Wide KPI Summary — page {idx + 2} of {deptPages.length}</div></div>
-          <div className="rc-section">
-            <div className="rc-st">Compliance by Department (continued)</div>
-            {renderDeptTable(rows)}
-          </div>
-          <ReportFooter />
-        </div>
-      ))}
-    </>
-  )
-}
+          <div className="rc-h"><div className="t1">Hospital-Wide KPI Summary — pag
