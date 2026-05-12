@@ -250,3 +250,134 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
   .tb-title{font-size:12px;}
 }
 
+
+/* ============================================================
+ * PSCS — Public Survey Form (/survey/[code])
+ * Mobile-first, big tap targets, no dashboard chrome
+ * ============================================================ */
+
+.srv-root{
+  min-height:100vh;background:#F9FAFB;color:var(--text);
+  display:flex;flex-direction:column;
+  font-family:inherit;
+}
+
+.srv-top{position:sticky;top:0;z-index:20;background:#16202E;color:#fff;}
+.srv-top-inner{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;max-width:760px;margin:0 auto;}
+.srv-brand{font-weight:700;font-size:13px;letter-spacing:0.3px;}
+.srv-lang{display:flex;gap:4px;}
+.srv-lang-pill{
+  background:transparent;color:#A8B4C7;border:1px solid #2A3548;
+  padding:5px 10px;font-size:12px;font-weight:700;border-radius:6px;cursor:pointer;
+}
+.srv-lang-pill.active{background:#fff;color:#16202E;border-color:#fff;}
+.srv-progress{height:3px;background:#0F1722;}
+.srv-progress-fill{height:100%;background:linear-gradient(90deg,#3B82F6,#10B981);transition:width 0.3s ease;}
+
+.srv-main{flex:1;max-width:760px;width:100%;margin:0 auto;padding:18px 14px 100px;}
+
+.srv-card{
+  background:#fff;border:1px solid #E5E7EB;border-radius:8px;
+  padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.05);
+}
+
+.srv-h1{color:#16202E;font-size:22px;font-weight:700;margin:0 0 10px;line-height:1.3;}
+.srv-h2{color:#16202E;font-size:18px;font-weight:700;margin:0 0 8px;line-height:1.3;}
+.srv-p{color:#4B5563;font-size:14px;line-height:1.55;margin:0 0 12px;}
+.srv-note{color:#6B7280;font-size:13px;font-style:italic;line-height:1.5;margin:8px 0 0;}
+.srv-callout{
+  background:#F3F4F6;border-left:3px solid #2563EB;
+  padding:10px 12px;border-radius:4px;margin:12px 0;font-size:13px;color:#374151;
+}
+
+.srv-field{margin-top:16px;}
+.srv-label{display:block;color:#16202E;font-weight:600;font-size:14px;margin-bottom:6px;line-height:1.4;}
+.srv-input,.srv-select,.srv-textarea{
+  width:100%;padding:10px 12px;font-size:15px;font-family:inherit;
+  border:1px solid #D1D5DB;border-radius:6px;background:#fff;color:#16202E;
+  -webkit-appearance:none;appearance:none;
+}
+.srv-select{
+  background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3e%3cpath fill='%236B7280' d='M6 8L1 3h10z'/%3e%3c/svg%3e");
+  background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;
+}
+.srv-input:focus,.srv-select:focus,.srv-textarea:focus{outline:none;border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.15);}
+.srv-textarea{resize:vertical;min-height:120px;line-height:1.5;}
+
+.srv-radio-group{display:flex;flex-direction:column;gap:8px;}
+.srv-radio{
+  display:flex;align-items:flex-start;gap:8px;padding:10px 12px;
+  border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;
+  background:#fff;font-size:14px;color:#16202E;line-height:1.4;
+}
+.srv-radio input[type=radio]{margin-top:2px;flex-shrink:0;}
+.srv-radio:hover{border-color:#2563EB;background:#F9FAFB;}
+
+.srv-pill-row{display:flex;flex-wrap:wrap;gap:6px;}
+.srv-pill{
+  padding:10px 14px;font-size:14px;font-family:inherit;
+  border:1px solid #D1D5DB;border-radius:8px;background:#fff;color:#374151;cursor:pointer;
+  flex:0 1 auto;min-height:44px;
+}
+.srv-pill:hover{border-color:#2563EB;}
+.srv-pill.active{background:#2563EB;color:#fff;border-color:#2563EB;font-weight:600;}
+
+/* Question item */
+.srv-q{
+  border-top:1px solid #E5E7EB;padding:16px 0;margin-top:8px;
+}
+.srv-q:first-of-type{border-top:none;padding-top:8px;}
+.srv-q-num{
+  display:inline-block;background:#16202E;color:#fff;
+  font-family:monospace;font-size:11px;font-weight:700;
+  padding:2px 6px;border-radius:4px;margin-bottom:6px;
+}
+.srv-q-text{color:#16202E;font-size:15px;line-height:1.5;margin-bottom:10px;font-weight:500;}
+
+/* Likert: 6 buttons (0..5) */
+.srv-likert{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:6px;
+}
+.srv-likert-btn{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:8px 4px;min-height:60px;
+  border:1px solid #D1D5DB;border-radius:6px;background:#fff;cursor:pointer;
+  font-family:inherit;color:#374151;text-align:center;
+  transition:all 0.15s;
+}
+.srv-likert-btn:hover{border-color:#2563EB;background:#F9FAFB;}
+.srv-likert-btn.active{background:#2563EB;color:#fff;border-color:#2563EB;font-weight:600;}
+.srv-likert-num{font-size:18px;font-weight:700;line-height:1;}
+.srv-likert-lab{font-size:10px;line-height:1.2;margin-top:4px;color:inherit;opacity:0.85;}
+
+/* Bottom nav */
+.srv-nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:20;
+  background:#fff;border-top:1px solid #E5E7EB;
+  padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  max-width:760px;margin:0 auto;
+}
+.srv-btn{
+  padding:11px 18px;font-size:14px;font-family:inherit;font-weight:600;
+  border-radius:6px;cursor:pointer;min-height:44px;
+}
+.srv-btn.primary{background:#2563EB;color:#fff;border:1px solid #2563EB;}
+.srv-btn.primary:hover{background:#1D4ED8;}
+.srv-btn.ghost{background:#fff;color:#374151;border:1px solid #D1D5DB;}
+.srv-btn.ghost:hover{background:#F3F4F6;}
+
+.srv-error{
+  margin-top:12px;background:#FEF2F2;color:#B91C1C;
+  border:1px solid #FECACA;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.5;
+}
+
+/* Mobile tweaks */
+@media (max-width: 480px){
+  .srv-likert{grid-template-columns:repeat(6,1fr);gap:4px;}
+  .srv-likert-btn{padding:6px 2px;min-height:54px;}
+  .srv-likert-num{font-size:16px;}
+  .srv-likert-lab{font-size:9px;}
+  .srv-card{padding:16px;}
+  .srv-h1{font-size:20px;}
+  .srv-h2{font-size:17px;}
+}
