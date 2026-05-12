@@ -76,25 +76,37 @@ export default function KpiPage() {
   useEffect(() => {
     let cancelled = false
     const supabase = createClient()
+    // PostgREST silently caps SELECT responses at 1000 rows by default (Supabase cloud).
+    // To avoid losing data, fetch in explicit 1000-row pages and concat.
+    async function fetchAll<T>(table: string): Promise<T[]> {
+      const PAGE = 1000
+      const acc: T[] = []
+      for (let offset = 0; ; offset += PAGE) {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .range(offset, offset + PAGE - 1)
+        if (error) throw new Error(`${table}: ${error.message}`)
+        if (!data || data.length === 0) break
+        acc.push(...(data as T[]))
+        if (data.length < PAGE) break
+      }
+      return acc
+    }
     ;(async () => {
       try {
-        const [d1, d2, d3, d4] = await Promise.all([
-          supabase.from('kpi_definitions').select('*').limit(1000),
-          supabase.from('kpi_data').select('*').limit(50000),
-          supabase.from('kpi_siq_records').select('*').limit(2000),
-          supabase.from('kpi_departments').select('*').limit(500),
+        const [allDefsRaw, allData, allSiq, allDepts] = await Promise.all([
+          fetchAll<KpiDefinition>('kpi_definitions'),
+          fetchAll<KpiDataRow>('kpi_data'),
+          fetchAll<KpiSiqRecord>('kpi_siq_records'),
+          fetchAll<KpiDepartment>('kpi_departments'),
         ])
         if (cancelled) return
-        if (d1.error) throw new Error(`KPI definitions: ${d1.error.message}`)
-        if (d2.error) throw new Error(`KPI data: ${d2.error.message}`)
-        if (d3.error) throw new Error(`SIQ records: ${d3.error.message}`)
-        if (d4.error) throw new Error(`KPI departments: ${d4.error.message}`)
         // Only show KPIs marked active. Use `?? true` so rows missing an active flag default to active.
-        const allDefs = (d1.data ?? []) as KpiDefinition[]
-        setDefs(allDefs.filter((d) => d.active ?? true))
-        setData(d2.data as KpiDataRow[])
-        setSiq(d3.data as KpiSiqRecord[])
-        setDepts(d4.data as KpiDepartment[])
+        setDefs(allDefsRaw.filter((d) => d.active ?? true))
+        setData(allData)
+        setSiq(allSiq)
+        setDepts(allDepts)
       } catch (e: unknown) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Failed to load KPI data')
       }
