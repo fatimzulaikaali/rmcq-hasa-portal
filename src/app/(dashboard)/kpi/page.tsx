@@ -1630,8 +1630,8 @@ function KpiDeptReport({ defs, data, siq, dept, year, period }: { defs: KpiDefin
           <div className="rc-st">Section 1 — Department KPI Summary</div>
           <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
             <div className="rc-kpi"><div className="l">Total KPIs</div><div className="v" style={{ color: 'var(--blue)' }}>{deptDefs.length}</div></div>
-            <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct >= 80 ? '🟢' : compPct >= 50 ? '🟡' : '🔴'} {compPct}%</div><div className="s">{sub}/{due}</div></div>
-            <div className="rc-kpi"><div className="l">Achievement</div><div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct >= 80 ? '🟢' : achPct >= 50 ? '🟡' : '🔴'} {achPct}%</div><div className="s">{ach} achieved</div></div>
+            <div className="rc-kpi"><div className="l">Compliance</div>{due === 0 ? (<div className="v" style={{ color: 'var(--muted)' }}>—</div>) : (<div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct >= 80 ? '🟢' : compPct >= 50 ? '🟡' : '🔴'} {compPct}%</div>)}<div className="s">{due === 0 ? 'No deadlines yet' : `${sub}/${due}`}</div></div>
+            <div className="rc-kpi"><div className="l">Achievement</div>{(ach + nach) === 0 ? (<div className="v" style={{ color: 'var(--muted)' }}>—</div>) : (<div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct >= 80 ? '🟢' : achPct >= 50 ? '🟡' : '🔴'} {achPct}%</div>)}<div className="s">{(ach + nach) === 0 ? 'No reports yet' : `${ach} achieved`}</div></div>
             <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--red)' }}>{pend}</div></div>
             <div className="rc-kpi"><div className="l">SIQs (live)</div><div className="v" style={{ color: 'var(--amber)' }}>{liveSiqs.length}</div></div>
             <div className="rc-kpi"><div className="l">SIQs (stored)</div><div className="v" style={{ color: 'var(--blue)' }}>{storedSiqs.length}</div></div>
@@ -1883,8 +1883,8 @@ function KpiHospitalReport({ defs, data, siq, year, period }: { defs: KpiDefinit
           <div className="rc-st">Section 1 — Hospital KPIs</div>
           <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
             <div className="rc-kpi"><div className="l">Total KPIs</div><div className="v" style={{ color: 'var(--blue)' }}>{allDefs.length}</div></div>
-            <div className="rc-kpi"><div className="l">Compliance</div><div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct}%</div></div>
-            <div className="rc-kpi"><div className="l">Achievement</div><div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct}%</div></div>
+            <div className="rc-kpi"><div className="l">Compliance</div>{due === 0 ? (<div className="v" style={{ color: 'var(--muted)' }}>—</div>) : (<div className="v" style={{ color: compPct >= 80 ? 'var(--green)' : compPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{compPct}%</div>)}<div className="s">{due === 0 ? 'No deadlines yet' : `${sub}/${due}`}</div></div>
+            <div className="rc-kpi"><div className="l">Achievement</div>{(ach + nach) === 0 ? (<div className="v" style={{ color: 'var(--muted)' }}>—</div>) : (<div className="v" style={{ color: achPct >= 80 ? 'var(--green)' : achPct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{achPct}%</div>)}<div className="s">{(ach + nach) === 0 ? 'No reports yet' : `${ach} achieved`}</div></div>
             <div className="rc-kpi"><div className="l">Pending</div><div className="v" style={{ color: 'var(--red)' }}>{pend}</div></div>
             <div className="rc-kpi"><div className="l">Live SIQs</div><div className="v" style={{ color: 'var(--amber)' }}>{liveSiqs}</div></div>
             <div className="rc-kpi"><div className="l">Open SIQs</div><div className="v" style={{ color: 'var(--blue)' }}>{storedOpen}</div></div>
