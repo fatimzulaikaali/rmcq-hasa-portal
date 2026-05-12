@@ -217,12 +217,32 @@ const t = (key: keyof typeof TXT, lang: Lang) => {
 /* ======================== HELPERS ======================== */
 
 async function hashStaffId(staffId: string, salt: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(staffId.trim().toLowerCase() + '|' + salt)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+  const input = staffId.trim().toLowerCase() + '|' + salt
+  // Prefer SHA-256 via Web Crypto (HTTPS required)
+  if (typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.digest === 'function') {
+    try {
+      const encoder = new TextEncoder()
+      const data = encoder.encode(input)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+      return Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+    } catch (err) {
+      console.warn('crypto.subtle failed, falling back to deterministic hash', err)
+    }
+  }
+  // Fallback: deterministic 64-bit-ish hash (cyrb53). Same staff ID -> same hash, so dedup still works.
+  // NOT cryptographic; only used when secure context unavailable (rare on Vercel HTTPS).
+  let h1 = 0xdeadbeef ^ 0, h2 = 0x41c6ce57 ^ 0
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  const hex = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
+  return 'fb_' + hex
 }
 
 const STORAGE_KEY = (campaignCode: string) => `pscs_draft_${campaignCode}`
@@ -421,8 +441,9 @@ export default function SurveyPage() {
       if (typeof window !== 'undefined') window.localStorage.removeItem(STORAGE_KEY(campaignCode))
       setStep('done')
     } catch (e) {
-      console.error(e)
-      setError(t('errSubmit', lang))
+      console.error('PSCS submit error:', e)
+      const msg = e instanceof Error ? e.message : (typeof e === 'object' && e ? JSON.stringify(e) : String(e))
+      setError(`${t('errSubmit', lang)} — ${msg}`)
       setStep('comments')
     }
   }
@@ -477,7 +498,17 @@ export default function SurveyPage() {
       {/* Top bar */}
       <div className="srv-top">
         <div className="srv-top-inner">
-          <div className="srv-brand">HASA UiTM · PSCS {campaign?.code}</div>
+          <div className="srv-brand-block">
+            <img
+              src="/hospital-logo.png"
+              alt="Hospital Al-Sultan Abdullah UiTM"
+              className="srv-logo"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            />
+            <div className="srv-brand-tagline">
+              {lang === 'en' ? 'Patient Safety Culture Survey' : 'Kajian Budaya Keselamatan Pesakit'} · {campaign?.code}
+            </div>
+          </div>
           <div className="srv-lang">
             <button
               className={`srv-lang-pill ${lang === 'en' ? 'active' : ''}`}
@@ -498,17 +529,22 @@ export default function SurveyPage() {
       <main className="srv-main">
         {step === 'welcome' && (
           <Card>
-            <h1 className="srv-h1">{t('welcomeTitle', lang)}</h1>
+            <div className="srv-hero">
+              <div className="srv-hero-emoji">🩺</div>
+              <h1 className="srv-h1">{t('welcomeTitle', lang)}</h1>
+              <p className="srv-hero-sub">{lang === 'en' ? 'Your voice matters' : 'Suara anda penting'}</p>
+            </div>
             <p className="srv-p">{t('welcomeIntro', lang)}</p>
             <div className="srv-callout">
-              <strong>{lang === 'en' ? 'Scale' : 'Skala'}:</strong>
-              <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+              <strong>{lang === 'en' ? 'Response scale' : 'Skala maklum balas'}:</strong>
+              <div className="srv-scale-grid">
                 {(TXT.agreementLabels as readonly { v: number; en: string; ms: string }[]).map((l) => (
-                  <li key={l.v} style={{ color: '#4B5563', fontSize: 13 }}>
-                    <strong>{l.v}</strong> — {lang === 'en' ? l.en : l.ms}
-                  </li>
+                  <div key={l.v} className="srv-scale-item">
+                    <div className="srv-scale-num">{l.v}</div>
+                    <div className="srv-scale-lab">{lang === 'en' ? l.en : l.ms}</div>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
             <p className="srv-note">{t('scaleNote', lang)}</p>
           </Card>
