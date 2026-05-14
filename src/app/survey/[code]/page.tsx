@@ -437,9 +437,16 @@ export default function SurveyPage() {
       const selectedPos = positions.find((p) => p.id === state.positionId)
       const isOther = selectedPos?.name_en === 'Other (please specify)'
 
+      // Generate the response id on the client. This avoids needing a SELECT policy on
+      // pscs_responses for the anon role (RETURNING would otherwise require it under RLS).
+      const responseId = (typeof crypto !== 'undefined' && (crypto as { randomUUID?: () => string }).randomUUID)
+        ? (crypto as { randomUUID: () => string }).randomUUID()
+        : 'r' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+
       const respInsert = await supabase
         .from('pscs_responses')
         .insert({
+          id: responseId,
           campaign_id: campaign.id,
           position_id: state.positionId,
           position_other: isOther ? state.positionOther.trim() : null,
@@ -453,8 +460,6 @@ export default function SurveyPage() {
           response_hash: responseHash,
           language: state.language,
         })
-        .select('id')
-        .single()
 
       if (respInsert.error) {
         // duplicate?
@@ -464,8 +469,6 @@ export default function SurveyPage() {
         }
         throw respInsert.error
       }
-
-      const responseId = respInsert.data.id as string
       const answerRows = Object.entries(state.answers).map(([qid, v]) => ({
         response_id: responseId,
         question_id: qid,
