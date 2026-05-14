@@ -1,0 +1,191 @@
+/* PSCS scoring helpers — mirrors AHRQ SOPS methodology with 0–5 scale.
+ *
+ * Scale: 0 = "Don't Know / Not Applicable" (EXCLUDED), 1 = strongest disagree/never,
+ * 5 = strongest agree/always.
+ *
+ * Positive response:
+ *   - For + items: value 4 or 5
+ *   - For - items: value 1 or 2 (reverse scored)
+ *
+ * Neutral = value 3 (regardless of wording).
+ *
+ * Negative = the inverse of positive.
+ *
+ * 0 (and any null / missing) is always excluded from numerator and denominator.
+ */
+
+import { PscsAnswer, PscsQuestion, Wording } from './types'
+
+/* ---------- per-answer classification ---------- */
+
+export type Bucket = 'positive' | 'neutral' | 'negative' | 'excluded'
+
+export function classify(value: number | null | undefined, wording: Wording): Bucket {
+  if (value === null || value === undefined) return 'excluded'
+  if (value === 0) return 'excluded'
+  if (value === 3) return 'neutral'
+  if (wording === '+') {
+    if (value === 4 || value === 5) return 'positive'
+    if (value === 1 || value === 2) return 'negative'
+  } else {
+    if (value === 1 || value === 2) return 'positive'
+    if (value === 4 || value === 5) return 'negative'
+  }
+  return 'excluded'
+}
+
+/* ---------- per-item stats ---------- */
+
+export interface ItemStats {
+  question_id: string
+  positive: number
+  neutral: number
+  negative: number
+  total: number   // valid (non-excluded)
+  pct_positive: number   // 0..100, unrounded
+  pct_neutral: number
+  pct_negative: number
+}
+
+export function itemStats(
+  q: PscsQuestion,
+  answers: PscsAnswer[],
+): ItemStats {
+  let positive = 0, neutral = 0, negative = 0, excluded = 0
+  for (const a of answers) {
+    if (a.question_id !== q.id) continue
+    const b = classify(a.value, q.wording)
+    if (b === 'positive') positive++
+    else if (b === 'neutral') neutral++
+    else if (b === 'negative') negative++
+    else excluded++
+  }
+  const total = positive + neutral + negative
+  const pct = (n: number) => (total === 0 ? 0 : (n / total) * 100)
+  return {
+    question_id: q.id,
+    positive, neutral, negative, total,
+    pct_positive: pct(positive),
+    pct_neutral: pct(neutral),
+    pct_negative: pct(negative),
+  }
+}
+
+/* ---------- composite stats ---------- */
+
+export interface CompositeStats {
+  composite_code: string
+  items: ItemStats[]
+  score: number | null      // mean of unrounded item % positives, or null if insufficient data
+  itemsWithScore: number    // number of items with ≥3 valid responses
+  itemsTotal: number
+}
+
+const MIN_RESPONSES_PER_ITEM = 3
+
+export function compositeStats(
+  compositeCode: string,
+  questions: PscsQuestion[],
+  answers: PscsAnswer[],
+): CompositeStats {
+  const compQuestions = questions.filter((q) => q.composite_code === compositeCode && q.active)
+  const items = compQuestions.map((q) => itemStats(q, answers))
+  const valid = items.filter((it) => it.total >= MIN_RESPONSES_PER_ITEM)
+  const itemsTotal = items.length
+
+  // AHRQ rule:
+  // - Need at least half of items with scores
+  // - For 3-item composites, need at least 2 of 3
+  // - For all others, half-rounded-up minimum
+  const minNeeded = itemsTotal === 3 ? 2 : Math.ceil(itemsTotal / 2)
+  if (valid.length < minNeeded) {
+    return { composite_code: compositeCode, items, score: null, itemsWithScore: valid.length, itemsTotal }
+  }
+
+  const sum = valid.reduce((s, it) => s + it.pct_positive, 0)
+  return {
+    composite_code: compositeCode,
+    items,
+    score: sum / valid.length,
+    itemsWithScore: valid.length,
+    itemsTotal,
+  }
+}
+
+/* ---------- distribution helpers (D3 events, E1 rating) ---------- */
+
+export interface BucketCount {
+  value: number   // 1..5
+  count: number
+  pct: number     // 0..100
+}
+
+export function distribution(
+  questionId: string,
+  answers: PscsAnswer[],
+  buckets: number[] = [1, 2, 3, 4, 5],
+): { items: BucketCount[]; total: number } {
+  const counts = new Map<number, number>()
+  for (const b of buckets) counts.set(b, 0)
+  let total = 0
+  for (const a of answers) {
+    if (a.question_id !== questionId) continue
+    if (a.value === 0 || a.value === null || a.value === undefined) continue
+    counts.set(a.value, (counts.get(a.value) ?? 0) + 1)
+    total++
+  }
+  const items: BucketCount[] = buckets.map((v) => ({
+    value: v,
+    count: counts.get(v) ?? 0,
+    pct: total === 0 ? 0 : ((counts.get(v) ?? 0) / total) * 100,
+  }))
+  return { items, total }
+}
+
+/* ---------- color band (AHRQ standard) ---------- */
+
+export type Band = 'strength' | 'watch' | 'gap' | 'na'
+
+export function band(pct: number | null): Band {
+  if (pct === null || !Number.isFinite(pct)) return 'na'
+  if (pct >= 75) return 'strength'
+  if (pct >= 50) return 'watch'
+  return 'gap'
+}
+
+export const BAND_COLOR: Record<Band, string> = {
+  strength: '#16A34A',   // green
+  watch:    '#F59E0B',   // amber
+  gap:      '#DC2626',   // red
+  na:       '#9CA3AF',   // grey
+}
+
+export const BAND_LABEL: Record<Band, string> = {
+  strength: 'Strength (≥75%)',
+  watch:    'Watch (50–74%)',
+  gap:      'Gap (<50%)',
+  na:       'Insufficient data',
+}
+
+/* ---------- response filtering ---------- */
+
+export interface ResponseFilter {
+  campaignId?: number
+  positionId?: number
+  positionGroup?: string             // group_en value
+  directorateCode?: string
+  departmentCode?: string
+  subDepartmentCode?: string
+  tenureHospital?: string
+  tenureUnit?: string
+  hoursPerWeek?: string
+  directPatientContact?: boolean
+}
+
+export function answersForResponses<T extends { id: string }>(
+  responses: T[],
+  answers: PscsAnswer[],
+): PscsAnswer[] {
+  const idSet = new Set(responses.map((r) => r.id))
+  return answers.filter((a) => idSet.has(a.response_id))
+}

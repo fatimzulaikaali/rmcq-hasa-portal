@@ -429,3 +429,66 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
   .srv-logo{height:32px;max-width:160px;}
   .srv-hero-emoji{font-size:46px;}
 }
+
+/* ============================================================
+ * PSCS — admin dashboard (/(dashboard)/pscs)
+ * ============================================================ */
+.pscs-page{display:flex;flex-direction:column;gap:12px;}
+.pscs-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+@media (max-width:768px){.pscs-tiles{grid-template-columns:repeat(2,1fr);}}
+.tile{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.tile .tl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;}
+.tile .tv{font-size:24px;font-weight:700;margin-top:4px;line-height:1;}
+
+/* Distribution list */
+.dl{display:flex;flex-direction:column;gap:6px;}
+.dl-row{display:grid;grid-template-columns:200px 1fr 90px;gap:8px;align-items:center;font-size:12px;}
+.dl-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dl-bar{background:#F3F4F6;border-radius:3px;height:14px;overflow:hidden;}
+.dl-fill{height:100%;background:linear-gradient(90deg,#0EA5E9,#14B8A6);transition:width 0.3s;}
+.dl-n{text-align:right;color:var(--muted);font-size:11px;}
+@media (max-width:600px){.dl-row{grid-template-columns:1fr 70px;grid-template-areas:"label n" "bar bar";}.dl-label{grid-area:label;}.dl-bar{grid-area:bar;}.dl-n{grid-area:n;}}
+
+/* Composites table */
+.pscs-comp-table{width:100%;border-collapse:collapse;font-size:13px;}
+.pscs-comp-table th{text-align:left;padding:6px 8px;background:#F9FAFB;border-bottom:2px solid var(--border);font-weight:700;color:#16202E;}
+.pscs-comp-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.custom-tag{display:inline-block;font-size:9px;background:#FEF3C7;color:#92400E;padding:1px 5px;border-radius:8px;margin-left:6px;letter-spacing:0.4px;vertical-align:middle;}
+.cbar{background:#F3F4F6;border-radius:3px;height:18px;overflow:hidden;position:relative;}
+.cbar-fill{height:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#fff;font-size:11px;font-weight:700;transition:width 0.4s;}
+.cbar-num{white-space:nowrap;}
+.cbar-empty{color:var(--muted);font-style:italic;font-size:12px;}
+.pscs-legend{display:flex;gap:18px;margin-top:10px;font-size:11px;color:var(--muted);flex-wrap:wrap;}
+.lg-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle;}
+
+/* Item-level segmented bars */
+.il-row{padding:10px 0;border-bottom:1px solid var(--border);}
+.il-row:last-child{border-bottom:none;}
+.il-meta{display:flex;align-items:flex-start;gap:6px;margin-bottom:5px;font-size:12px;color:#16202E;line-height:1.4;}
+.il-num{display:inline-block;background:#16202E;color:#fff;font-family:monospace;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;flex-shrink:0;}
+.il-rev{display:inline-block;color:#DC2626;font-weight:700;flex-shrink:0;}
+.il-text{flex:1;}
+.il-bar{display:flex;height:18px;border-radius:3px;overflow:hidden;background:#F3F4F6;}
+.il-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;transition:width 0.3s;white-space:nowrap;}
+.il-seg.pos{background:#16A34A;}
+.il-seg.neu{background:#F59E0B;}
+.il-seg.neg{background:#DC2626;}
+.il-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;}
+.il-n{font-size:10px;color:var(--muted);margin-top:3px;text-align:right;}
+
+/* Comments */
+.pscs-search{width:100%;max-width:380px;padding:7px 12px;border:1px solid var(--border);border-radius:var(--rs);font-size:13px;font-family:inherit;margin-bottom:10px;}
+.comments-list{display:flex;flex-direction:column;gap:8px;}
+.comment-card{background:#FAFAFA;border-left:3px solid #0EA5E9;padding:10px 12px;border-radius:4px;}
+.comment-meta{font-size:11px;color:var(--muted);margin-bottom:4px;}
+.comment-body{font-size:13px;line-height:1.5;color:#16202E;white-space:pre-wrap;}
+
+/* Distribution chart card */
+.dc-card{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;}
+.dc-title{font-size:12px;font-weight:700;color:#16202E;margin-bottom:4px;}
+.dc-pct{font-size:14px;font-weight:700;margin-bottom:8px;}
+
+/* Filter field */
+.filter-field{margin-bottom:8px;}
+.filter-field label{display:block;font-size:10px;color:#A8B4C7;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;}
+.filter-field select{width:100%;padding:5px 8px;background:#0F1722;color:#fff;border:1px solid #2A3548;border-radius:4px;font-size:12px;font-family:inherit;}

@@ -185,6 +185,10 @@ export default function IrPage() {
             <span className="nav-icon">📈</span>
             <span>KPI Monitor</span>
           </Link>
+          <Link href="/pscs" className="nav-item">
+            <span className="nav-icon">🛡️</span>
+            <span>Safety Culture</span>
+          </Link>
         </div>
 
         <div className="sb-filters">

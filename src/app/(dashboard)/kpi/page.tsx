@@ -156,6 +156,10 @@ export default function KpiPage() {
             <span className="nav-icon">🩺</span>
             <span>IR Dashboard</span>
           </Link>
+          <Link href="/pscs" className="nav-item">
+            <span className="nav-icon">🛡️</span>
+            <span>Safety Culture</span>
+          </Link>
         </div>
 
         <div className="sb-filters">
