@@ -49,6 +49,7 @@ type Department = {
   name_ms: string
   parent_code: string | null
   is_high_risk: boolean
+  allow_across: boolean
   analysis_group_en: string
   analysis_group_ms: string
   kind: 'directorate' | 'department' | 'subunit'
@@ -381,6 +382,15 @@ export default function SurveyPage() {
     }
     if (!state.directorateCode) { setError(t('errSelectDirectorate', lang)); return }
     if (!state.departmentCode) { setError(t('errSelectDept', lang)); return }
+    // For departments that DON'T allow the "across whole department" option, a sub-unit must be picked
+    {
+      const dep = departments.find((d) => d.code === state.departmentCode)
+      const subs = departments.filter((d) => d.kind === 'subunit' && d.parent_code === state.departmentCode)
+      if (dep && !dep.allow_across && subs.length > 0 && !state.subDepartmentCode) {
+        setError(t('errSelectDept', lang))
+        return
+      }
+    }
     if (!state.tenureHospital || !state.tenureUnit || !state.hoursPerWeek || state.directPatientContact === null) {
       setError(t('errFillAll', lang)); return
     }
@@ -677,34 +687,40 @@ export default function SurveyPage() {
               </div>
             )}
 
-            {/* Sub-unit, only if applicable */}
-            {subUnitsOfSelected.length > 0 && (
-              <div className="srv-field">
-                <label className="srv-label">{t('subDeptLabel', lang)}</label>
-                <div className="srv-radio-group">
-                  <label className="srv-radio">
-                    <input
-                      type="radio"
-                      name="subdept"
-                      checked={state.subDepartmentCode === null}
-                      onChange={() => setState({ ...state, subDepartmentCode: null })}
-                    />
-                    <span>{t('subDeptNone', lang)}</span>
-                  </label>
-                  {subUnitsOfSelected.map((su) => (
-                    <label key={su.code} className="srv-radio">
-                      <input
-                        type="radio"
-                        name="subdept"
-                        checked={state.subDepartmentCode === su.code}
-                        onChange={() => setState({ ...state, subDepartmentCode: su.code })}
-                      />
-                      <span>{lang === 'en' ? su.name_en : su.name_ms}</span>
-                    </label>
-                  ))}
+            {/* Sub-unit, only if applicable. Show "I work across..." option ONLY for depts flagged allow_across */}
+            {subUnitsOfSelected.length > 0 && (() => {
+              const selectedDept = departments.find((d) => d.code === state.departmentCode)
+              const showAcross = selectedDept?.allow_across === true
+              return (
+                <div className="srv-field">
+                  <label className="srv-label">{t('subDeptLabel', lang)}</label>
+                  <div className="srv-radio-group">
+                    {showAcross && (
+                      <label className="srv-radio">
+                        <input
+                          type="radio"
+                          name="subdept"
+                          checked={state.subDepartmentCode === null}
+                          onChange={() => setState({ ...state, subDepartmentCode: null })}
+                        />
+                        <span>{t('subDeptNone', lang)}</span>
+                      </label>
+                    )}
+                    {subUnitsOfSelected.map((su) => (
+                      <label key={su.code} className="srv-radio">
+                        <input
+                          type="radio"
+                          name="subdept"
+                          checked={state.subDepartmentCode === su.code}
+                          onChange={() => setState({ ...state, subDepartmentCode: su.code })}
+                        />
+                        <span>{lang === 'en' ? su.name_en : su.name_ms}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* Tenure in hospital */}
             <div className="srv-field">
