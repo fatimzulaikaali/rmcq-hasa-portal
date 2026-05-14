@@ -51,6 +51,7 @@ type Department = {
   is_high_risk: boolean
   analysis_group_en: string
   analysis_group_ms: string
+  kind: 'directorate' | 'department' | 'subunit'
   sort_order: number
 }
 
@@ -70,6 +71,7 @@ type FormState = {
   staffId: string
   positionId: number | null
   positionOther: string
+  directorateCode: string | null
   departmentCode: string | null
   subDepartmentCode: string | null
   tenureHospital: '<1y' | '1-5y' | '6-10y' | '11+y' | null
@@ -85,6 +87,7 @@ const INITIAL_STATE: FormState = {
   staffId: '',
   positionId: null,
   positionOther: '',
+  directorateCode: null,
   departmentCode: null,
   subDepartmentCode: null,
   tenureHospital: null,
@@ -121,6 +124,7 @@ const TXT = {
   demogTitle:         { en: 'About You',                                       ms: 'Tentang Anda' },
   positionLabel:      { en: 'What is your position in this hospital?',         ms: 'Apakah jawatan anda di hospital ini?' },
   positionOtherLabel: { en: 'Please specify',                                  ms: 'Sila nyatakan' },
+  directorateLabel:   { en: 'Which directorate do you fall under?',           ms: 'Anda di bawah direktorat yang mana?' },
   deptLabel:          { en: 'Which department do you primarily work in?',     ms: 'Anda bekerja di jabatan/unit yang mana?' },
   subDeptLabel:       { en: 'Do you work in a specific sub-unit within this department?', ms: 'Adakah anda bekerja di sub-unit tertentu dalam jabatan ini?' },
   subDeptNone:        { en: 'I work across the whole department',             ms: 'Saya bekerja merentas seluruh jabatan' },
@@ -198,6 +202,7 @@ const TXT = {
   duplicateTitle:     { en: 'Already Submitted',                              ms: 'Sudah Dijawab' },
   duplicateBody:      { en: 'A response from this staff ID has already been recorded for this campaign. Each staff member may only submit once.', ms: 'Maklum balas dari ID kakitangan ini telah direkodkan untuk kempen ini. Setiap kakitangan hanya boleh menjawab sekali sahaja.' },
   errSelectPosition:  { en: 'Please select your position.', ms: 'Sila pilih jawatan anda.' },
+  errSelectDirectorate: { en: 'Please select your directorate.', ms: 'Sila pilih direktorat anda.' },
   errSelectDept:      { en: 'Please select your department.', ms: 'Sila pilih jabatan anda.' },
   errFillAll:         { en: 'Please answer all questions in this section.', ms: 'Sila jawab semua soalan di bahagian ini.' },
   errStaffIdRequired: { en: 'Staff ID is required.', ms: 'ID kakitangan diperlukan.' },
@@ -319,9 +324,13 @@ export default function SurveyPage() {
     () => questions.filter((q) => q.section === currentSection),
     [questions, currentSection],
   )
-  const topLevelDepts = useMemo(() => departments.filter((d) => !d.parent_code), [departments])
+  const directorates = useMemo(() => departments.filter((d) => d.kind === 'directorate'), [departments])
+  const departmentsOfDirectorate = useMemo(
+    () => (state.directorateCode ? departments.filter((d) => d.kind === 'department' && d.parent_code === state.directorateCode) : []),
+    [departments, state.directorateCode],
+  )
   const subUnitsOfSelected = useMemo(
-    () => (state.departmentCode ? departments.filter((d) => d.parent_code === state.departmentCode) : []),
+    () => (state.departmentCode ? departments.filter((d) => d.kind === 'subunit' && d.parent_code === state.departmentCode) : []),
     [departments, state.departmentCode],
   )
 
@@ -351,6 +360,7 @@ export default function SurveyPage() {
     if (state.positionId && positions.find((p) => p.id === state.positionId)?.name_en === 'Other (please specify)' && !state.positionOther.trim()) {
       setError(t('errOtherRequired', lang)); return
     }
+    if (!state.directorateCode) { setError(t('errSelectDirectorate', lang)); return }
     if (!state.departmentCode) { setError(t('errSelectDept', lang)); return }
     if (!state.tenureHospital || !state.tenureUnit || !state.hoursPerWeek || state.directPatientContact === null) {
       setError(t('errFillAll', lang)); return
@@ -596,21 +606,39 @@ export default function SurveyPage() {
               )}
             </div>
 
-            {/* Department */}
+            {/* Directorate */}
             <div className="srv-field">
-              <label className="srv-label">{t('deptLabel', lang)}</label>
+              <label className="srv-label">{t('directorateLabel', lang)}</label>
               <select
                 className="srv-select"
-                value={state.departmentCode ?? ''}
-                onChange={(e) => setState({ ...state, departmentCode: e.target.value || null, subDepartmentCode: null })}>
+                value={state.directorateCode ?? ''}
+                onChange={(e) => setState({ ...state, directorateCode: e.target.value || null, departmentCode: null, subDepartmentCode: null })}>
                 <option value="">—</option>
-                {topLevelDepts.map((d) => (
+                {directorates.map((d) => (
                   <option key={d.code} value={d.code}>
                     {lang === 'en' ? d.name_en : d.name_ms}
                   </option>
                 ))}
               </select>
             </div>
+
+            {/* Department (depends on selected directorate) */}
+            {state.directorateCode && (
+              <div className="srv-field">
+                <label className="srv-label">{t('deptLabel', lang)}</label>
+                <select
+                  className="srv-select"
+                  value={state.departmentCode ?? ''}
+                  onChange={(e) => setState({ ...state, departmentCode: e.target.value || null, subDepartmentCode: null })}>
+                  <option value="">—</option>
+                  {departmentsOfDirectorate.map((d) => (
+                    <option key={d.code} value={d.code}>
+                      {lang === 'en' ? d.name_en : d.name_ms}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Sub-unit, only if applicable */}
             {subUnitsOfSelected.length > 0 && (
