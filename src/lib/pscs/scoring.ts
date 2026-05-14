@@ -51,14 +51,13 @@ export function itemStats(
   q: PscsQuestion,
   answers: PscsAnswer[],
 ): ItemStats {
-  let positive = 0, neutral = 0, negative = 0, excluded = 0
+  let positive = 0, neutral = 0, negative = 0
   for (const a of answers) {
     if (a.question_id !== q.id) continue
     const b = classify(a.value, q.wording)
     if (b === 'positive') positive++
     else if (b === 'neutral') neutral++
     else if (b === 'negative') negative++
-    else excluded++
   }
   const total = positive + neutral + negative
   const pct = (n: number) => (total === 0 ? 0 : (n / total) * 100)
