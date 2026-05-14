@@ -69,6 +69,7 @@ type Campaign = {
 type FormState = {
   language: Lang
   staffId: string
+  positionGroup: string | null
   positionId: number | null
   positionOther: string
   directorateCode: string | null
@@ -85,6 +86,7 @@ type FormState = {
 const INITIAL_STATE: FormState = {
   language: 'en',
   staffId: '',
+  positionGroup: null,
   positionId: null,
   positionOther: '',
   directorateCode: null,
@@ -122,7 +124,8 @@ const TXT = {
   },
   staffIdPlaceholder: { en: 'Enter your staff ID', ms: 'Masukkan ID kakitangan anda' },
   demogTitle:         { en: 'About You',                                       ms: 'Tentang Anda' },
-  positionLabel:      { en: 'What is your position in this hospital?',         ms: 'Apakah jawatan anda di hospital ini?' },
+  positionGroupLabel: { en: 'Which staff group do you belong to?',              ms: 'Anda dari kumpulan kakitangan yang mana?' },
+  positionLabel:      { en: 'What is your specific position?',                  ms: 'Apakah jawatan khusus anda?' },
   positionOtherLabel: { en: 'Please specify',                                  ms: 'Sila nyatakan' },
   directorateLabel:   { en: 'Which directorate do you fall under?',           ms: 'Anda di bawah direktorat yang mana?' },
   deptLabel:          { en: 'Which department do you primarily work in?',     ms: 'Anda bekerja di jabatan/unit yang mana?' },
@@ -201,6 +204,7 @@ const TXT = {
   doneBody:           { en: 'Your response has been submitted. Your feedback helps improve patient safety culture at our hospital.', ms: 'Maklum balas anda telah dihantar. Pendapat anda membantu menambah baik budaya keselamatan pesakit di hospital kami.' },
   duplicateTitle:     { en: 'Already Submitted',                              ms: 'Sudah Dijawab' },
   duplicateBody:      { en: 'A response from this staff ID has already been recorded for this campaign. Each staff member may only submit once.', ms: 'Maklum balas dari ID kakitangan ini telah direkodkan untuk kempen ini. Setiap kakitangan hanya boleh menjawab sekali sahaja.' },
+  errSelectPositionGroup: { en: 'Please select your staff group.', ms: 'Sila pilih kumpulan kakitangan anda.' },
   errSelectPosition:  { en: 'Please select your position.', ms: 'Sila pilih jawatan anda.' },
   errSelectDirectorate: { en: 'Please select your directorate.', ms: 'Sila pilih direktorat anda.' },
   errSelectDept:      { en: 'Please select your department.', ms: 'Sila pilih jabatan anda.' },
@@ -324,6 +328,20 @@ export default function SurveyPage() {
     () => questions.filter((q) => q.section === currentSection),
     [questions, currentSection],
   )
+  // Position groups in insertion order (first occurrence per group_en)
+  const positionGroups = useMemo(() => {
+    const seen = new Set<string>()
+    const out: { group_en: string; group_ms: string }[] = []
+    for (const p of positions) {
+      if (!seen.has(p.group_en)) { seen.add(p.group_en); out.push({ group_en: p.group_en, group_ms: p.group_ms }) }
+    }
+    return out
+  }, [positions])
+  const positionsOfGroup = useMemo(
+    () => (state.positionGroup ? positions.filter((p) => p.group_en === state.positionGroup) : []),
+    [positions, state.positionGroup],
+  )
+
   const directorates = useMemo(() => departments.filter((d) => d.kind === 'directorate'), [departments])
   const departmentsOfDirectorate = useMemo(
     () => (state.directorateCode ? departments.filter((d) => d.kind === 'department' && d.parent_code === state.directorateCode) : []),
@@ -356,6 +374,7 @@ export default function SurveyPage() {
     setStep('demographics')
   }
   const goDemographicsNext = () => {
+    if (!state.positionGroup) { setError(t('errSelectPositionGroup', lang)); return }
     if (!state.positionId) { setError(t('errSelectPosition', lang)); return }
     if (state.positionId && positions.find((p) => p.id === state.positionId)?.name_en === 'Other (please specify)' && !state.positionOther.trim()) {
       setError(t('errOtherRequired', lang)); return
@@ -580,31 +599,49 @@ export default function SurveyPage() {
           <Card>
             <h2 className="srv-h2">{t('demogTitle', lang)}</h2>
 
-            {/* Position */}
+            {/* Position Group */}
             <div className="srv-field">
-              <label className="srv-label">{t('positionLabel', lang)}</label>
+              <label className="srv-label">{t('positionGroupLabel', lang)}</label>
               <select
                 className="srv-select"
-                value={state.positionId ?? ''}
-                onChange={(e) => setState({ ...state, positionId: e.target.value ? Number(e.target.value) : null })}>
+                value={state.positionGroup ?? ''}
+                onChange={(e) => setState({ ...state, positionGroup: e.target.value || null, positionId: null, positionOther: '' })}>
                 <option value="">—</option>
-                {positions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {lang === 'en' ? p.name_en : p.name_ms}
+                {positionGroups.map((g) => (
+                  <option key={g.group_en} value={g.group_en}>
+                    {lang === 'en' ? g.group_en : g.group_ms}
                   </option>
                 ))}
               </select>
-              {state.positionId && positions.find((p) => p.id === state.positionId)?.name_en === 'Other (please specify)' && (
-                <input
-                  type="text"
-                  className="srv-input"
-                  style={{ marginTop: 8 }}
-                  value={state.positionOther}
-                  onChange={(e) => setState({ ...state, positionOther: e.target.value })}
-                  placeholder={t('positionOtherLabel', lang)}
-                />
-              )}
             </div>
+
+            {/* Position (depends on selected group) */}
+            {state.positionGroup && (
+              <div className="srv-field">
+                <label className="srv-label">{t('positionLabel', lang)}</label>
+                <select
+                  className="srv-select"
+                  value={state.positionId ?? ''}
+                  onChange={(e) => setState({ ...state, positionId: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">—</option>
+                  {positionsOfGroup.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {lang === 'en' ? p.name_en : p.name_ms}
+                    </option>
+                  ))}
+                </select>
+                {state.positionId && positions.find((p) => p.id === state.positionId)?.name_en === 'Other (please specify)' && (
+                  <input
+                    type="text"
+                    className="srv-input"
+                    style={{ marginTop: 8 }}
+                    value={state.positionOther}
+                    onChange={(e) => setState({ ...state, positionOther: e.target.value })}
+                    placeholder={t('positionOtherLabel', lang)}
+                  />
+                )}
+              </div>
+            )}
 
             {/* Directorate */}
             <div className="srv-field">
