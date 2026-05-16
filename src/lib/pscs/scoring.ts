@@ -14,7 +14,7 @@
  * 0 (and any null / missing) is always excluded from numerator and denominator.
  */
 
-import { PscsAnswer, PscsQuestion, Wording } from './types'
+import { PscsAnswer, PscsComposite, PscsQuestion, Wording } from './types'
 
 /* ---------- per-answer classification ---------- */
 
@@ -187,4 +187,78 @@ export function answersForResponses<T extends { id: string }>(
 ): PscsAnswer[] {
   const idSet = new Set(responses.map((r) => r.id))
   return answers.filter((a) => idSet.has(a.response_id))
+}
+
+/* ---------- group-by-cohort breakdown matrix ---------- */
+/*
+ * Given a list of "groups" (each a labelled bucket of responses), produce one
+ * row per group with:
+ *   - n         : number of responses in the group
+ *   - perComposite: Map<composite_code, score|null>  (null = insufficient data)
+ *   - overall   : mean of available composite scores, or null
+ *   - suppressed: true when n < minResponses (UI should hide the numbers but
+ *                 keep the row visible so the user knows the group exists)
+ *
+ * Per-item / per-composite suppression continues to use the existing AHRQ
+ * MIN_RESPONSES_PER_ITEM rule inside compositeStats(); the group-level
+ * minResponses is an additional privacy guard against tiny cohorts.
+ */
+
+export interface BreakdownGroup<T extends { id: string }> {
+  key: string
+  label_en: string
+  label_ms: string
+  responses: T[]
+  meta?: Record<string, string | number | boolean | null>
+}
+
+export interface BreakdownRow {
+  key: string
+  label_en: string
+  label_ms: string
+  n: number
+  suppressed: boolean
+  perComposite: Map<string, number | null>
+  overall: number | null
+  meta?: Record<string, string | number | boolean | null>
+}
+
+const DEFAULT_GROUP_MIN_RESPONSES = 3
+
+export function breakdownMatrix<T extends { id: string }>(
+  groups: BreakdownGroup<T>[],
+  composites: PscsComposite[],
+  questions: PscsQuestion[],
+  answers: PscsAnswer[],
+  minResponses: number = DEFAULT_GROUP_MIN_RESPONSES,
+): BreakdownRow[] {
+  return groups.map((g) => {
+    const n = g.responses.length
+    const suppressed = n < minResponses
+    const perComposite = new Map<string, number | null>()
+    let overall: number | null = null
+
+    if (!suppressed) {
+      const groupAnswers = answersForResponses(g.responses, answers)
+      const scoresForAvg: number[] = []
+      for (const c of composites) {
+        if (c.is_rating) continue
+        const s = compositeStats(c.code, questions, groupAnswers).score
+        perComposite.set(c.code, s)
+        if (s !== null) scoresForAvg.push(s)
+      }
+      overall = scoresForAvg.length === 0 ? null : scoresForAvg.reduce((a, b) => a + b, 0) / scoresForAvg.length
+    }
+
+    return {
+      key: g.key,
+      label_en: g.label_en,
+      label_ms: g.label_ms,
+      n,
+      suppressed,
+      perComposite,
+      overall,
+      meta: g.meta,
+    }
+  })
 }
