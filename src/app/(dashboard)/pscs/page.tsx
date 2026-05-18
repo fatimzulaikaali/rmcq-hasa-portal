@@ -481,7 +481,7 @@ function ItemLevelTab({ responses, answers, questions, composites, language }: {
 
 /* ======================== TAB 4 — BREAKDOWNS ======================== */
 
-type CompareAxis = 'department' | 'subunit' | 'posgroup' | 'position' | 'tenure' | 'contact'
+type CompareAxis = 'department' | 'subunit' | 'posgroup' | 'position' | 'tenure' | 'hours' | 'contact'
 type ViewMode   = 'composites' | 'events'
 type ContactFilter = 'all' | 'yes' | 'no'
 
@@ -492,12 +492,13 @@ interface BreakdownFilters {
   posgroup:    string          // 'all' | group_en
   position:    string          // 'all' | position_id as string
   tenure:      string          // 'all' | tenure_hospital value
+  hours:       string          // 'all' | hours_per_week value ('<30','30-40','>40')
   contact:     ContactFilter
 }
 
 const EMPTY_FILTERS: BreakdownFilters = {
   directorate: 'all', department: 'all', subunit: 'all',
-  posgroup: 'all', position: 'all', tenure: 'all', contact: 'all',
+  posgroup: 'all', position: 'all', tenure: 'all', hours: 'all', contact: 'all',
 }
 
 const TENURE_OPTIONS: { key: string; en: string; ms: string }[] = [
@@ -507,12 +508,20 @@ const TENURE_OPTIONS: { key: string; en: string; ms: string }[] = [
   { key: '11+y',  en: '11+ years',        ms: '11+ tahun' },
 ]
 
+// Working hours per week — labels match the survey form exactly.
+const HOURS_OPTIONS: { key: string; en: string; ms: string }[] = [
+  { key: '<30',   en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
+  { key: '30-40', en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
+  { key: '>40',   en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+]
+
 const COMPARE_OPTIONS: { id: CompareAxis; en: string; ms: string }[] = [
   { id: 'department', en: 'Department',     ms: 'Jabatan' },
   { id: 'subunit',    en: 'Sub-unit',       ms: 'Sub-unit' },
   { id: 'posgroup',   en: 'Position Group', ms: 'Kumpulan Kakitangan' },
   { id: 'position',   en: 'Position',       ms: 'Jawatan' },
   { id: 'tenure',     en: 'Tenure',         ms: 'Tempoh di Hospital' },
+  { id: 'hours',      en: 'Working Hours',  ms: 'Waktu Bekerja' },
   { id: 'contact',    en: 'Patient Contact', ms: 'Interaksi Pesakit' },
 ]
 
@@ -604,6 +613,7 @@ function BreakdownsTab({
     }
     if (filters.position !== 'all' && String(r.position_id ?? '') !== filters.position) return false
     if (filters.tenure !== 'all' && r.tenure_hospital !== filters.tenure) return false
+    if (filters.hours  !== 'all' && r.hours_per_week  !== filters.hours)  return false
     if (filters.contact === 'yes' && r.direct_patient_contact !== true)  return false
     if (filters.contact === 'no'  && r.direct_patient_contact !== false) return false
     return true
@@ -674,6 +684,17 @@ function BreakdownsTab({
       const byKey = new Map<string, PscsResponse[]>()
       for (const r of filteredResponses) {
         const k = r.tenure_hospital ?? '__none__'
+        if (!byKey.has(k)) byKey.set(k, [])
+        byKey.get(k)!.push(r)
+      }
+      return order.filter((o) => byKey.has(o.key))
+        .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
+    }
+    if (compareBy === 'hours') {
+      const order = [...HOURS_OPTIONS, { key: '__none__', en: 'Not specified', ms: 'Tidak dinyatakan' }]
+      const byKey = new Map<string, PscsResponse[]>()
+      for (const r of filteredResponses) {
+        const k = r.hours_per_week ?? '__none__'
         if (!byKey.has(k)) byKey.set(k, [])
         byKey.get(k)!.push(r)
       }
@@ -783,6 +804,15 @@ function BreakdownsTab({
             options={[
               { value: 'all', label: language === 'en' ? 'All' : 'Semua' },
               ...TENURE_OPTIONS.map((t) => ({ value: t.key, label: language === 'en' ? t.en : t.ms })),
+            ]}
+          />
+          <FilterSelect
+            label={language === 'en' ? 'Working Hours' : 'Waktu Bekerja'}
+            value={filters.hours}
+            onChange={(v) => setFilter('hours', v)}
+            options={[
+              { value: 'all', label: language === 'en' ? 'All' : 'Semua' },
+              ...HOURS_OPTIONS.map((h) => ({ value: h.key, label: language === 'en' ? h.en : h.ms })),
             ]}
           />
           <FilterSelect
