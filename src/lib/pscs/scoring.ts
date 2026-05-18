@@ -1,28 +1,63 @@
 /* PSCS scoring helpers — mirrors AHRQ SOPS methodology with 0–5 scale.
  *
- * Scale: 0 = "Don't Know / Not Applicable" (EXCLUDED), 1 = strongest disagree/never,
- * 5 = strongest agree/always.
+ * Scale (for Agreement / Frequency items): 0 = "Don't Know / Not Applicable"
+ * (EXCLUDED), 1 = strongest disagree/never, 5 = strongest agree/always.
  *
- * Positive response:
+ * Positive response (Agreement / Frequency):
  *   - For + items: value 4 or 5
  *   - For - items: value 1 or 2 (reverse scored)
+ *   - Neutral = value 3 (regardless of wording).
  *
- * Neutral = value 3 (regardless of wording).
+ * Special-case scales:
+ *   - EventCount (D3 "How many events have you reported in past 12 months"):
+ *       1 = None, 2 = 1–2, 3 = 3–5, 4 = 6–10, 5 = 11 or more.
+ *       Per AHRQ: "% positive" for D3 = % who reported ≥ 1 event.
+ *       So value 1 = negative, values 2–5 = positive, no neutral category.
+ *       Reporting culture is the positive trait — actively reporting events
+ *       signals psychological safety, not the absence of events.
  *
- * Negative = the inverse of positive.
+ *   - Rating (E1 "Patient Safety Rating"):
+ *       1 = Poor, 2 = Fair, 3 = Good, 4 = Very Good, 5 = Excellent.
+ *       "% positive" = Very Good or Excellent (values 4–5). Currently E1 is
+ *       excluded from regular composite scoring (RATING composite has
+ *       is_rating=true) and rendered separately by the dashboard.
  *
  * 0 (and any null / missing) is always excluded from numerator and denominator.
  */
 
-import { PscsAnswer, PscsComposite, PscsQuestion, Wording } from './types'
+import { PscsAnswer, PscsComposite, PscsQuestion, ScaleType, Wording } from './types'
 
 /* ---------- per-answer classification ---------- */
 
 export type Bucket = 'positive' | 'neutral' | 'negative' | 'excluded'
 
-export function classify(value: number | null | undefined, wording: Wording): Bucket {
+export function classify(
+  value: number | null | undefined,
+  wording: Wording,
+  scaleType: ScaleType = 'Agreement',
+): Bucket {
   if (value === null || value === undefined) return 'excluded'
   if (value === 0) return 'excluded'
+
+  // EventCount (D3) — wording is '+' but the scale is "how many events
+  // reported". AHRQ defines "% positive" as reported ≥ 1 event, so:
+  if (scaleType === 'EventCount') {
+    if (value === 1) return 'negative'     // None
+    if (value >= 2 && value <= 5) return 'positive'  // 1+ events reported
+    return 'excluded'
+  }
+
+  // Rating (E1) — Very Good / Excellent = positive, Good = neutral, Poor/Fair = negative.
+  // E1's composite is is_rating=true so this branch rarely runs through itemStats,
+  // but kept here for completeness so classify() works correctly if called directly.
+  if (scaleType === 'Rating') {
+    if (value === 4 || value === 5) return 'positive'
+    if (value === 3) return 'neutral'
+    if (value === 1 || value === 2) return 'negative'
+    return 'excluded'
+  }
+
+  // Default Agreement / Frequency scale: 1–2 / 3 / 4–5 with wording-aware inversion
   if (value === 3) return 'neutral'
   if (wording === '+') {
     if (value === 4 || value === 5) return 'positive'
@@ -54,7 +89,7 @@ export function itemStats(
   let positive = 0, neutral = 0, negative = 0
   for (const a of answers) {
     if (a.question_id !== q.id) continue
-    const b = classify(a.value, q.wording)
+    const b = classify(a.value, q.wording, q.scale_type)
     if (b === 'positive') positive++
     else if (b === 'neutral') neutral++
     else if (b === 'negative') negative++
