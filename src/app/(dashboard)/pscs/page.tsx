@@ -2137,12 +2137,6 @@ function ReportCrossTabs({
     // 'Department' only makes sense at hospital/directorate scope (a dept
     // report is by definition one department). 'Sub-unit' only at dept scope.
     appliesAtScope?: (scope: ReportScope) => boolean
-    // Whether to widen the column set with cohorts that exist hospital-wide
-    // but not in scope. True for demographic axes (Position, Tenure, etc.)
-    // where seeing the hospital benchmark for an absent cohort is useful.
-    // False for structural axes (Department, Sub-unit) where the dept/sub-unit
-    // is fully contained — adding other depts would leak unrelated data.
-    includeHospitalOnlyCols?: boolean
   }
 
   const deptHasSubunits = scope.kind === 'department' && departments.some(
@@ -2160,7 +2154,6 @@ function ReportCrossTabs({
         return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
       },
       appliesAtScope: (s) => s.kind === 'all' || s.kind === 'directorate',
-      includeHospitalOnlyCols: false,
     },
     {
       key: 'subunit',
@@ -2172,7 +2165,6 @@ function ReportCrossTabs({
         return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
       },
       appliesAtScope: () => deptHasSubunits,
-      includeHospitalOnlyCols: false,
     },
     {
       key: 'posgroup',
@@ -2261,14 +2253,13 @@ function ReportCrossTabs({
       hospByKey.get(k)!.push(r)
     }
 
-    // Union of scope + (hospital only when benchmark is being rendered AND
-    // this axis benefits from hospital-only columns). For structural axes
-    // (Department, Sub-unit), the dept/sub-unit is fully contained — adding
-    // other dept columns would leak unrelated data the report shouldn't show.
+    // Columns are driven strictly by cohorts present in `scoped` — we never
+    // invent columns for cohorts that have zero scope respondents. The
+    // benchmark comparison is delivered by the Hospital sub-row for the
+    // SAME cohort (e.g. "Medical Officer in Medicine" vs "Medical Officer
+    // across the hospital"), not by adding a Specialist column to a report
+    // that has no Specialists.
     const keySet = new Set<string>(Array.from(scopeByKey.keys()))
-    if (showBenchmark && def.includeHospitalOnlyCols !== false) {
-      for (const k of Array.from(hospByKey.keys())) keySet.add(k)
-    }
 
     // Render rules:
     //   - whole hospital report (showBenchmark=false): need ≥2 cohorts for
