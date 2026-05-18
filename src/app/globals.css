@@ -221,6 +221,12 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .rc-xmatrix .rc-xcomp-name{display:inline;font-weight:600;font-size:9.5px;color:#16202E;}
 .rc-xmatrix .rc-xcomp-code{display:block;font-family:monospace;font-size:8px;color:var(--muted);margin-top:1px;}
 
+/* Item-level cross-tab table */
+.rc-itemxt tbody .rc-itemxt-comp td{background:#B7CBE3;color:#16202E;font-size:9.5px;padding:3px 6px;}
+.rc-itemxt .rc-xleft{font-size:9px;line-height:1.3;}
+.rc-itemxt-id{display:inline-block;font-family:monospace;font-size:8px;font-weight:700;background:#16202E;color:#fff;padding:1px 4px;border-radius:3px;margin-right:5px;vertical-align:middle;}
+.rc-itemxt-text{display:inline;font-size:9px;}
+
 .rc-comp{width:100%;border-collapse:collapse;font-size:11px;}
 .rc-comp th{text-align:left;padding:5px 7px;background:#F3F4F6;border-bottom:2px solid var(--border);font-weight:700;font-size:9.5px;color:#16202E;text-transform:uppercase;letter-spacing:.03em;}
 .rc-comp td{padding:6px 7px;border-bottom:1px solid var(--border);vertical-align:middle;}

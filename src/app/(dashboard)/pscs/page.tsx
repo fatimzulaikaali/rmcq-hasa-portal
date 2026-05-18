@@ -1397,6 +1397,19 @@ function PscsReport({
         departments={departments}
         language={language}
       />
+      <ReportItemCrossTabs
+        scope={scope}
+        scopeName={scopeNameStr}
+        scoped={scoped}
+        hospitalResponses={campResponses}
+        allAnswers={allAnswers}
+        showBenchmark={showBenchmark}
+        questions={questions}
+        composites={composites}
+        positions={positions}
+        departments={departments}
+        language={language}
+      />
       <ReportMethodology language={language} />
     </>
   )
@@ -2497,6 +2510,359 @@ function ReportCrossTabPage({
       </div>
       <ReportFooter language={language} />
     </div>
+  )
+}
+
+/* ----- Page(s): Item-level cross-tabs ----- */
+/*
+ * Per-item % positive broken down by cohort.
+ *
+ * Hospital-wide report includes 4 axes:
+ *   Department, Sub-unit, Position Group, Staff Position
+ *
+ * Department/sub-unit report includes 2 axes (only the ones meaningful at
+ * that scope):
+ *   Sub-unit (only if the department has sub-units), Staff Position
+ *
+ * Per item × cohort cell shows % positive. For dept reports each item gets
+ * two sub-rows (This Scope vs Hospital benchmark for the same cohort).
+ * Columns are scope-only — we never invent columns for cohorts with no
+ * scope respondents. Wide axes are paginated by columns (COLS_PER_PAGE).
+ */
+
+function ReportItemCrossTabs({
+  scope, scopeName, scoped, hospitalResponses, allAnswers, showBenchmark, questions, composites, positions, departments, language,
+}: {
+  scope: ReportScope
+  scopeName: string
+  scoped: PscsResponse[]
+  hospitalResponses: PscsResponse[]
+  allAnswers: PscsAnswer[]
+  showBenchmark: boolean
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
+  language: 'en' | 'ms'
+}) {
+  const posById = useMemo(() => {
+    const m = new Map<number, PscsPosition>()
+    for (const p of positions) m.set(p.id, p)
+    return m
+  }, [positions])
+  const deptByCode = useMemo(() => {
+    const m = new Map<string, PscsDepartment>()
+    for (const d of departments) m.set(d.code, d)
+    return m
+  }, [departments])
+
+  type KeyDef = {
+    key: string
+    title_en: string
+    title_ms: string
+    keyOf: (r: PscsResponse) => string | null
+    labelOf: (k: string) => { en: string; ms: string }
+    order?: (a: string, b: string) => number
+    wantedAtScope: (s: ReportScope) => boolean
+  }
+
+  const deptHasSubunits = scope.kind === 'department' && departments.some(
+    (d) => d.kind === 'subunit' && d.parent_code === scope.code,
+  )
+
+  // Hospital scope wants: Department, Sub-unit, Position Group, Position
+  // Dept    scope wants: Sub-unit (if dept has sub-units), Position
+  const keyDefs: KeyDef[] = [
+    {
+      key: 'department',
+      title_en: 'By Department',
+      title_ms: 'Mengikut Jabatan',
+      keyOf: (r) => r.department_code ?? null,
+      labelOf: (k) => {
+        const d = deptByCode.get(k)
+        return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
+      },
+      wantedAtScope: (s) => s.kind === 'all',
+    },
+    {
+      key: 'subunit',
+      title_en: 'By Sub-unit',
+      title_ms: 'Mengikut Sub-unit',
+      keyOf: (r) => r.sub_department_code ?? null,
+      labelOf: (k) => {
+        const d = deptByCode.get(k)
+        return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
+      },
+      wantedAtScope: (s) => s.kind === 'all' || (s.kind === 'department' && deptHasSubunits),
+    },
+    {
+      key: 'posgroup',
+      title_en: 'By Position Group',
+      title_ms: 'Mengikut Kumpulan Kakitangan',
+      keyOf: (r) => {
+        const p = r.position_id ? posById.get(r.position_id) : null
+        return p?.group_en ?? null
+      },
+      labelOf: (k) => {
+        const p = positions.find((x) => x.group_en === k)
+        return { en: p?.group_en ?? k, ms: p?.group_ms ?? k }
+      },
+      wantedAtScope: (s) => s.kind === 'all',
+    },
+    {
+      key: 'position',
+      title_en: 'By Staff Position',
+      title_ms: 'Mengikut Jawatan',
+      keyOf: (r) => (r.position_id != null ? String(r.position_id) : null),
+      labelOf: (k) => {
+        const p = posById.get(parseInt(k, 10))
+        return { en: p?.name_en ?? k, ms: p?.name_ms ?? k }
+      },
+      wantedAtScope: () => true,
+    },
+  ]
+
+  type ItemAxis = {
+    key: string; title_en: string; title_ms: string
+    groups: CtGroup[]
+  }
+
+  const axes: ItemAxis[] = keyDefs.map((def) => {
+    if (!def.wantedAtScope(scope)) return null
+    const scopeByKey = new Map<string, PscsResponse[]>()
+    for (const r of scoped) {
+      const k = def.keyOf(r); if (k === null) continue
+      if (!scopeByKey.has(k)) scopeByKey.set(k, [])
+      scopeByKey.get(k)!.push(r)
+    }
+    if (scopeByKey.size === 0) return null
+    const hospByKey = new Map<string, PscsResponse[]>()
+    for (const r of hospitalResponses) {
+      const k = def.keyOf(r); if (k === null) continue
+      if (!hospByKey.has(k)) hospByKey.set(k, [])
+      hospByKey.get(k)!.push(r)
+    }
+    const keys = Array.from(scopeByKey.keys())
+    if (def.order) keys.sort(def.order)
+    else keys.sort((a, b) => (scopeByKey.get(b)?.length ?? 0) - (scopeByKey.get(a)?.length ?? 0))
+    const groups: CtGroup[] = keys.map((k) => {
+      const lab = def.labelOf(k)
+      return {
+        key: k,
+        label_en: lab.en,
+        label_ms: lab.ms,
+        scopedResponses: scopeByKey.get(k) ?? [],
+        hospitalResponses: hospByKey.get(k) ?? [],
+      }
+    })
+    return { key: def.key, title_en: def.title_en, title_ms: def.title_ms, groups }
+  }).filter((a): a is ItemAxis => a !== null)
+
+  if (axes.length === 0) return null
+
+  // Paginate by column-width (items per page = all 34; columns per page = 5)
+  const COLS_PER_PAGE = 5
+  const pages: { axis: ItemAxis; cols: CtGroup[]; pageNum: number; totalPages: number }[] = []
+  for (const axis of axes) {
+    const totalPages = Math.max(1, Math.ceil(axis.groups.length / COLS_PER_PAGE))
+    for (let i = 0; i < totalPages; i++) {
+      pages.push({
+        axis,
+        cols: axis.groups.slice(i * COLS_PER_PAGE, (i + 1) * COLS_PER_PAGE),
+        pageNum: i + 1,
+        totalPages,
+      })
+    }
+  }
+
+  return (
+    <>
+      {pages.map((p, idx) => (
+        <ReportItemCrossTabPage
+          key={`item-${p.axis.key}-${p.pageNum}-${idx}`}
+          title={language === 'en' ? p.axis.title_en : p.axis.title_ms}
+          scopeName={scopeName}
+          cols={p.cols}
+          pageNum={p.pageNum}
+          totalPages={p.totalPages}
+          composites={composites}
+          questions={questions}
+          allAnswers={allAnswers}
+          showBenchmark={showBenchmark}
+          language={language}
+        />
+      ))}
+    </>
+  )
+}
+
+function ReportItemCrossTabPage({
+  title, scopeName, cols, pageNum, totalPages, composites, questions, allAnswers, showBenchmark, language,
+}: {
+  title: string
+  scopeName: string
+  cols: CtGroup[]
+  pageNum: number
+  totalPages: number
+  composites: PscsComposite[]
+  questions: PscsQuestion[]
+  allAnswers: PscsAnswer[]
+  showBenchmark: boolean
+  language: 'en' | 'ms'
+}) {
+  const compsForGroups = composites.filter((c) => !c.is_rating)
+
+  // Pre-compute per-(item × cohort) % positive for scope and hospital cohorts
+  const colData = useMemo(() => cols.map((col) => {
+    const scopedAns = answersForResponses(col.scopedResponses, allAnswers)
+    const hospAns   = answersForResponses(col.hospitalResponses, allAnswers)
+    return {
+      col,
+      scopeN: col.scopedResponses.length,
+      hospN:  col.hospitalResponses.length,
+      scopedAns,
+      hospAns,
+    }
+  }), [cols, allAnswers])
+
+  function pctCell(q: PscsQuestion, answers: PscsAnswer[], cohortN: number): React.ReactNode {
+    if (cohortN < 3) return <span style={{ color: 'var(--muted)', fontSize: 8, fontStyle: 'italic' }}>small n</span>
+    const s = itemStats(q, answers)
+    if (s.total < 3) return <span style={{ color: 'var(--muted)' }}>—</span>
+    return <span style={{ color: BAND_COLOR[band(s.pct_positive)], fontWeight: 700 }}>{Math.round(s.pct_positive)}%</span>
+  }
+
+  const scopeLabel = language === 'en' ? 'This Scope' : 'Skop Ini'
+  const hospLabel  = language === 'en' ? 'Hospital'   : 'Hospital'
+  const datasetHeader = language === 'en' ? 'Dataset'  : 'Set Data'
+
+  // Items per page: if there's only one cohort column with single-row, fit all items.
+  // For multi-column or dual-row, paginate items to keep each page printable.
+  // Conservative: 18 items per page when dual-row, 30 when single-row.
+  const ITEMS_PER_PAGE = showBenchmark ? 18 : 30
+  const allItems: { composite: PscsComposite; q: PscsQuestion }[] = []
+  for (const c of compsForGroups) {
+    const qs = questions.filter((q) => q.composite_code === c.code && q.active)
+      .sort((a, b) => a.sort_order - b.sort_order)
+    for (const q of qs) allItems.push({ composite: c, q })
+  }
+  const itemChunks: typeof allItems[] = []
+  for (let i = 0; i < allItems.length; i += ITEMS_PER_PAGE) {
+    itemChunks.push(allItems.slice(i, i + ITEMS_PER_PAGE))
+  }
+
+  return (
+    <>
+      {itemChunks.map((chunk, chunkIdx) => {
+        const pageTitle = `${title}${totalPages > 1 ? ` (${language === 'en' ? 'page' : 'm/s'} ${pageNum} ${language === 'en' ? 'of' : 'dari'} ${totalPages})` : ''}${itemChunks.length > 1 ? ` · ${language === 'en' ? 'items' : 'item'} ${chunkIdx + 1}/${itemChunks.length}` : ''}`
+        // Track current composite to insert composite header rows when it changes
+        let lastCompCode: string | null = null
+        return (
+          <div className="rc-page" key={`itemxt-page-${chunkIdx}`}>
+            <div className="rc-h">
+              <div className="t1">
+                {language === 'en' ? 'Survey Item % Positive — ' : '% Positif Item — '}{pageTitle}
+              </div>
+              <div className="t2">{scopeName}</div>
+            </div>
+            <div className="rc-section">
+              <table className="rc-xmatrix rc-itemxt">
+                <colgroup>
+                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '10%' }} />
+                  {cols.map((c) => <col key={c.key} />)}
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th rowSpan={2} className="rc-xleft">{language === 'en' ? 'Survey Item' : 'Item Tinjauan'}</th>
+                    <th rowSpan={2} className="rc-xds">{datasetHeader}</th>
+                    <th colSpan={cols.length} className="rc-xgrouphdr">{title}</th>
+                  </tr>
+                  <tr>
+                    {cols.map((c) => (
+                      <th key={c.key} className="rc-xcol" title={language === 'en' ? c.label_en : c.label_ms}>
+                        {language === 'en' ? c.label_en : c.label_ms}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Respondent counts — same dual/single-row pattern */}
+                  <tr className="rc-xcount-row">
+                    <td className="rc-xleft"><b>{language === 'en' ? '# Respondents' : 'Bil. Respondent'}</b></td>
+                    <td className="rc-xds">{showBenchmark ? scopeLabel : (language === 'en' ? 'Your Hospital' : 'Hospital Anda')}</td>
+                    {colData.map((d) => (
+                      <td key={d.col.key} className="rc-xcount">{d.scopeN}</td>
+                    ))}
+                  </tr>
+                  {showBenchmark && (
+                    <tr className="rc-xcount-row">
+                      <td className="rc-xleft" />
+                      <td className="rc-xds">{hospLabel}</td>
+                      {colData.map((d) => (
+                        <td key={d.col.key} className="rc-xcount" style={{ color: 'var(--muted)' }}>{d.hospN}</td>
+                      ))}
+                    </tr>
+                  )}
+
+                  {chunk.map(({ composite, q }) => {
+                    const compHeader = composite.code !== lastCompCode
+                      ? (
+                        <tr key={`comphdr-${composite.code}`} className="rc-itemxt-comp">
+                          <td colSpan={2 + cols.length}>
+                            <b>{composite.code}</b> · {language === 'en' ? composite.name_en : composite.name_ms}
+                          </td>
+                        </tr>
+                      ) : null
+                    if (composite.code !== lastCompCode) lastCompCode = composite.code
+                    return (
+                      <React.Fragment key={q.id}>
+                        {compHeader}
+                        <tr className="rc-xcomp-row">
+                          <td className="rc-xleft" rowSpan={showBenchmark ? 2 : 1}>
+                            <span className="rc-itemxt-id">{q.id}{q.wording === '-' && <span style={{ color: 'var(--red)', marginLeft: 2 }}>−</span>}</span>
+                            <span className="rc-itemxt-text">{language === 'en' ? q.text_en : q.text_ms}</span>
+                          </td>
+                          <td className="rc-xds">{showBenchmark ? scopeLabel : (language === 'en' ? 'Your Hospital' : 'Hospital Anda')}</td>
+                          {colData.map((d) => (
+                            <td key={d.col.key} className="rc-xcell">
+                              {pctCell(q, d.scopedAns, d.scopeN)}
+                            </td>
+                          ))}
+                        </tr>
+                        {showBenchmark && (
+                          <tr className="rc-xcomp-row rc-xhosp-row">
+                            <td className="rc-xds">{hospLabel}</td>
+                            {colData.map((d) => (
+                              <td key={d.col.key} className="rc-xcell">
+                                {pctCell(q, d.hospAns, d.hospN)}
+                              </td>
+                            ))}
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+
+              <div className="rc-legend" style={{ marginTop: 6 }}>
+                <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.strength }} /> ≥ 75%</span>
+                <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.watch }} /> 50–74%</span>
+                <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.gap }} /> &lt; 50%</span>
+                <span style={{ color: 'var(--muted)' }}>
+                  {language === 'en'
+                    ? 'small n = cohort has fewer than 3 responses (cells suppressed). — = item has fewer than 3 valid (non-zero) responses in that cohort.'
+                    : 'n kecil = kumpulan ada kurang dari 3 maklum balas (sel disembunyikan). — = item kurang dari 3 maklum balas sah dalam kumpulan tersebut.'}
+                </span>
+                <span style={{ color: 'var(--red)' }}>−</span> = {language === 'en' ? 'negatively worded (reverse-scored)' : 'pernyataan negatif (skor terbalik)'}
+              </div>
+            </div>
+            <ReportFooter language={language} />
+          </div>
+        )
+      })}
+    </>
   )
 }
 
