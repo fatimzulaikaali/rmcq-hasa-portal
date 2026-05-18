@@ -201,6 +201,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .rc-dist th{text-align:left;padding:3px 6px;background:#F3F4F6;border-bottom:1px solid var(--border);font-weight:700;font-size:9px;color:#16202E;text-transform:uppercase;letter-spacing:.04em;}
 .rc-dist td{padding:3px 6px;border-bottom:1px solid var(--border);font-size:10px;}
 .rc-dist tbody tr:last-child td{border-bottom:none;}
+.rc-pos-table tr.rc-pos-grouprow td{background:#F3F4F6;border-top:1px solid var(--border);font-size:10px;}
 
 .rc-comp{width:100%;border-collapse:collapse;font-size:11px;}
 .rc-comp th{text-align:left;padding:5px 7px;background:#F3F4F6;border-bottom:2px solid var(--border);font-weight:700;font-size:9.5px;color:#16202E;text-transform:uppercase;letter-spacing:.03em;}

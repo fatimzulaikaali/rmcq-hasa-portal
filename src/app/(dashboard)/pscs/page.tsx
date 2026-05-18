@@ -1353,6 +1353,7 @@ function PscsReport({
         language={language}
       />
       <ReportAdminStats
+        scope={scope}
         scopeName={scopeNameStr}
         scoped={scoped}
         positions={positions}
@@ -1521,8 +1522,9 @@ function ReportCover({
 /* ----- Page: Survey Administration Statistics ----- */
 
 function ReportAdminStats({
-  scopeName, scoped, positions, departments, language,
+  scope, scopeName, scoped, positions, departments, language,
 }: {
+  scope: ReportScope
   scopeName: string
   scoped: PscsResponse[]
   positions: PscsPosition[]
@@ -1531,19 +1533,44 @@ function ReportAdminStats({
 }) {
   const total = scoped.length
 
-  // By position group
+  // By position — hierarchical (group → position) like the AHRQ report
   const posBy = useMemo(() => {
-    const groupByPos = new Map<number, { en: string; ms: string }>()
-    for (const p of positions) groupByPos.set(p.id, { en: p.group_en, ms: p.group_ms })
-    const m = new Map<string, { en: string; ms: string; n: number }>()
+    const posById = new Map<number, PscsPosition>()
+    for (const p of positions) posById.set(p.id, p)
+    // Group → Map<positionId, count>
+    const byGroup = new Map<string, { en: string; ms: string; sort: number; positions: Map<number, number>; unknown: number }>()
+    let groupless = 0
     for (const r of scoped) {
-      const g = r.position_id ? groupByPos.get(r.position_id) : null
-      const k = g?.en ?? '__none__'
-      const cur = m.get(k) ?? { en: g?.en ?? 'Not specified', ms: g?.ms ?? 'Tidak dinyatakan', n: 0 }
-      cur.n++
-      m.set(k, cur)
+      const p = r.position_id ? posById.get(r.position_id) : null
+      if (!p) {
+        groupless++
+        continue
+      }
+      const g = byGroup.get(p.group_en) ?? { en: p.group_en, ms: p.group_ms, sort: p.sort_order, positions: new Map(), unknown: 0 }
+      g.positions.set(p.id, (g.positions.get(p.id) ?? 0) + 1)
+      byGroup.set(p.group_en, g)
     }
-    return Array.from(m.values()).sort((a, b) => b.n - a.n)
+    // Build hierarchical rows
+    type Row = { groupLabel?: { en: string; ms: string }; positionLabel?: { en: string; ms: string }; n: number; isSubtotal?: boolean }
+    const rows: Row[] = []
+    const sortedGroups = Array.from(byGroup.entries()).sort((a, b) => a[1].sort - b[1].sort)
+    for (const [, g] of sortedGroups) {
+      const groupTotal = Array.from(g.positions.values()).reduce((a, b) => a + b, 0)
+      // Group header row showing the group label + total
+      rows.push({ groupLabel: { en: g.en, ms: g.ms }, n: groupTotal, isSubtotal: true })
+      // Position detail rows under it
+      const sortedPositions = Array.from(g.positions.entries())
+        .map(([pid, n]) => ({ pos: posById.get(pid)!, n }))
+        .filter((x) => x.pos)
+        .sort((a, b) => a.pos.sort_order - b.pos.sort_order)
+      for (const { pos, n } of sortedPositions) {
+        rows.push({ positionLabel: { en: pos.name_en, ms: pos.name_ms }, n })
+      }
+    }
+    if (groupless > 0) {
+      rows.push({ groupLabel: { en: 'Not specified', ms: 'Tidak dinyatakan' }, n: groupless, isSubtotal: true })
+    }
+    return rows
   }, [scoped, positions])
 
   // By directorate
@@ -1613,6 +1640,38 @@ function ReportAdminStats({
     return rows
   }, [scoped])
 
+  // By sub-unit — only meaningful when the scope is a department with sub-units
+  const subBy = useMemo(() => {
+    if (scope.kind !== 'department') return null
+    const subs = departments.filter((d) => d.kind === 'subunit' && d.parent_code === scope.code)
+    if (subs.length === 0) return null
+    const counts = new Map<string, number>()
+    let deptOnly = 0
+    for (const r of scoped) {
+      if (r.sub_department_code) counts.set(r.sub_department_code, (counts.get(r.sub_department_code) ?? 0) + 1)
+      else deptOnly++
+    }
+    const rows = subs
+      .map((s) => ({ label_en: s.name_en, label_ms: s.name_ms, n: counts.get(s.code) ?? 0 }))
+      .sort((a, b) => b.n - a.n)
+    if (deptOnly > 0) {
+      rows.push({ label_en: 'Department-level only (no sub-unit)', label_ms: 'Peringkat jabatan sahaja (tiada sub-unit)', n: deptOnly })
+    }
+    return rows
+  }, [scope, departments, scoped])
+
+  // Count of unique position groups represented (for the KPI tile, since posBy is now hierarchical)
+  const groupCount = useMemo(() => {
+    const groups = new Set<string>()
+    const posById = new Map<number, PscsPosition>()
+    for (const p of positions) posById.set(p.id, p)
+    for (const r of scoped) {
+      const p = r.position_id ? posById.get(r.position_id) : null
+      if (p) groups.add(p.group_en)
+    }
+    return groups.size
+  }, [scoped, positions])
+
   return (
     <div className="rc-page">
       <div className="rc-h">
@@ -1624,21 +1683,29 @@ function ReportAdminStats({
         <div className="rc-st">{language === 'en' ? 'Response Summary' : 'Ringkasan Maklum Balas'}</div>
         <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div className="rc-kpi"><div className="l">{language === 'en' ? 'Completed' : 'Lengkap'}</div><div className="v" style={{ color: 'var(--blue)' }}>{total}</div></div>
-          <div className="rc-kpi"><div className="l">{language === 'en' ? 'Position Groups' : 'Kumpulan'}</div><div className="v" style={{ color: 'var(--teal)' }}>{posBy.length}</div></div>
+          <div className="rc-kpi"><div className="l">{language === 'en' ? 'Position Groups' : 'Kumpulan'}</div><div className="v" style={{ color: 'var(--teal)' }}>{groupCount}</div></div>
           <div className="rc-kpi"><div className="l">{language === 'en' ? 'Directorates' : 'Direktorat'}</div><div className="v" style={{ color: 'var(--amber)' }}>{dirBy.length}</div></div>
           <div className="rc-kpi"><div className="l">{language === 'en' ? 'With Patient Contact' : 'Interaksi Pesakit'}</div><div className="v" style={{ color: 'var(--green)' }}>{contactBy.yes}</div></div>
         </div>
       </div>
 
+      {/* Staff Position breakdown spans full width because it's hierarchical and tends to be tall */}
+      <div className="rc-section">
+        <div className="rc-st">{language === 'en' ? 'By Staff Position' : 'Mengikut Jawatan'}</div>
+        <RcPositionTable rows={posBy} total={total} language={language} />
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div className="rc-section">
-          <div className="rc-st">{language === 'en' ? 'By Position Group' : 'Mengikut Kumpulan Kakitangan'}</div>
-          <RcDistTable rows={posBy.map((r) => ({ label: language === 'en' ? r.en : r.ms, n: r.n }))} total={total} />
-        </div>
         <div className="rc-section">
           <div className="rc-st">{language === 'en' ? 'By Directorate' : 'Mengikut Direktorat'}</div>
           <RcDistTable rows={dirBy.map((r) => ({ label: language === 'en' ? r.en : r.ms, n: r.n }))} total={total} />
         </div>
+        {subBy && (
+          <div className="rc-section">
+            <div className="rc-st">{language === 'en' ? 'By Sub-unit' : 'Mengikut Sub-unit'}</div>
+            <RcDistTable rows={subBy.map((r) => ({ label: language === 'en' ? r.label_en : r.label_ms, n: r.n }))} total={total} />
+          </div>
+        )}
         <div className="rc-section">
           <div className="rc-st">{language === 'en' ? 'By Tenure in Hospital' : 'Mengikut Tempoh di Hospital'}</div>
           <RcDistTable rows={tenureBy.map((r) => ({ label: language === 'en' ? r.label_en : r.label_ms, n: r.n }))} total={total} />
@@ -1659,6 +1726,42 @@ function ReportAdminStats({
 
       <ReportFooter language={language} />
     </div>
+  )
+}
+
+function RcPositionTable({ rows, total, language }: {
+  rows: { groupLabel?: { en: string; ms: string }; positionLabel?: { en: string; ms: string }; n: number; isSubtotal?: boolean }[]
+  total: number
+  language: 'en' | 'ms'
+}) {
+  return (
+    <table className="rc-dist rc-pos-table">
+      <thead>
+        <tr>
+          <th style={{ width: 160 }}>{language === 'en' ? 'Staff Group' : 'Kumpulan'}</th>
+          <th>{language === 'en' ? 'Position' : 'Jawatan'}</th>
+          <th style={{ width: 50 }}>n</th>
+          <th style={{ width: 50 }}>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => {
+          const isGroup = !!r.isSubtotal
+          return (
+            <tr key={i} className={isGroup ? 'rc-pos-grouprow' : ''}>
+              <td style={{ fontWeight: isGroup ? 700 : 400 }}>
+                {isGroup && r.groupLabel ? (language === 'en' ? r.groupLabel.en : r.groupLabel.ms) : ''}
+              </td>
+              <td style={{ paddingLeft: isGroup ? 8 : 18 }}>
+                {!isGroup && r.positionLabel ? (language === 'en' ? r.positionLabel.en : r.positionLabel.ms) : (isGroup ? <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 9 }}>{language === 'en' ? '— group total —' : '— jumlah kumpulan —'}</span> : '')}
+              </td>
+              <td style={{ fontWeight: isGroup ? 700 : 400 }}>{r.n}</td>
+              <td style={{ fontWeight: isGroup ? 700 : 400 }}>{total === 0 ? '—' : `${Math.round((r.n / total) * 100)}%`}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }
 
@@ -2045,6 +2148,28 @@ function ReportCrossTabs({
     if (groups.length > 1) axes.push({ key: 'posgroup', title_en: 'By Position Group', title_ms: 'Mengikut Kumpulan Kakitangan', groups })
   }
 
+  // Specific Position axis (always shown)
+  {
+    const posById = new Map<number, PscsPosition>()
+    for (const p of positions) posById.set(p.id, p)
+    const byKey = new Map<string, { en: string; ms: string; sort: number; rs: PscsResponse[] }>()
+    for (const r of scoped) {
+      const p = r.position_id ? posById.get(r.position_id) : null
+      const k = r.position_id != null ? String(r.position_id) : '__none__'
+      if (!byKey.has(k)) byKey.set(k, {
+        en: p?.name_en ?? 'Not specified',
+        ms: p?.name_ms ?? 'Tidak dinyatakan',
+        sort: p?.sort_order ?? 9999,
+        rs: [],
+      })
+      byKey.get(k)!.rs.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries())
+      .map(([k, v]) => ({ key: k, label_en: v.en, label_ms: v.ms, responses: v.rs }))
+      .sort((a, b) => b.responses.length - a.responses.length)
+    if (groups.length > 1) axes.push({ key: 'position', title_en: 'By Staff Position', title_ms: 'Mengikut Jawatan', groups })
+  }
+
   // Tenure axis
   {
     const order = [
@@ -2063,6 +2188,25 @@ function ReportCrossTabs({
       .filter((o) => byKey.has(o.key))
       .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
     if (groups.length > 1) axes.push({ key: 'tenure', title_en: 'By Tenure in Hospital', title_ms: 'Mengikut Tempoh', groups })
+  }
+
+  // Working hours axis
+  {
+    const order = [
+      { key: '<30',   en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
+      { key: '30-40', en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
+      { key: '>40',   en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+    ]
+    const byKey = new Map<string, PscsResponse[]>()
+    for (const r of scoped) {
+      const k = r.hours_per_week ?? '__none__'
+      if (!byKey.has(k)) byKey.set(k, [])
+      byKey.get(k)!.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = order
+      .filter((o) => byKey.has(o.key))
+      .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
+    if (groups.length > 1) axes.push({ key: 'hours', title_en: 'By Working Hours', title_ms: 'Mengikut Waktu Bekerja', groups })
   }
 
   // Patient contact axis
