@@ -1385,6 +1385,7 @@ function PscsReport({
         language={language}
       />
       <ReportCrossTabs
+        scope={scope}
         scopeName={scopeNameStr}
         scoped={scoped}
         hospitalResponses={campResponses}
@@ -2096,8 +2097,9 @@ interface CtAxis {
 }
 
 function ReportCrossTabs({
-  scopeName, scoped, hospitalResponses, allAnswers, showBenchmark, questions, composites, positions, departments, language,
+  scope, scopeName, scoped, hospitalResponses, allAnswers, showBenchmark, questions, composites, positions, departments, language,
 }: {
+  scope: ReportScope
   scopeName: string
   scoped: PscsResponse[]
   hospitalResponses: PscsResponse[]
@@ -2131,7 +2133,21 @@ function ReportCrossTabs({
     keyOf: (r: PscsResponse) => string | null
     labelOf: (k: string) => { en: string; ms: string }
     order?: (a: string, b: string) => number
+    // Whether this axis is meaningful at the given report scope.
+    // 'Department' only makes sense at hospital/directorate scope (a dept
+    // report is by definition one department). 'Sub-unit' only at dept scope.
+    appliesAtScope?: (scope: ReportScope) => boolean
+    // Whether to widen the column set with cohorts that exist hospital-wide
+    // but not in scope. True for demographic axes (Position, Tenure, etc.)
+    // where seeing the hospital benchmark for an absent cohort is useful.
+    // False for structural axes (Department, Sub-unit) where the dept/sub-unit
+    // is fully contained — adding other depts would leak unrelated data.
+    includeHospitalOnlyCols?: boolean
   }
+
+  const deptHasSubunits = scope.kind === 'department' && departments.some(
+    (d) => d.kind === 'subunit' && d.parent_code === scope.code,
+  )
 
   const keyDefs: KeyDef[] = [
     {
@@ -2143,6 +2159,8 @@ function ReportCrossTabs({
         const d = deptByCode.get(k)
         return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
       },
+      appliesAtScope: (s) => s.kind === 'all' || s.kind === 'directorate',
+      includeHospitalOnlyCols: false,
     },
     {
       key: 'subunit',
@@ -2153,6 +2171,8 @@ function ReportCrossTabs({
         const d = deptByCode.get(k)
         return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
       },
+      appliesAtScope: () => deptHasSubunits,
+      includeHospitalOnlyCols: false,
     },
     {
       key: 'posgroup',
@@ -2221,6 +2241,8 @@ function ReportCrossTabs({
   ]
 
   const axes: CtAxis[] = keyDefs.map((def) => {
+    // Skip axes that aren't meaningful at this scope
+    if (def.appliesAtScope && !def.appliesAtScope(scope)) return null
     // Scope groups
     const scopeByKey = new Map<string, PscsResponse[]>()
     for (const r of scoped) {
@@ -2239,11 +2261,14 @@ function ReportCrossTabs({
       hospByKey.get(k)!.push(r)
     }
 
-    // Union of scope + (hospital only when benchmark is being rendered).
-    // For whole-hospital reports the hospital cohort IS the scope, so the
-    // union collapses to the scope groups anyway.
+    // Union of scope + (hospital only when benchmark is being rendered AND
+    // this axis benefits from hospital-only columns). For structural axes
+    // (Department, Sub-unit), the dept/sub-unit is fully contained — adding
+    // other dept columns would leak unrelated data the report shouldn't show.
     const keySet = new Set<string>(Array.from(scopeByKey.keys()))
-    if (showBenchmark) for (const k of Array.from(hospByKey.keys())) keySet.add(k)
+    if (showBenchmark && def.includeHospitalOnlyCols !== false) {
+      for (const k of Array.from(hospByKey.keys())) keySet.add(k)
+    }
 
     // Render rules:
     //   - whole hospital report (showBenchmark=false): need ≥2 cohorts for
