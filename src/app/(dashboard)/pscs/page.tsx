@@ -2228,18 +2228,41 @@ function ReportCrossTabs({
       if (!scopeByKey.has(k)) scopeByKey.set(k, [])
       scopeByKey.get(k)!.push(r)
     }
-    if (scopeByKey.size < 2) return null
-    // Hospital groups (filtered to same keys present in scope)
+    // Hospital groups — always indexed across the WHOLE hospital so that
+    // dept/sub-unit reports can show hospital-only cohorts as columns
+    // (e.g. Medicine has 0 Specialists, but the hospital has 2 — that's a
+    // useful comparison to surface).
     const hospByKey = new Map<string, PscsResponse[]>()
     for (const r of hospitalResponses) {
       const k = def.keyOf(r); if (k === null) continue
-      if (!scopeByKey.has(k)) continue
       if (!hospByKey.has(k)) hospByKey.set(k, [])
       hospByKey.get(k)!.push(r)
     }
-    const keys = Array.from(scopeByKey.keys())
+
+    // Union of scope + (hospital only when benchmark is being rendered).
+    // For whole-hospital reports the hospital cohort IS the scope, so the
+    // union collapses to the scope groups anyway.
+    const keySet = new Set<string>(Array.from(scopeByKey.keys()))
+    if (showBenchmark) for (const k of Array.from(hospByKey.keys())) keySet.add(k)
+
+    // Render rules:
+    //   - whole hospital report (showBenchmark=false): need ≥2 cohorts for
+    //     a comparison to be meaningful
+    //   - dept/sub-unit report (showBenchmark=true): render any axis with at
+    //     least one cohort, because the Scope vs Hospital sub-rows alone
+    //     produce a useful comparison even for a single-cohort axis
+    if (!showBenchmark && keySet.size < 2) return null
+    if (keySet.size === 0) return null
+
+    const keys = Array.from(keySet)
     if (def.order) keys.sort(def.order)
-    else keys.sort((a, b) => (scopeByKey.get(b)?.length ?? 0) - (scopeByKey.get(a)?.length ?? 0))
+    else keys.sort((a, b) => {
+      // Sort by scope cohort size, then by hospital cohort size as tiebreaker
+      const aS = scopeByKey.get(a)?.length ?? 0
+      const bS = scopeByKey.get(b)?.length ?? 0
+      if (bS !== aS) return bS - aS
+      return (hospByKey.get(b)?.length ?? 0) - (hospByKey.get(a)?.length ?? 0)
+    })
     const groups: CtGroup[] = keys.map((k) => {
       const lab = def.labelOf(k)
       return {
