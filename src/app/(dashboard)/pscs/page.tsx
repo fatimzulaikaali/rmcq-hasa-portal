@@ -1329,7 +1329,7 @@ function ReportCardTab({
       try { return Array.from(s.cssRules).map((r) => r.cssText).join('\n') }
       catch { return '' }
     }).join('\n')
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>PSCS Report Card</title><style>${css}\n@page{size:A4;margin:0}body{margin:0;padding:0;background:#fff;}</style></head><body>${pageHtml}<script>window.onload=()=>window.print()</script></body></html>`
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>PSCS Report Card</title><style>${css}\n@page{size:A4 portrait;margin:0}@page landscape{size:A4 landscape;margin:0}.rc-page{page:auto}.rc-page.rc-landscape{page:landscape}body{margin:0;padding:0;background:#fff;}</style></head><body>${pageHtml}<script>window.onload=()=>window.print()</script></body></html>`
     const w = window.open('', '_blank')
     if (!w) return
     w.document.open(); w.document.write(html); w.document.close()
@@ -2464,9 +2464,10 @@ function ReportCrossTabs({
 
   if (axes.length === 0) return null
 
-  // Paginate wide axes — A4 portrait can comfortably show ~7 cohort columns
-  // beside the composite label + dataset column.
-  const COLS_PER_PAGE = 7
+  // Paginate wide axes — these pages render in A4 landscape (297mm wide),
+  // so we can comfortably fit ~10 cohort columns beside the label + dataset
+  // column. Axes with more cohorts split into additional pages.
+  const COLS_PER_PAGE = 10
   const pages: { axis: CtAxis; cols: CtGroup[]; pageNum: number; totalPages: number }[] = []
   for (const axis of axes) {
     const totalPages = Math.max(1, Math.ceil(axis.groups.length / COLS_PER_PAGE))
@@ -2555,7 +2556,7 @@ function ReportCrossTabPage({
   const datasetHeader = language === 'en' ? 'Dataset'    : 'Set Data'
 
   return (
-    <div className="rc-page">
+    <div className="rc-page rc-landscape">
       <div className="rc-h">
         <div className="t1">
           {language === 'en' ? 'Composite Measure Average % Positive — ' : 'Purata % Positif Komposit — '}
@@ -2817,8 +2818,8 @@ function ReportItemCrossTabs({
 
   if (axes.length === 0) return null
 
-  // Paginate by column-width (items per page = all 34; columns per page = 5)
-  const COLS_PER_PAGE = 5
+  // Landscape pages — fit ~10 cohort columns per page; items further paginated below
+  const COLS_PER_PAGE = 10
   const pages: { axis: ItemAxis; cols: CtGroup[]; pageNum: number; totalPages: number }[] = []
   for (const axis of axes) {
     const totalPages = Math.max(1, Math.ceil(axis.groups.length / COLS_PER_PAGE))
@@ -2893,10 +2894,10 @@ function ReportItemCrossTabPage({
   const hospLabel  = language === 'en' ? 'Hospital'   : 'Hospital'
   const datasetHeader = language === 'en' ? 'Dataset'  : 'Set Data'
 
-  // Items per page: if there's only one cohort column with single-row, fit all items.
-  // For multi-column or dual-row, paginate items to keep each page printable.
-  // Conservative: 18 items per page when dual-row, 30 when single-row.
-  const ITEMS_PER_PAGE = showBenchmark ? 18 : 30
+  // Items per page on a LANDSCAPE A4 page (~182mm usable height after margins).
+  // Conservative: 14 items per page in dual-row (Scope/Hospital) mode, 26 in
+  // single-row (Whole Hospital) mode.
+  const ITEMS_PER_PAGE = showBenchmark ? 14 : 26
   const allItems: { composite: PscsComposite; q: PscsQuestion }[] = []
   for (const c of compsForGroups) {
     const qs = questions.filter((q) => q.composite_code === c.code && q.active)
@@ -2915,7 +2916,7 @@ function ReportItemCrossTabPage({
         // Track current composite to insert composite header rows when it changes
         let lastCompCode: string | null = null
         return (
-          <div className="rc-page" key={`itemxt-page-${chunkIdx}`}>
+          <div className="rc-page rc-landscape" key={`itemxt-page-${chunkIdx}`}>
             <div className="rc-h">
               <div className="t1">
                 {language === 'en' ? 'Survey Item % Positive — ' : '% Positif Item — '}{pageTitle}

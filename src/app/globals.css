@@ -170,9 +170,19 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .rc-kpi .v{font-size:18px;font-weight:700;line-height:1.1;white-space:nowrap;}
 .rc-kpi .s{font-size:9px;color:var(--muted);}
 
+/* Landscape variant for cross-tab pages — wider canvas to fit ~10 cohort columns */
+.rc-page.rc-landscape{width:297mm;min-height:210mm;}
+
 @media print{
   .rc-page{box-shadow:none;margin:0;page-break-after:always;}
   body{background:#fff;}
+  /* Named-page rules — Chrome supports these so the print job mixes
+     portrait (cover, admin stats, composites, item-level, events,
+     methodology) and landscape (cross-tab pages) within one document. */
+  @page{size:A4 portrait;margin:0;}
+  @page landscape{size:A4 landscape;margin:0;}
+  .rc-page{page:auto;}
+  .rc-page.rc-landscape{page:landscape;}
 }
 
 /* PSCS Report Card — cover, composite table, items, matrix, etc. */
