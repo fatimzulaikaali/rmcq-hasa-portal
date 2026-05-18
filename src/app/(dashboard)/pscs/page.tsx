@@ -16,6 +16,7 @@ import {
   Title,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
+import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
 import {
   PscsAnswer, PscsCampaign, PscsComposite, PscsDepartment, PscsPosition, PscsQuestion, PscsResponse,
@@ -128,6 +129,131 @@ export default function PscsPage() {
     router.push('/login')
   }
 
+  /* ----- Raw-data Excel export for the selected campaign ----- */
+  function downloadExcel() {
+    if (!campaign || !questions || !composites || !positions || !departments || !responses || !answers) return
+
+    // Lookup maps
+    const posById = new Map(positions.map((p) => [p.id, p]))
+    const deptByCode = new Map(departments.map((d) => [d.code, d]))
+    // Directorate lookup via department.parent_code
+    function directorateFor(deptCode: string | null): PscsDepartment | null {
+      if (!deptCode) return null
+      const d = deptByCode.get(deptCode)
+      if (!d || !d.parent_code) return null
+      return deptByCode.get(d.parent_code) ?? null
+    }
+
+    // Order questions: section A, B, ..., F by item_num
+    const orderedQuestions = [...questions.filter((q) => q.active)]
+      .sort((a, b) => a.section.localeCompare(b.section) || a.item_num - b.item_num)
+
+    // Filter answers to selected campaign's responses
+    const respIds = new Set(filteredResponses.map((r) => r.id))
+    const ansByResp = new Map<string, Map<string, number>>()
+    for (const r of filteredResponses) ansByResp.set(r.id, new Map())
+    for (const a of answers) {
+      if (!respIds.has(a.response_id)) continue
+      ansByResp.get(a.response_id)!.set(a.question_id, a.value)
+    }
+
+    // SHEET 1 — Responses (wide format, one row per response)
+    const responsesRows = filteredResponses.map((r) => {
+      const pos = r.position_id ? posById.get(r.position_id) ?? null : null
+      const dept = r.department_code ? deptByCode.get(r.department_code) ?? null : null
+      const sub  = r.sub_department_code ? deptByCode.get(r.sub_department_code) ?? null : null
+      const dir  = directorateFor(r.department_code)
+      const row: Record<string, string | number | null> = {
+        response_id:           r.id,
+        campaign_id:           r.campaign_id,
+        campaign_code:         campaign.code,
+        submitted_at:          r.submitted_at,
+        language:              r.language,
+        position_id:           r.position_id,
+        position_name:         pos?.name_en ?? '',
+        position_group:        pos?.group_en ?? '',
+        position_other:        r.position_other ?? '',
+        directorate_code:      dir?.code ?? '',
+        directorate_name:      dir?.name_en ?? '',
+        department_code:       r.department_code ?? '',
+        department_name:       dept?.name_en ?? '',
+        sub_department_code:   r.sub_department_code ?? '',
+        sub_department_name:   sub?.name_en ?? '',
+        tenure_hospital:       r.tenure_hospital ?? '',
+        tenure_unit:           r.tenure_unit ?? '',
+        hours_per_week:        r.hours_per_week ?? '',
+        direct_patient_contact: r.direct_patient_contact === true ? 'Yes'
+                              : r.direct_patient_contact === false ? 'No' : '',
+        comment:               r.comment ?? '',
+        response_hash:         r.response_hash,
+      }
+      // Append one column per question (numeric value or null when unanswered)
+      const ans = ansByResp.get(r.id)!
+      for (const q of orderedQuestions) {
+        row[q.id] = ans.has(q.id) ? ans.get(q.id)! : null
+      }
+      return row
+    })
+    const wsResponses = XLSX.utils.json_to_sheet(responsesRows)
+
+    // SHEET 2 — Codebook
+    const codebook: { Section: string; Code: string | number; 'Label (EN)': string; 'Label (MS)': string }[] = []
+    function add(section: string, code: string | number, en: string, ms: string) {
+      codebook.push({ Section: section, Code: code, 'Label (EN)': en, 'Label (MS)': ms })
+    }
+    add('Agreement / Frequency scale', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
+    add('Agreement / Frequency scale', 1, 'Strongly Disagree / Never',    'Sangat Tidak Setuju / Tidak Pernah')
+    add('Agreement / Frequency scale', 2, 'Disagree / Rarely',            'Tidak Setuju / Jarang')
+    add('Agreement / Frequency scale', 3, 'Neither / Sometimes',          'Neutral / Kadang-kadang')
+    add('Agreement / Frequency scale', 4, 'Agree / Most of the time',     'Setuju / Selalu')
+    add('Agreement / Frequency scale', 5, 'Strongly Agree / Always',      'Sangat Setuju / Sentiasa')
+    add('EventCount scale (D3)', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
+    add('EventCount scale (D3)', 1, 'None',          'Tiada')
+    add('EventCount scale (D3)', 2, '1-2 events',    '1-2 insiden')
+    add('EventCount scale (D3)', 3, '3-5 events',    '3-5 insiden')
+    add('EventCount scale (D3)', 4, '6-10 events',   '6-10 insiden')
+    add('EventCount scale (D3)', 5, '11 or more events', '11 insiden atau lebih')
+    add('Rating scale (E1)', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
+    add('Rating scale (E1)', 1, 'Poor',      'Lemah')
+    add('Rating scale (E1)', 2, 'Fair',      'Boleh Tahan')
+    add('Rating scale (E1)', 3, 'Good',      'Bagus')
+    add('Rating scale (E1)', 4, 'Very Good', 'Sangat Bagus')
+    add('Rating scale (E1)', 5, 'Excellent', 'Cemerlang')
+    add('tenure_hospital / tenure_unit', '<1y',   'Less than 1 year', 'Kurang dari 1 tahun')
+    add('tenure_hospital / tenure_unit', '1-5y',  '1-5 years',        '1-5 tahun')
+    add('tenure_hospital / tenure_unit', '6-10y', '6-10 years',       '6-10 tahun')
+    add('tenure_hospital / tenure_unit', '11+y',  '11+ years',        '11+ tahun')
+    add('hours_per_week', '<30',   'Less than 30 hours per week', 'Kurang dari 30 jam seminggu')
+    add('hours_per_week', '30-40', '30 to 40 hours per week',     '30 hingga 40 jam seminggu')
+    add('hours_per_week', '>40',   'More than 40 hours per week', 'Lebih dari 40 jam seminggu')
+    add('direct_patient_contact', 'Yes', 'Yes - direct patient contact', 'Ya - interaksi langsung')
+    add('direct_patient_contact', 'No',  'No - no direct contact',       'Tidak - tiada interaksi langsung')
+    add('language', 'en', 'English',           'Bahasa Inggeris')
+    add('language', 'ms', 'Bahasa Malaysia',   'Bahasa Malaysia')
+    const wsCodebook = XLSX.utils.json_to_sheet(codebook)
+
+    // SHEET 3 — Questions reference
+    const questionsRows = orderedQuestions.map((q) => ({
+      question_id:    q.id,
+      section:        q.section,
+      item_num:       q.item_num,
+      composite_code: q.composite_code,
+      wording:        q.wording,
+      scale_type:     q.scale_type,
+      text_en:        q.text_en,
+      text_ms:        q.text_ms,
+    }))
+    const wsQuestions = XLSX.utils.json_to_sheet(questionsRows)
+
+    // Workbook + download
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, wsResponses, 'Responses')
+    XLSX.utils.book_append_sheet(wb, wsCodebook,  'Codebook')
+    XLSX.utils.book_append_sheet(wb, wsQuestions, 'Questions')
+    const today = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `PSCS_RawData_${campaign.code}_${today}.xlsx`)
+  }
+
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
@@ -167,6 +293,17 @@ export default function PscsPage() {
               <option value="ms">Bahasa Malaysia</option>
             </select>
           </div>
+          <button
+            type="button"
+            className="reset-btn"
+            style={{ marginTop: 10 }}
+            onClick={downloadExcel}
+            disabled={loading || !campaign || filteredResponses.length === 0}
+            title={language === 'en'
+              ? 'Download raw responses + codebook for the selected campaign'
+              : 'Muat turun maklum balas mentah + buku kod untuk kempen yang dipilih'}>
+            ⬇ {language === 'en' ? 'Export to Excel' : 'Eksport ke Excel'}
+          </button>
         </div>
       </aside>
 
