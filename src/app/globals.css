@@ -196,6 +196,14 @@ body{counter-reset:rcpage;}
   /* In print, use the browser's built-in counters so we get "Page X of Y"
      where Y is the true total page count. */
   .rc-foot-paged .rc-foot-pageno::before{content:"Page " counter(page) " of " counter(pages);}
+  /* Force background colors + images to actually print. Without this, Chrome
+     strips background-color from all .rc-* bars, badges, header strips,
+     callouts, and matrix cells when saving as PDF. */
+  .rc-page, .rc-page *{
+    -webkit-print-color-adjust:exact !important;
+    print-color-adjust:exact !important;
+    color-adjust:exact !important;
+  }
 }
 
 /* PSCS Report Card — cover, composite table, items, matrix, etc. */
