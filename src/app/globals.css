@@ -173,6 +173,16 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 /* Landscape variant for cross-tab pages — wider canvas to fit ~10 cohort columns */
 .rc-page.rc-landscape{width:297mm;min-height:210mm;}
 
+/* Paged footer variant — used by PSCS report card (IR/KPI keep plain rc-foot) */
+.rc-foot.rc-foot-paged{display:flex;align-items:center;gap:8px;text-align:left;}
+.rc-foot-paged .rc-foot-spacer{flex:1;}
+.rc-foot-paged .rc-foot-text{flex:0 0 auto;text-align:center;}
+.rc-foot-paged .rc-foot-pageno{flex:1;text-align:right;font-weight:700;color:var(--text);font-size:9px;}
+.rc-foot-paged .rc-foot-pageno::before{content:"Page " counter(rcpage);}
+/* Custom counter that advances per .rc-page in the preview pane */
+body{counter-reset:rcpage;}
+.rc-page{counter-increment:rcpage;}
+
 @media print{
   .rc-page{box-shadow:none;margin:0;page-break-after:always;}
   body{background:#fff;}
@@ -183,6 +193,9 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
   @page landscape{size:A4 landscape;margin:0;}
   .rc-page{page:auto;}
   .rc-page.rc-landscape{page:landscape;}
+  /* In print, use the browser's built-in counters so we get "Page X of Y"
+     where Y is the true total page count. */
+  .rc-foot-paged .rc-foot-pageno::before{content:"Page " counter(page) " of " counter(pages);}
 }
 
 /* PSCS Report Card — cover, composite table, items, matrix, etc. */

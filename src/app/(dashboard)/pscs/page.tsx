@@ -3083,10 +3083,14 @@ function ReportMethodology({ language }: { language: 'en' | 'ms' }) {
 function ReportFooter({ language }: { language: 'en' | 'ms' }) {
   const today = new Date().toISOString().slice(0, 10)
   return (
-    <div className="rc-foot">
-      {language === 'en'
-        ? `RMCQ · Quality Assurance and Document Management Unit · Patient Safety Culture Survey · Confidential · Generated ${today}`
-        : `RMCQ · Unit Jaminan Kualiti dan Pengurusan Dokumen · Tinjauan Budaya Keselamatan Pesakit · Sulit · Dihasilkan ${today}`}
+    <div className="rc-foot rc-foot-paged">
+      <span className="rc-foot-spacer" />
+      <span className="rc-foot-text">
+        {language === 'en'
+          ? `RMCQ · Quality Assurance and Document Management Unit · Patient Safety Culture Survey · Confidential · Generated ${today}`
+          : `RMCQ · Unit Jaminan Kualiti dan Pengurusan Dokumen · Tinjauan Budaya Keselamatan Pesakit · Sulit · Dihasilkan ${today}`}
+      </span>
+      <span className="rc-foot-pageno" aria-hidden="true" />
     </div>
   )
 }
