@@ -203,6 +203,24 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;li
 .rc-dist tbody tr:last-child td{border-bottom:none;}
 .rc-pos-table tr.rc-pos-grouprow td{background:#F3F4F6;border-top:1px solid var(--border);font-size:10px;}
 
+/* AHRQ-style transposed cross-tab matrix */
+.rc-xmatrix{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed;}
+.rc-xmatrix th,.rc-xmatrix td{border:1px solid #D7DEE6;padding:3px 4px;vertical-align:middle;}
+.rc-xmatrix thead th{background:#DCE7F3;color:#16202E;font-weight:700;font-size:9px;}
+.rc-xmatrix .rc-xgrouphdr{background:#B7CBE3;text-align:center;font-size:10px;padding:5px 4px;}
+.rc-xmatrix .rc-xcol{text-align:center;font-size:8.5px;line-height:1.2;padding:4px 3px;word-break:break-word;}
+.rc-xmatrix .rc-xleft{text-align:left;background:#EFF3F8;font-size:9.5px;padding:5px 6px;vertical-align:top;}
+.rc-xmatrix .rc-xds{background:#F5F8FC;font-size:8.5px;font-style:italic;color:#16202E;text-align:left;padding:3px 5px;white-space:nowrap;}
+.rc-xmatrix .rc-xcell{text-align:center;font-size:10px;background:#fff;}
+.rc-xmatrix .rc-xcount{text-align:center;font-size:9px;font-weight:700;color:#16202E;background:#fff;}
+.rc-xmatrix .rc-xcount-row td{background:#F9FAFB;}
+.rc-xmatrix .rc-xcomp-row td{padding:4px 5px;}
+.rc-xmatrix .rc-xhosp-row td{background:#FAFBFD;}
+.rc-xmatrix .rc-xavg-row td{background:#F0F4FA;border-top:2px solid #16202E;}
+.rc-xmatrix .rc-xcomp-num{display:inline-block;font-family:monospace;font-size:8.5px;color:var(--muted);margin-right:3px;}
+.rc-xmatrix .rc-xcomp-name{display:inline;font-weight:600;font-size:9.5px;color:#16202E;}
+.rc-xmatrix .rc-xcomp-code{display:block;font-family:monospace;font-size:8px;color:var(--muted);margin-top:1px;}
+
 .rc-comp{width:100%;border-collapse:collapse;font-size:11px;}
 .rc-comp th{text-align:left;padding:5px 7px;background:#F3F4F6;border-bottom:2px solid var(--border);font-weight:700;font-size:9.5px;color:#16202E;text-transform:uppercase;letter-spacing:.03em;}
 .rc-comp td{padding:6px 7px;border-bottom:1px solid var(--border);vertical-align:middle;}

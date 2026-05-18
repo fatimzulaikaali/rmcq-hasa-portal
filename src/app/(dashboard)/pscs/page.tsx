@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Chart as ChartJS,
@@ -1385,10 +1385,11 @@ function PscsReport({
         language={language}
       />
       <ReportCrossTabs
-        scope={scope}
         scopeName={scopeNameStr}
         scoped={scoped}
-        scopedAnswers={scopedAnswers}
+        hospitalResponses={campResponses}
+        allAnswers={allAnswers}
+        showBenchmark={showBenchmark}
         questions={questions}
         composites={composites}
         positions={positions}
@@ -2066,236 +2067,392 @@ function RcBucketTable({ buckets, labels, positiveFrom }: {
   )
 }
 
-/* ----- Page(s): Cross-tabs by Position / Department / Sub-unit / Tenure / Contact ----- */
+/* ----- Page(s): Cross-tabs — AHRQ transposed layout ----- */
+/*
+ * Each axis becomes one page (or several, when the cohort count exceeds
+ * COLS_PER_PAGE). Layout mirrors the AHRQ SOPS comparative tables:
+ *   - composites as rows down the left
+ *   - cohort groups as columns across the top
+ *   - per composite, TWO sub-rows when showBenchmark is true:
+ *       "This [Scope]"  — scoped responses in that group
+ *       "Hospital"      — hospital-wide responses in that same group
+ *     (single row when scope is the whole hospital, since the two are equal)
+ *   - a Respondent Counts header row at the top of the table
+ *   - a Composite Measure Average row at the bottom
+ */
+
+interface CtGroup {
+  key: string
+  label_en: string
+  label_ms: string
+  scopedResponses: PscsResponse[]
+  hospitalResponses: PscsResponse[]
+}
+interface CtAxis {
+  key: string
+  title_en: string
+  title_ms: string
+  groups: CtGroup[]
+}
 
 function ReportCrossTabs({
-  scope, scopeName, scoped, scopedAnswers, questions, composites, positions, departments, language,
+  scopeName, scoped, hospitalResponses, allAnswers, showBenchmark, questions, composites, positions, departments, language,
 }: {
-  scope: ReportScope
   scopeName: string
   scoped: PscsResponse[]
-  scopedAnswers: PscsAnswer[]
+  hospitalResponses: PscsResponse[]
+  allAnswers: PscsAnswer[]
+  showBenchmark: boolean
   questions: PscsQuestion[]
   composites: PscsComposite[]
   positions: PscsPosition[]
   departments: PscsDepartment[]
   language: 'en' | 'ms'
 }) {
-  // Which axes make sense at the current scope?
-  // - 'all'         : Department, Position, Tenure, Contact
-  // - 'directorate' : Department within directorate, Position, Tenure, Contact
-  // - 'department'  : Sub-unit (if any), Position, Tenure, Contact
-  // - 'subunit'     : Position, Tenure, Contact
-  const axes: { key: string; title_en: string; title_ms: string; groups: BreakdownGroup<PscsResponse>[] }[] = []
+  // Build axes. For each axis, key-function determines column membership.
+  // Columns are driven by groups that exist in `scoped` (so the page shows
+  // your scope's cohorts); hospital benchmark cells are computed by
+  // filtering `hospitalResponses` against the same key.
+  const posById = useMemo(() => {
+    const m = new Map<number, PscsPosition>()
+    for (const p of positions) m.set(p.id, p)
+    return m
+  }, [positions])
+  const deptByCode = useMemo(() => {
+    const m = new Map<string, PscsDepartment>()
+    for (const d of departments) m.set(d.code, d)
+    return m
+  }, [departments])
 
-  // Department axis
-  if (scope.kind === 'all' || scope.kind === 'directorate') {
-    const byKey = new Map<string, PscsResponse[]>()
+  type KeyDef = {
+    key: string
+    title_en: string
+    title_ms: string
+    keyOf: (r: PscsResponse) => string | null
+    labelOf: (k: string) => { en: string; ms: string }
+    order?: (a: string, b: string) => number
+  }
+
+  const keyDefs: KeyDef[] = [
+    {
+      key: 'department',
+      title_en: 'By Department',
+      title_ms: 'Mengikut Jabatan',
+      keyOf: (r) => r.department_code ?? null,
+      labelOf: (k) => {
+        const d = deptByCode.get(k)
+        return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
+      },
+    },
+    {
+      key: 'subunit',
+      title_en: 'By Sub-unit',
+      title_ms: 'Mengikut Sub-unit',
+      keyOf: (r) => r.sub_department_code ?? null,
+      labelOf: (k) => {
+        const d = deptByCode.get(k)
+        return { en: d?.name_en ?? k, ms: d?.name_ms ?? k }
+      },
+    },
+    {
+      key: 'posgroup',
+      title_en: 'By Position Group',
+      title_ms: 'Mengikut Kumpulan Kakitangan',
+      keyOf: (r) => {
+        const p = r.position_id ? posById.get(r.position_id) : null
+        return p?.group_en ?? null
+      },
+      labelOf: (k) => {
+        const p = positions.find((x) => x.group_en === k)
+        return { en: p?.group_en ?? k, ms: p?.group_ms ?? k }
+      },
+    },
+    {
+      key: 'position',
+      title_en: 'By Staff Position',
+      title_ms: 'Mengikut Jawatan',
+      keyOf: (r) => (r.position_id != null ? String(r.position_id) : null),
+      labelOf: (k) => {
+        const p = posById.get(parseInt(k, 10))
+        return { en: p?.name_en ?? k, ms: p?.name_ms ?? k }
+      },
+    },
+    {
+      key: 'tenure',
+      title_en: 'By Tenure in Hospital',
+      title_ms: 'Mengikut Tempoh di Hospital',
+      keyOf: (r) => r.tenure_hospital ?? null,
+      labelOf: (k) => {
+        const map: Record<string, { en: string; ms: string }> = {
+          '<1y':   { en: 'Less than 1 year', ms: 'Kurang dari 1 tahun' },
+          '1-5y':  { en: '1–5 years',        ms: '1–5 tahun' },
+          '6-10y': { en: '6–10 years',       ms: '6–10 tahun' },
+          '11+y':  { en: '11+ years',        ms: '11+ tahun' },
+        }
+        return map[k] ?? { en: k, ms: k }
+      },
+      order: (a, b) => ['<1y','1-5y','6-10y','11+y'].indexOf(a) - ['<1y','1-5y','6-10y','11+y'].indexOf(b),
+    },
+    {
+      key: 'hours',
+      title_en: 'By Working Hours',
+      title_ms: 'Mengikut Waktu Bekerja',
+      keyOf: (r) => r.hours_per_week ?? null,
+      labelOf: (k) => {
+        const map: Record<string, { en: string; ms: string }> = {
+          '<30':   { en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
+          '30-40': { en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
+          '>40':   { en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+        }
+        return map[k] ?? { en: k, ms: k }
+      },
+      order: (a, b) => ['<30','30-40','>40'].indexOf(a) - ['<30','30-40','>40'].indexOf(b),
+    },
+    {
+      key: 'contact',
+      title_en: 'By Patient Contact',
+      title_ms: 'Mengikut Interaksi Pesakit',
+      keyOf: (r) => r.direct_patient_contact === true ? 'yes' : r.direct_patient_contact === false ? 'no' : null,
+      labelOf: (k) => k === 'yes'
+        ? { en: 'Yes — direct patient contact', ms: 'Ya — interaksi langsung' }
+        : { en: 'No — no direct contact', ms: 'Tidak — tiada interaksi langsung' },
+      order: (a) => a === 'yes' ? -1 : 1,
+    },
+  ]
+
+  const axes: CtAxis[] = keyDefs.map((def) => {
+    // Scope groups
+    const scopeByKey = new Map<string, PscsResponse[]>()
     for (const r of scoped) {
-      const k = r.department_code ?? '__none__'
-      if (!byKey.has(k)) byKey.set(k, [])
-      byKey.get(k)!.push(r)
+      const k = def.keyOf(r); if (k === null) continue
+      if (!scopeByKey.has(k)) scopeByKey.set(k, [])
+      scopeByKey.get(k)!.push(r)
     }
-    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries()).map(([k, rs]) => {
-      const d = departments.find((x) => x.code === k)
+    if (scopeByKey.size < 2) return null
+    // Hospital groups (filtered to same keys present in scope)
+    const hospByKey = new Map<string, PscsResponse[]>()
+    for (const r of hospitalResponses) {
+      const k = def.keyOf(r); if (k === null) continue
+      if (!scopeByKey.has(k)) continue
+      if (!hospByKey.has(k)) hospByKey.set(k, [])
+      hospByKey.get(k)!.push(r)
+    }
+    const keys = Array.from(scopeByKey.keys())
+    if (def.order) keys.sort(def.order)
+    else keys.sort((a, b) => (scopeByKey.get(b)?.length ?? 0) - (scopeByKey.get(a)?.length ?? 0))
+    const groups: CtGroup[] = keys.map((k) => {
+      const lab = def.labelOf(k)
       return {
         key: k,
-        label_en: d?.name_en ?? (k === '__none__' ? 'Not specified' : k),
-        label_ms: d?.name_ms ?? (k === '__none__' ? 'Tidak dinyatakan' : k),
-        responses: rs,
+        label_en: lab.en,
+        label_ms: lab.ms,
+        scopedResponses: scopeByKey.get(k) ?? [],
+        hospitalResponses: hospByKey.get(k) ?? [],
       }
-    }).sort((a, b) => b.responses.length - a.responses.length)
-    if (groups.length > 1) axes.push({ key: 'department', title_en: 'By Department', title_ms: 'Mengikut Jabatan', groups })
-  }
+    })
+    return { key: def.key, title_en: def.title_en, title_ms: def.title_ms, groups }
+  }).filter((a): a is CtAxis => a !== null)
 
-  // Sub-unit axis (only when scope=department and that dept has sub-units)
-  if (scope.kind === 'department') {
-    const subs = departments.filter((d) => d.kind === 'subunit' && d.parent_code === scope.code)
-    if (subs.length > 0) {
-      const byKey = new Map<string, PscsResponse[]>()
-      for (const r of scoped) {
-        const k = r.sub_department_code ?? '__none__'
-        if (!byKey.has(k)) byKey.set(k, [])
-        byKey.get(k)!.push(r)
-      }
-      const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries()).map(([k, rs]) => {
-        const d = departments.find((x) => x.code === k)
-        return {
-          key: k,
-          label_en: d?.name_en ?? (k === '__none__' ? 'Department-level only' : k),
-          label_ms: d?.name_ms ?? (k === '__none__' ? 'Peringkat Jabatan sahaja' : k),
-          responses: rs,
-        }
-      }).sort((a, b) => b.responses.length - a.responses.length)
-      if (groups.length > 1) axes.push({ key: 'subunit', title_en: 'By Sub-unit', title_ms: 'Mengikut Sub-unit', groups })
-    }
-  }
+  if (axes.length === 0) return null
 
-  // Position group axis (always shown)
-  {
-    const groupByPos = new Map<number, { en: string; ms: string }>()
-    for (const p of positions) groupByPos.set(p.id, { en: p.group_en, ms: p.group_ms })
-    const byKey = new Map<string, { en: string; ms: string; rs: PscsResponse[] }>()
-    for (const r of scoped) {
-      const g = r.position_id ? groupByPos.get(r.position_id) : null
-      const k = g?.en ?? '__none__'
-      if (!byKey.has(k)) byKey.set(k, { en: g?.en ?? 'Not specified', ms: g?.ms ?? 'Tidak dinyatakan', rs: [] })
-      byKey.get(k)!.rs.push(r)
-    }
-    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries())
-      .map(([k, v]) => ({ key: k, label_en: v.en, label_ms: v.ms, responses: v.rs }))
-      .sort((a, b) => b.responses.length - a.responses.length)
-    if (groups.length > 1) axes.push({ key: 'posgroup', title_en: 'By Position Group', title_ms: 'Mengikut Kumpulan Kakitangan', groups })
-  }
-
-  // Specific Position axis (always shown)
-  {
-    const posById = new Map<number, PscsPosition>()
-    for (const p of positions) posById.set(p.id, p)
-    const byKey = new Map<string, { en: string; ms: string; sort: number; rs: PscsResponse[] }>()
-    for (const r of scoped) {
-      const p = r.position_id ? posById.get(r.position_id) : null
-      const k = r.position_id != null ? String(r.position_id) : '__none__'
-      if (!byKey.has(k)) byKey.set(k, {
-        en: p?.name_en ?? 'Not specified',
-        ms: p?.name_ms ?? 'Tidak dinyatakan',
-        sort: p?.sort_order ?? 9999,
-        rs: [],
+  // Paginate wide axes — A4 portrait can comfortably show ~7 cohort columns
+  // beside the composite label + dataset column.
+  const COLS_PER_PAGE = 7
+  const pages: { axis: CtAxis; cols: CtGroup[]; pageNum: number; totalPages: number }[] = []
+  for (const axis of axes) {
+    const totalPages = Math.max(1, Math.ceil(axis.groups.length / COLS_PER_PAGE))
+    for (let i = 0; i < totalPages; i++) {
+      pages.push({
+        axis,
+        cols: axis.groups.slice(i * COLS_PER_PAGE, (i + 1) * COLS_PER_PAGE),
+        pageNum: i + 1,
+        totalPages,
       })
-      byKey.get(k)!.rs.push(r)
     }
-    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries())
-      .map(([k, v]) => ({ key: k, label_en: v.en, label_ms: v.ms, responses: v.rs }))
-      .sort((a, b) => b.responses.length - a.responses.length)
-    if (groups.length > 1) axes.push({ key: 'position', title_en: 'By Staff Position', title_ms: 'Mengikut Jawatan', groups })
-  }
-
-  // Tenure axis
-  {
-    const order = [
-      { key: '<1y',   en: 'Less than 1 year', ms: 'Kurang dari 1 tahun' },
-      { key: '1-5y',  en: '1–5 years',        ms: '1–5 tahun' },
-      { key: '6-10y', en: '6–10 years',       ms: '6–10 tahun' },
-      { key: '11+y',  en: '11+ years',        ms: '11+ tahun' },
-    ]
-    const byKey = new Map<string, PscsResponse[]>()
-    for (const r of scoped) {
-      const k = r.tenure_hospital ?? '__none__'
-      if (!byKey.has(k)) byKey.set(k, [])
-      byKey.get(k)!.push(r)
-    }
-    const groups: BreakdownGroup<PscsResponse>[] = order
-      .filter((o) => byKey.has(o.key))
-      .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
-    if (groups.length > 1) axes.push({ key: 'tenure', title_en: 'By Tenure in Hospital', title_ms: 'Mengikut Tempoh', groups })
-  }
-
-  // Working hours axis
-  {
-    const order = [
-      { key: '<30',   en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
-      { key: '30-40', en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
-      { key: '>40',   en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
-    ]
-    const byKey = new Map<string, PscsResponse[]>()
-    for (const r of scoped) {
-      const k = r.hours_per_week ?? '__none__'
-      if (!byKey.has(k)) byKey.set(k, [])
-      byKey.get(k)!.push(r)
-    }
-    const groups: BreakdownGroup<PscsResponse>[] = order
-      .filter((o) => byKey.has(o.key))
-      .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
-    if (groups.length > 1) axes.push({ key: 'hours', title_en: 'By Working Hours', title_ms: 'Mengikut Waktu Bekerja', groups })
-  }
-
-  // Patient contact axis
-  {
-    const yes: PscsResponse[] = [], no: PscsResponse[] = []
-    for (const r of scoped) {
-      if (r.direct_patient_contact === true) yes.push(r)
-      else if (r.direct_patient_contact === false) no.push(r)
-    }
-    const groups: BreakdownGroup<PscsResponse>[] = []
-    if (yes.length > 0) groups.push({ key: 'yes', label_en: 'Yes — direct patient contact', label_ms: 'Ya — interaksi langsung', responses: yes })
-    if (no.length > 0)  groups.push({ key: 'no',  label_en: 'No — no direct contact',       label_ms: 'Tidak — tiada interaksi langsung', responses: no })
-    if (groups.length > 1) axes.push({ key: 'contact', title_en: 'By Patient Contact', title_ms: 'Mengikut Interaksi Pesakit', groups })
-  }
-
-  void scopedAnswers // not directly used; matrix recomputes from group responses via breakdownMatrix
-
-  if (axes.length === 0) {
-    return null
   }
 
   return (
     <>
-      {axes.map((axis) => (
-        <ReportCrossTabPage key={axis.key} title={language === 'en' ? axis.title_en : axis.title_ms} scopeName={scopeName} groups={axis.groups} composites={composites} questions={questions} allAnswers={scopedAnswers} language={language} />
+      {pages.map((p, idx) => (
+        <ReportCrossTabPage
+          key={`${p.axis.key}-${p.pageNum}-${idx}`}
+          title={language === 'en' ? p.axis.title_en : p.axis.title_ms}
+          scopeName={scopeName}
+          cols={p.cols}
+          pageNum={p.pageNum}
+          totalPages={p.totalPages}
+          composites={composites}
+          questions={questions}
+          allAnswers={allAnswers}
+          showBenchmark={showBenchmark}
+          language={language}
+        />
       ))}
     </>
   )
 }
 
 function ReportCrossTabPage({
-  title, scopeName, groups, composites, questions, allAnswers, language,
+  title, scopeName, cols, pageNum, totalPages, composites, questions, allAnswers, showBenchmark, language,
 }: {
   title: string
   scopeName: string
-  groups: BreakdownGroup<PscsResponse>[]
+  cols: CtGroup[]
+  pageNum: number
+  totalPages: number
   composites: PscsComposite[]
   questions: PscsQuestion[]
   allAnswers: PscsAnswer[]
+  showBenchmark: boolean
   language: 'en' | 'ms'
 }) {
-  const matrix = breakdownMatrix(groups, composites, questions, allAnswers, 3)
-  const compsForCols = composites.filter((c) => !c.is_rating)
+  const compsForRows = composites.filter((c) => !c.is_rating)
+
+  // Pre-compute scope and hospital composite scores per (composite × column)
+  // plus overall composite averages per column.
+  const data = useMemo(() => {
+    const perCol = cols.map((col) => {
+      const scopedAns = answersForResponses(col.scopedResponses, allAnswers)
+      const hospAns   = answersForResponses(col.hospitalResponses, allAnswers)
+      const scopeScores = new Map<string, number | null>()
+      const hospScores  = new Map<string, number | null>()
+      for (const c of compsForRows) {
+        scopeScores.set(c.code, compositeStats(c.code, questions, scopedAns).score)
+        hospScores.set(c.code,  compositeStats(c.code, questions, hospAns).score)
+      }
+      const scopeValid = Array.from(scopeScores.values()).filter((s): s is number => s !== null)
+      const hospValid  = Array.from(hospScores.values()).filter((s): s is number => s !== null)
+      return {
+        col,
+        scopeN: col.scopedResponses.length,
+        hospN:  col.hospitalResponses.length,
+        scopeScores,
+        hospScores,
+        scopeAvg: scopeValid.length === 0 ? null : scopeValid.reduce((a, b) => a + b, 0) / scopeValid.length,
+        hospAvg:  hospValid.length  === 0 ? null : hospValid.reduce((a, b) => a + b, 0)  / hospValid.length,
+      }
+    })
+    return perCol
+  }, [cols, allAnswers, compsForRows, questions])
+
+  function pctCell(v: number | null, n: number): React.ReactNode {
+    if (n < 3) return <span style={{ color: 'var(--muted)', fontSize: 8.5, fontStyle: 'italic' }}>small n</span>
+    if (v === null) return <span style={{ color: 'var(--muted)' }}>—</span>
+    return <span style={{ color: BAND_COLOR[band(v)], fontWeight: 700 }}>{Math.round(v)}%</span>
+  }
+
+  const scopeLabel    = language === 'en' ? 'This Scope' : 'Skop Ini'
+  const hospLabel     = language === 'en' ? 'Hospital'   : 'Hospital'
+  const datasetHeader = language === 'en' ? 'Dataset'    : 'Set Data'
 
   return (
     <div className="rc-page">
       <div className="rc-h">
-        <div className="t1">{language === 'en' ? 'Composite Comparison' : 'Perbandingan Komposit'} — {title}</div>
+        <div className="t1">
+          {language === 'en' ? 'Composite Measure Average % Positive — ' : 'Purata % Positif Komposit — '}
+          {title}
+          {totalPages > 1 && ` (${language === 'en' ? 'page' : 'm/s'} ${pageNum} ${language === 'en' ? 'of' : 'dari'} ${totalPages})`}
+        </div>
         <div className="t2">{scopeName}</div>
       </div>
       <div className="rc-section">
-        <table className="rc-matrix">
+        <table className="rc-xmatrix">
+          <colgroup>
+            <col style={{ width: '34%' }} />
+            <col style={{ width: '12%' }} />
+            {cols.map((c) => <col key={c.key} />)}
+          </colgroup>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left' }}>{language === 'en' ? 'Group' : 'Kumpulan'}</th>
-              <th style={{ width: 40 }}>n</th>
-              <th style={{ width: 50 }}>{language === 'en' ? 'Avg' : 'Purata'}</th>
-              {compsForCols.map((c) => (
-                <th key={c.code} title={language === 'en' ? c.name_en : c.name_ms}>{c.code}</th>
+              <th rowSpan={2} className="rc-xleft">{language === 'en' ? 'SOPS Composite Measures' : 'Komposit SOPS'}</th>
+              <th rowSpan={2} className="rc-xds">{datasetHeader}</th>
+              <th colSpan={cols.length} className="rc-xgrouphdr">{title}</th>
+            </tr>
+            <tr>
+              {cols.map((c) => (
+                <th key={c.key} className="rc-xcol" title={language === 'en' ? c.label_en : c.label_ms}>
+                  {language === 'en' ? c.label_en : c.label_ms}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {matrix.map((row) => (
-              <tr key={row.key} className={row.suppressed ? 'rc-suppressed' : ''}>
-                <td style={{ textAlign: 'left', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{language === 'en' ? row.label_en : row.label_ms}</td>
-                <td style={{ textAlign: 'center' }}>
-                  {row.n}{row.suppressed && <div style={{ fontSize: 8, color: 'var(--amber)', fontWeight: 700 }}>{language === 'en' ? 'small n' : 'n kecil'}</div>}
-                </td>
-                <td style={{ textAlign: 'right', fontWeight: 700, color: row.suppressed ? 'var(--muted)' : (row.overall === null ? 'var(--muted)' : BAND_COLOR[band(row.overall)]) }}>
-                  {row.suppressed ? '·' : (row.overall === null ? '—' : `${Math.round(row.overall)}%`)}
-                </td>
-                {compsForCols.map((c) => {
-                  const s = row.perComposite.get(c.code) ?? null
-                  return (
-                    <td key={c.code} style={{ textAlign: 'center', fontSize: 9.5, fontWeight: 700, color: row.suppressed ? 'var(--muted)' : (s === null ? 'var(--muted)' : BAND_COLOR[band(s)]) }}>
-                      {row.suppressed ? '·' : (s === null ? '—' : `${Math.round(s)}%`)}
-                    </td>
-                  )
-                })}
+            {/* Respondent counts header — 1 or 2 rows */}
+            <tr className="rc-xcount-row">
+              <td className="rc-xleft"><b>{language === 'en' ? '# Respondents' : 'Bil. Respondent'}</b></td>
+              <td className="rc-xds">{showBenchmark ? scopeLabel : (language === 'en' ? 'Your Hospital' : 'Hospital Anda')}</td>
+              {data.map((d) => (
+                <td key={d.col.key} className="rc-xcount">{d.scopeN}</td>
+              ))}
+            </tr>
+            {showBenchmark && (
+              <tr className="rc-xcount-row">
+                <td className="rc-xleft" />
+                <td className="rc-xds">{hospLabel}</td>
+                {data.map((d) => (
+                  <td key={d.col.key} className="rc-xcount" style={{ color: 'var(--muted)' }}>{d.hospN}</td>
+                ))}
               </tr>
+            )}
+
+            {/* Composite rows */}
+            {compsForRows.map((c, ci) => (
+              <React.Fragment key={c.code}>
+                <tr className="rc-xcomp-row">
+                  <td className="rc-xleft" rowSpan={showBenchmark ? 2 : 1}>
+                    <div className="rc-xcomp-num">{ci + 1}.</div>
+                    <div className="rc-xcomp-name">{language === 'en' ? c.name_en : c.name_ms}</div>
+                    <div className="rc-xcomp-code">{c.code}{c.is_custom && <span className="rc-tag" style={{ marginLeft: 4 }}>HASA</span>}</div>
+                  </td>
+                  <td className="rc-xds">{showBenchmark ? scopeLabel : (language === 'en' ? 'Your Hospital' : 'Hospital Anda')}</td>
+                  {data.map((d) => (
+                    <td key={d.col.key} className="rc-xcell">
+                      {pctCell(d.scopeScores.get(c.code) ?? null, d.scopeN)}
+                    </td>
+                  ))}
+                </tr>
+                {showBenchmark && (
+                  <tr className="rc-xcomp-row rc-xhosp-row">
+                    <td className="rc-xds">{hospLabel}</td>
+                    {data.map((d) => (
+                      <td key={d.col.key} className="rc-xcell">
+                        {pctCell(d.hospScores.get(c.code) ?? null, d.hospN)}
+                      </td>
+                    ))}
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
+
+            {/* Composite Measure Average rows */}
+            <tr className="rc-xavg-row">
+              <td className="rc-xleft" rowSpan={showBenchmark ? 2 : 1}>
+                <b>{language === 'en' ? 'Composite Measure Average' : 'Purata Komposit'}</b>
+              </td>
+              <td className="rc-xds">{showBenchmark ? scopeLabel : (language === 'en' ? 'Your Hospital' : 'Hospital Anda')}</td>
+              {data.map((d) => (
+                <td key={d.col.key} className="rc-xcell"><b>{pctCell(d.scopeAvg, d.scopeN)}</b></td>
+              ))}
+            </tr>
+            {showBenchmark && (
+              <tr className="rc-xavg-row rc-xhosp-row">
+                <td className="rc-xds">{hospLabel}</td>
+                {data.map((d) => (
+                  <td key={d.col.key} className="rc-xcell"><b>{pctCell(d.hospAvg, d.hospN)}</b></td>
+                ))}
+              </tr>
+            )}
           </tbody>
         </table>
+
         <div className="rc-legend" style={{ marginTop: 6 }}>
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.strength }} /> ≥ 75%</span>
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.watch }} /> 50–74%</span>
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.gap }} /> &lt; 50%</span>
           <span style={{ color: 'var(--muted)' }}>
             {language === 'en'
-              ? '"small n" = fewer than 3 responses — cells hidden to protect anonymity. "—" = AHRQ per-item ≥3 valid responses rule not met.'
-              : '"n kecil" = kurang dari 3 maklum balas — sel disembunyikan. "—" = syarat AHRQ ≥3 maklum balas sah tidak dipenuhi.'}
+              ? 'small n = cohort has fewer than 3 responses (cells suppressed). — = AHRQ per-item ≥3 valid responses rule not met.'
+              : 'n kecil = kumpulan ada kurang dari 3 maklum balas (sel disembunyikan). — = syarat AHRQ ≥3 maklum balas sah tidak dipenuhi.'}
           </span>
         </div>
       </div>
