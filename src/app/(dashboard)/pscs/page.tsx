@@ -22,13 +22,13 @@ import {
 } from '@/lib/pscs/types'
 import {
   BAND_COLOR, BAND_LABEL, band, BreakdownGroup, BreakdownRow, breakdownMatrix,
-  compositeStats, distribution, itemStats,
+  answersForResponses, compositeStats, distribution, itemStats,
 } from '@/lib/pscs/scoring'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, Title)
 
 /* ======================== TABS ======================== */
-type TabId = 'overview' | 'composites' | 'item-level' | 'breakdowns' | 'comments'
+type TabId = 'overview' | 'composites' | 'item-level' | 'breakdowns' | 'comments' | 'reportcard'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'overview',   label: 'Overview',   icon: '📊' },
@@ -36,6 +36,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'item-level', label: 'Item-Level', icon: '📋' },
   { id: 'breakdowns', label: 'Breakdowns', icon: '🧭' },
   { id: 'comments',   label: 'Comments',   icon: '💬' },
+  { id: 'reportcard', label: 'Report Card', icon: '📄' },
 ]
 
 /* ======================== PAGE ======================== */
@@ -202,6 +203,7 @@ export default function PscsPage() {
               {tab === 'item-level' && <ItemLevelTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} language={language} />}
               {tab === 'breakdowns' && <BreakdownsTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
               {tab === 'comments'   && <CommentsTab responses={filteredResponses} departments={departments!} positions={positions!} language={language} />}
+              {tab === 'reportcard' && <ReportCardTab campaign={campaign} campaigns={campaigns!} allResponses={responses!} allAnswers={answers!} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
             </>
           )}
         </div>
@@ -1065,6 +1067,1162 @@ function CommentsTab({ responses, departments, positions, language }: {
           </div>
         )}
       </Panel>
+    </div>
+  )
+}
+
+/* ======================== TAB 6 — REPORT CARD ======================== */
+/*
+ * Hospital-level and department-level PSCS Report Card.
+ *
+ * Layout follows the AHRQ SOPS 2.0 Individual Hospital Feedback Report
+ * structure but adapted for HASA: no comparison to an external database,
+ * instead each scoped report includes a faded "Hospital overall" benchmark
+ * column. Renders as one or more A4 .rc-page divs inside a preview area;
+ * the Download PDF button opens a print window populated with cloned pages
+ * (canvas → img swap so Chart.js charts survive serialization) and triggers
+ * window.print() — exactly how the IR and KPI report cards work.
+ */
+
+type ReportScope =
+  | { kind: 'all' }
+  | { kind: 'directorate'; code: string }
+  | { kind: 'department';  code: string }
+  | { kind: 'subunit';     code: string }
+
+function ReportCardTab({
+  campaign, campaigns, allResponses, allAnswers, questions, composites, positions, departments, language,
+}: {
+  campaign: PscsCampaign | null
+  campaigns: PscsCampaign[]
+  allResponses: PscsResponse[]
+  allAnswers: PscsAnswer[]
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
+  language: 'en' | 'ms'
+}) {
+  // Scope selector inputs
+  const [directorate, setDirectorate] = useState<string>('all')
+  const [department,  setDepartment]  = useState<string>('all')
+  const [subunit,     setSubunit]     = useState<string>('all')
+  const [generated,   setGenerated]   = useState<ReportScope | null>(null)
+
+  const directorateOpts = useMemo(
+    () => departments.filter((d) => d.kind === 'directorate').sort((a, b) => a.sort_order - b.sort_order),
+    [departments],
+  )
+  const departmentOpts = useMemo(
+    () => departments.filter((d) => d.kind === 'department')
+      .filter((d) => directorate === 'all' || d.parent_code === directorate)
+      .sort((a, b) => a.sort_order - b.sort_order),
+    [departments, directorate],
+  )
+  const subunitOpts = useMemo(
+    () => department === 'all' ? [] : departments
+      .filter((d) => d.kind === 'subunit' && d.parent_code === department)
+      .sort((a, b) => a.sort_order - b.sort_order),
+    [departments, department],
+  )
+
+  function generate() {
+    if (subunit !== 'all') setGenerated({ kind: 'subunit', code: subunit })
+    else if (department !== 'all') setGenerated({ kind: 'department', code: department })
+    else if (directorate !== 'all') setGenerated({ kind: 'directorate', code: directorate })
+    else setGenerated({ kind: 'all' })
+  }
+  function generateAll() {
+    setDirectorate('all'); setDepartment('all'); setSubunit('all')
+    setGenerated({ kind: 'all' })
+  }
+
+  function downloadPdf() {
+    if (typeof window === 'undefined') return
+    const preview = document.getElementById('pscs-rc-preview')
+    if (!preview) return
+    const pages = Array.from(preview.querySelectorAll<HTMLElement>('.rc-page'))
+    if (pages.length === 0) return
+
+    // Clone each page then replace its canvases with PNG <img>s rendered from
+    // the live canvas — outerHTML doesn't preserve canvas bitmaps.
+    const clonedPages = pages.map((page) => {
+      const clone = page.cloneNode(true) as HTMLElement
+      const originals = Array.from(page.querySelectorAll('canvas'))
+      const clonedCanvases = Array.from(clone.querySelectorAll('canvas'))
+      originals.forEach((orig, i) => {
+        const target = clonedCanvases[i]
+        if (!target) return
+        try {
+          const dataUrl = orig.toDataURL('image/png')
+          const img = clone.ownerDocument!.createElement('img')
+          img.src = dataUrl
+          const rect = orig.getBoundingClientRect()
+          img.style.width = `${rect.width}px`
+          img.style.height = `${rect.height}px`
+          img.style.display = 'block'
+          target.replaceWith(img)
+        } catch { /* tainted canvas — leave as-is */ }
+      })
+      return clone
+    })
+
+    const pageHtml = clonedPages.map((p) => p.outerHTML).join('\n')
+    const css = Array.from(document.styleSheets).map((s) => {
+      try { return Array.from(s.cssRules).map((r) => r.cssText).join('\n') }
+      catch { return '' }
+    }).join('\n')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>PSCS Report Card</title><style>${css}\n@page{size:A4;margin:0}body{margin:0;padding:0;background:#fff;}</style></head><body>${pageHtml}<script>window.onload=()=>window.print()</script></body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.open(); w.document.write(html); w.document.close()
+  }
+
+  return (
+    <>
+      <div className="rc-controls">
+        <div className="pf">
+          <div>
+            <div className="pt">{language === 'en' ? 'PSCS Report Card' : 'Kad Laporan PSCS'}</div>
+            <div className="psub">
+              {language === 'en'
+                ? 'Generate a printable PSCS report at hospital, directorate, department, or sub-unit scope. Department-level reports include a faded "Hospital overall" benchmark column.'
+                : 'Hasilkan laporan PSCS yang boleh dicetak pada skop hospital, direktorat, jabatan, atau sub-unit. Laporan peringkat jabatan termasuk lajur penanda aras "Hospital keseluruhan".'}
+            </div>
+          </div>
+        </div>
+        <div className="row">
+          <div>
+            <label>{language === 'en' ? 'Directorate' : 'Direktorat'}</label>
+            <select value={directorate} onChange={(e) => { setDirectorate(e.target.value); setDepartment('all'); setSubunit('all') }}>
+              <option value="all">{language === 'en' ? 'All directorates' : 'Semua direktorat'}</option>
+              {directorateOpts.map((d) => (
+                <option key={d.code} value={d.code}>{language === 'en' ? d.name_en : d.name_ms}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>{language === 'en' ? 'Department' : 'Jabatan'}</label>
+            <select value={department} onChange={(e) => { setDepartment(e.target.value); setSubunit('all') }}>
+              <option value="all">{language === 'en' ? 'All departments' : 'Semua jabatan'}</option>
+              {departmentOpts.map((d) => (
+                <option key={d.code} value={d.code}>{language === 'en' ? d.name_en : d.name_ms}</option>
+              ))}
+            </select>
+          </div>
+          {subunitOpts.length > 0 && (
+            <div>
+              <label>{language === 'en' ? 'Sub-unit' : 'Sub-unit'}</label>
+              <select value={subunit} onChange={(e) => setSubunit(e.target.value)}>
+                <option value="all">{language === 'en' ? 'All sub-units' : 'Semua sub-unit'}</option>
+                {subunitOpts.map((d) => (
+                  <option key={d.code} value={d.code}>{language === 'en' ? d.name_en : d.name_ms}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button className="btn" type="button" onClick={generate}>
+            {language === 'en' ? 'Generate Report' : 'Hasilkan Laporan'}
+          </button>
+          <button className="btn ghost" type="button" onClick={generateAll}>
+            🏥 {language === 'en' ? 'Whole Hospital' : 'Seluruh Hospital'}
+          </button>
+          <button className="btn ghost" type="button" onClick={downloadPdf} disabled={!generated}>
+            ⬇ {language === 'en' ? 'Download PDF' : 'Muat Turun PDF'}
+          </button>
+        </div>
+      </div>
+
+      <div className="rc-preview" id="pscs-rc-preview">
+        {!generated && (
+          <div style={{ background: '#fff', padding: 30, borderRadius: 6, color: 'var(--muted)', textAlign: 'center', fontSize: 13 }}>
+            {language === 'en'
+              ? 'Choose a scope and press Generate Report — or click Whole Hospital for a hospital-wide report.'
+              : 'Pilih skop dan tekan Hasilkan Laporan — atau klik Seluruh Hospital untuk laporan seluruh hospital.'}
+          </div>
+        )}
+        {generated && (
+          <PscsReport
+            scope={generated}
+            campaign={campaign}
+            campaigns={campaigns}
+            allResponses={allResponses}
+            allAnswers={allAnswers}
+            questions={questions}
+            composites={composites}
+            positions={positions}
+            departments={departments}
+            language={language}
+          />
+        )}
+      </div>
+    </>
+  )
+}
+
+/* ----- Scope helpers ----- */
+
+function scopeName(scope: ReportScope, departments: PscsDepartment[], lang: 'en' | 'ms'): { name: string; kindLabel: string } {
+  if (scope.kind === 'all') {
+    return {
+      name: lang === 'en' ? 'Whole Hospital' : 'Seluruh Hospital',
+      kindLabel: lang === 'en' ? 'Hospital-wide report' : 'Laporan seluruh hospital',
+    }
+  }
+  const d = departments.find((x) => x.code === scope.code)
+  const nm = d ? (lang === 'en' ? d.name_en : d.name_ms) : scope.code
+  const kindLabel =
+    scope.kind === 'directorate' ? (lang === 'en' ? 'Directorate-level report' : 'Laporan peringkat direktorat') :
+    scope.kind === 'department'  ? (lang === 'en' ? 'Department-level report'  : 'Laporan peringkat jabatan') :
+                                   (lang === 'en' ? 'Sub-unit-level report'    : 'Laporan peringkat sub-unit')
+  return { name: nm, kindLabel }
+}
+
+/* Returns responses that fall within `scope`. */
+function scopeResponses(scope: ReportScope, all: PscsResponse[], departments: PscsDepartment[]): PscsResponse[] {
+  if (scope.kind === 'all') return all
+  if (scope.kind === 'directorate') {
+    const deptsInDir = new Set(departments.filter((d) => d.kind === 'department' && d.parent_code === scope.code).map((d) => d.code))
+    return all.filter((r) => r.department_code != null && deptsInDir.has(r.department_code))
+  }
+  if (scope.kind === 'department') return all.filter((r) => r.department_code === scope.code)
+  return all.filter((r) => r.sub_department_code === scope.code)
+}
+
+/* ======================== REPORT (multi-page) ======================== */
+
+function PscsReport({
+  scope, campaign, campaigns, allResponses, allAnswers, questions, composites, positions, departments, language,
+}: {
+  scope: ReportScope
+  campaign: PscsCampaign | null
+  campaigns: PscsCampaign[]
+  allResponses: PscsResponse[]
+  allAnswers: PscsAnswer[]
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
+  language: 'en' | 'ms'
+}) {
+  const showBenchmark = scope.kind !== 'all'
+  const { name: scopeNameStr, kindLabel } = scopeName(scope, departments, language)
+
+  // Filter to selected campaign first, then to scope
+  const campResponses = useMemo(
+    () => allResponses.filter((r) => campaign ? r.campaign_id === campaign.id : true),
+    [allResponses, campaign],
+  )
+  const scoped = useMemo(() => scopeResponses(scope, campResponses, departments), [scope, campResponses, departments])
+  const scopedAnswers = useMemo(() => answersForResponses(scoped, allAnswers), [scoped, allAnswers])
+  const hospitalAnswers = useMemo(() => answersForResponses(campResponses, allAnswers), [campResponses, allAnswers])
+
+  // Trend stub: find previous campaign with responses, compute composite scores per code for trend arrows.
+  const prevCampaign = useMemo(() => {
+    if (!campaign) return null
+    const earlier = campaigns
+      .filter((c) => c.id !== campaign.id && new Date(c.open_date) < new Date(campaign.open_date))
+      .sort((a, b) => new Date(b.open_date).getTime() - new Date(a.open_date).getTime())
+    for (const c of earlier) {
+      const had = allResponses.some((r) => r.campaign_id === c.id)
+      if (had) return c
+    }
+    return null
+  }, [campaign, campaigns, allResponses])
+
+  const prevScopedAnswers = useMemo(() => {
+    if (!prevCampaign) return null
+    const prevAll = allResponses.filter((r) => r.campaign_id === prevCampaign.id)
+    const prevScoped = scopeResponses(scope, prevAll, departments)
+    return answersForResponses(prevScoped, allAnswers)
+  }, [prevCampaign, allResponses, scope, departments, allAnswers])
+
+  const reportDate = new Date().toISOString().slice(0, 10)
+
+  return (
+    <>
+      <ReportCover
+        scopeName={scopeNameStr}
+        kindLabel={kindLabel}
+        campaign={campaign}
+        reportDate={reportDate}
+        scoped={scoped}
+        scopedAnswers={scopedAnswers}
+        questions={questions}
+        composites={composites}
+        language={language}
+      />
+      <ReportAdminStats
+        scopeName={scopeNameStr}
+        scoped={scoped}
+        positions={positions}
+        departments={departments}
+        language={language}
+      />
+      <ReportComposites
+        scopeName={scopeNameStr}
+        scopedAnswers={scopedAnswers}
+        hospitalAnswers={hospitalAnswers}
+        prevScopedAnswers={prevScopedAnswers}
+        showBenchmark={showBenchmark}
+        questions={questions}
+        composites={composites}
+        language={language}
+      />
+      <ReportItemLevel
+        scopeName={scopeNameStr}
+        scopedAnswers={scopedAnswers}
+        hospitalAnswers={hospitalAnswers}
+        showBenchmark={showBenchmark}
+        questions={questions}
+        composites={composites}
+        language={language}
+      />
+      <ReportEventsRating
+        scopeName={scopeNameStr}
+        scopedAnswers={scopedAnswers}
+        language={language}
+      />
+      <ReportCrossTabs
+        scope={scope}
+        scopeName={scopeNameStr}
+        scoped={scoped}
+        scopedAnswers={scopedAnswers}
+        questions={questions}
+        composites={composites}
+        positions={positions}
+        departments={departments}
+        language={language}
+      />
+      <ReportMethodology language={language} />
+    </>
+  )
+}
+
+/* ----- Page: Cover ----- */
+
+function ReportCover({
+  scopeName, kindLabel, campaign, reportDate, scoped, scopedAnswers, questions, composites, language,
+}: {
+  scopeName: string
+  kindLabel: string
+  campaign: PscsCampaign | null
+  reportDate: string
+  scoped: PscsResponse[]
+  scopedAnswers: PscsAnswer[]
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  language: 'en' | 'ms'
+}) {
+  // Top 5 strengths / gaps from items with ≥3 valid responses
+  const allItems = useMemo(() => {
+    return questions
+      .filter((q) => q.active && !composites.find((c) => c.code === q.composite_code)?.is_rating)
+      .map((q) => ({ q, st: itemStats(q, scopedAnswers) }))
+      .filter((x) => x.st.total >= 3)
+      .sort((a, b) => b.st.pct_positive - a.st.pct_positive)
+  }, [questions, composites, scopedAnswers])
+  const topStrengths = allItems.slice(0, 5)
+  const topGaps = [...allItems].reverse().slice(0, 5)
+
+  // Overall composite average
+  const compsForAvg = composites.filter((c) => !c.is_rating)
+  const compositeScores = compsForAvg
+    .map((c) => compositeStats(c.code, questions, scopedAnswers).score)
+    .filter((s): s is number => s !== null)
+  const overallAvg = compositeScores.length === 0
+    ? null
+    : compositeScores.reduce((a, b) => a + b, 0) / compositeScores.length
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Patient Safety Culture Survey' : 'Tinjauan Budaya Keselamatan Pesakit'}</div>
+        <div className="t2">{language === 'en' ? 'Hospital Al-Sultan Abdullah UiTM · RMCQ' : 'Hospital Al-Sultan Abdullah UiTM · RMCQ'}</div>
+      </div>
+
+      <div className="rc-cover-block">
+        <div className="rc-cover-kind">{kindLabel}</div>
+        <div className="rc-cover-scope">{scopeName}</div>
+        <div className="rc-cover-meta">
+          {campaign && (
+            <>
+              {language === 'en' ? 'Campaign' : 'Kempen'}: <b>{campaign.code} · {language === 'en' ? campaign.name_en : campaign.name_ms}</b><br />
+              {language === 'en' ? 'Open' : 'Buka'}: {campaign.open_date} → {campaign.close_date}<br />
+            </>
+          )}
+          {language === 'en' ? 'Generated' : 'Dihasilkan'}: {reportDate}
+        </div>
+      </div>
+
+      <div className="rc-cover-tiles">
+        <div className="rc-cover-tile">
+          <div className="l">{language === 'en' ? 'Completed Responses' : 'Maklum balas Lengkap'}</div>
+          <div className="v" style={{ color: 'var(--blue)' }}>{scoped.length}</div>
+        </div>
+        <div className="rc-cover-tile">
+          <div className="l">{language === 'en' ? 'Composite Avg' : 'Purata Komposit'}</div>
+          <div className="v" style={{ color: overallAvg !== null ? BAND_COLOR[band(overallAvg)] : 'var(--muted)' }}>
+            {overallAvg === null ? '—' : `${Math.round(overallAvg)}%`}
+          </div>
+          <div className="s">{language === 'en' ? '% positive (AHRQ avg)' : '% positif (purata AHRQ)'}</div>
+        </div>
+        <div className="rc-cover-tile">
+          <div className="l">{language === 'en' ? 'Items Scored' : 'Item Diskor'}</div>
+          <div className="v" style={{ color: 'var(--blue)' }}>{allItems.length}<span style={{ fontSize: 11, color: 'var(--muted)' }}> / {questions.filter((q) => q.active && !composites.find((c) => c.code === q.composite_code)?.is_rating).length}</span></div>
+          <div className="s">{language === 'en' ? 'items with ≥3 valid responses' : 'item dengan ≥3 maklum balas sah'}</div>
+        </div>
+      </div>
+
+      <div className="rc-cover-callouts">
+        <div className="rc-callout rc-strengths">
+          <div className="rc-callout-head">
+            🟢 {language === 'en' ? 'Top 5 Strengths' : '5 Kekuatan Teratas'}
+          </div>
+          {topStrengths.length === 0 ? (
+            <div className="rc-callout-empty">{language === 'en' ? 'Not enough data yet.' : 'Data belum mencukupi.'}</div>
+          ) : (
+            <ol className="rc-callout-list">
+              {topStrengths.map(({ q, st }) => (
+                <li key={q.id}>
+                  <span className="rc-item-id">{q.id}</span>
+                  <span className="rc-item-text">{language === 'en' ? q.text_en : q.text_ms}</span>
+                  <span className="rc-item-pct" style={{ color: BAND_COLOR[band(st.pct_positive)] }}>{Math.round(st.pct_positive)}%</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+        <div className="rc-callout rc-gaps">
+          <div className="rc-callout-head">
+            🔴 {language === 'en' ? 'Top 5 Gaps' : '5 Jurang Teratas'}
+          </div>
+          {topGaps.length === 0 ? (
+            <div className="rc-callout-empty">{language === 'en' ? 'Not enough data yet.' : 'Data belum mencukupi.'}</div>
+          ) : (
+            <ol className="rc-callout-list">
+              {topGaps.map(({ q, st }) => (
+                <li key={q.id}>
+                  <span className="rc-item-id">{q.id}</span>
+                  <span className="rc-item-text">{language === 'en' ? q.text_en : q.text_ms}</span>
+                  <span className="rc-item-pct" style={{ color: BAND_COLOR[band(st.pct_positive)] }}>{Math.round(st.pct_positive)}%</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+/* ----- Page: Survey Administration Statistics ----- */
+
+function ReportAdminStats({
+  scopeName, scoped, positions, departments, language,
+}: {
+  scopeName: string
+  scoped: PscsResponse[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
+  language: 'en' | 'ms'
+}) {
+  const total = scoped.length
+
+  // By position group
+  const posBy = useMemo(() => {
+    const groupByPos = new Map<number, { en: string; ms: string }>()
+    for (const p of positions) groupByPos.set(p.id, { en: p.group_en, ms: p.group_ms })
+    const m = new Map<string, { en: string; ms: string; n: number }>()
+    for (const r of scoped) {
+      const g = r.position_id ? groupByPos.get(r.position_id) : null
+      const k = g?.en ?? '__none__'
+      const cur = m.get(k) ?? { en: g?.en ?? 'Not specified', ms: g?.ms ?? 'Tidak dinyatakan', n: 0 }
+      cur.n++
+      m.set(k, cur)
+    }
+    return Array.from(m.values()).sort((a, b) => b.n - a.n)
+  }, [scoped, positions])
+
+  // By directorate
+  const dirBy = useMemo(() => {
+    const dirOf = new Map<string, string | null>()
+    for (const d of departments) if (d.kind === 'department') dirOf.set(d.code, d.parent_code)
+    const dirName = new Map<string, { en: string; ms: string }>()
+    for (const d of departments) if (d.kind === 'directorate') dirName.set(d.code, { en: d.name_en, ms: d.name_ms })
+    const m = new Map<string, { en: string; ms: string; n: number }>()
+    for (const r of scoped) {
+      const dirCode = r.department_code ? (dirOf.get(r.department_code) ?? null) : null
+      const nm = dirCode ? dirName.get(dirCode) : null
+      const k = dirCode ?? '__none__'
+      const cur = m.get(k) ?? { en: nm?.en ?? 'Not specified', ms: nm?.ms ?? 'Tidak dinyatakan', n: 0 }
+      cur.n++
+      m.set(k, cur)
+    }
+    return Array.from(m.values()).sort((a, b) => b.n - a.n)
+  }, [scoped, departments])
+
+  const tenureBy = useMemo(() => {
+    const order = ['<1y','1-5y','6-10y','11+y']
+    const labels: Record<string, { en: string; ms: string }> = {
+      '<1y':   { en: 'Less than 1 year', ms: 'Kurang dari 1 tahun' },
+      '1-5y':  { en: '1–5 years',        ms: '1–5 tahun' },
+      '6-10y': { en: '6–10 years',       ms: '6–10 tahun' },
+      '11+y':  { en: '11+ years',        ms: '11+ tahun' },
+    }
+    const counts = new Map<string, number>()
+    for (const o of order) counts.set(o, 0)
+    let unk = 0
+    for (const r of scoped) {
+      if (r.tenure_hospital && counts.has(r.tenure_hospital)) counts.set(r.tenure_hospital, (counts.get(r.tenure_hospital) ?? 0) + 1)
+      else unk++
+    }
+    const rows = order.map((k) => ({ key: k, label_en: labels[k].en, label_ms: labels[k].ms, n: counts.get(k) ?? 0 }))
+    if (unk > 0) rows.push({ key: '__none__', label_en: 'Not specified', label_ms: 'Tidak dinyatakan', n: unk })
+    return rows
+  }, [scoped])
+
+  const contactBy = useMemo(() => {
+    let yes = 0, no = 0, unk = 0
+    for (const r of scoped) {
+      if (r.direct_patient_contact === true) yes++
+      else if (r.direct_patient_contact === false) no++
+      else unk++
+    }
+    return { yes, no, unk }
+  }, [scoped])
+
+  const hoursBy = useMemo(() => {
+    const order = ['<30','30-40','>40']
+    const labels: Record<string, { en: string; ms: string }> = {
+      '<30':   { en: '< 30 hrs/wk', ms: '< 30 jam/mgu' },
+      '30-40': { en: '30–40 hrs/wk', ms: '30–40 jam/mgu' },
+      '>40':   { en: '> 40 hrs/wk', ms: '> 40 jam/mgu' },
+    }
+    const counts = new Map<string, number>()
+    for (const o of order) counts.set(o, 0)
+    let unk = 0
+    for (const r of scoped) {
+      if (r.hours_per_week && counts.has(r.hours_per_week)) counts.set(r.hours_per_week, (counts.get(r.hours_per_week) ?? 0) + 1)
+      else unk++
+    }
+    const rows = order.map((k) => ({ key: k, label_en: labels[k].en, label_ms: labels[k].ms, n: counts.get(k) ?? 0 }))
+    if (unk > 0) rows.push({ key: '__none__', label_en: 'Not specified', label_ms: 'Tidak dinyatakan', n: unk })
+    return rows
+  }, [scoped])
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Survey Administration Statistics' : 'Statistik Pentadbiran Tinjauan'}</div>
+        <div className="t2">{scopeName}</div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">{language === 'en' ? 'Response Summary' : 'Ringkasan Maklum Balas'}</div>
+        <div className="rc-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="rc-kpi"><div className="l">{language === 'en' ? 'Completed' : 'Lengkap'}</div><div className="v" style={{ color: 'var(--blue)' }}>{total}</div></div>
+          <div className="rc-kpi"><div className="l">{language === 'en' ? 'Position Groups' : 'Kumpulan'}</div><div className="v" style={{ color: 'var(--teal)' }}>{posBy.length}</div></div>
+          <div className="rc-kpi"><div className="l">{language === 'en' ? 'Directorates' : 'Direktorat'}</div><div className="v" style={{ color: 'var(--amber)' }}>{dirBy.length}</div></div>
+          <div className="rc-kpi"><div className="l">{language === 'en' ? 'With Patient Contact' : 'Interaksi Pesakit'}</div><div className="v" style={{ color: 'var(--green)' }}>{contactBy.yes}</div></div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="rc-section">
+          <div className="rc-st">{language === 'en' ? 'By Position Group' : 'Mengikut Kumpulan Kakitangan'}</div>
+          <RcDistTable rows={posBy.map((r) => ({ label: language === 'en' ? r.en : r.ms, n: r.n }))} total={total} />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">{language === 'en' ? 'By Directorate' : 'Mengikut Direktorat'}</div>
+          <RcDistTable rows={dirBy.map((r) => ({ label: language === 'en' ? r.en : r.ms, n: r.n }))} total={total} />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">{language === 'en' ? 'By Tenure in Hospital' : 'Mengikut Tempoh di Hospital'}</div>
+          <RcDistTable rows={tenureBy.map((r) => ({ label: language === 'en' ? r.label_en : r.label_ms, n: r.n }))} total={total} />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">{language === 'en' ? 'By Working Hours' : 'Mengikut Waktu Bekerja'}</div>
+          <RcDistTable rows={hoursBy.map((r) => ({ label: language === 'en' ? r.label_en : r.label_ms, n: r.n }))} total={total} />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">{language === 'en' ? 'By Patient Contact' : 'Mengikut Interaksi Pesakit'}</div>
+          <RcDistTable rows={[
+            { label: language === 'en' ? 'Yes — direct patient contact' : 'Ya — interaksi langsung', n: contactBy.yes },
+            { label: language === 'en' ? 'No — no direct contact' : 'Tidak — tiada interaksi langsung', n: contactBy.no },
+            ...(contactBy.unk > 0 ? [{ label: language === 'en' ? 'Not specified' : 'Tidak dinyatakan', n: contactBy.unk }] : []),
+          ]} total={total} />
+        </div>
+      </div>
+
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+function RcDistTable({ rows, total }: { rows: { label: string; n: number }[]; total: number }) {
+  return (
+    <table className="rc-dist">
+      <thead>
+        <tr><th>Group</th><th>n</th><th>%</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label}>
+            <td>{r.label}</td>
+            <td>{r.n}</td>
+            <td>{total === 0 ? '—' : `${Math.round((r.n / total) * 100)}%`}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/* ----- Page: Composite Measure Results ----- */
+
+function ReportComposites({
+  scopeName, scopedAnswers, hospitalAnswers, prevScopedAnswers, showBenchmark, questions, composites, language,
+}: {
+  scopeName: string
+  scopedAnswers: PscsAnswer[]
+  hospitalAnswers: PscsAnswer[]
+  prevScopedAnswers: PscsAnswer[] | null
+  showBenchmark: boolean
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  language: 'en' | 'ms'
+}) {
+  const comps = composites.filter((c) => !c.is_rating)
+  const rows = comps.map((c) => {
+    const cur = compositeStats(c.code, questions, scopedAnswers)
+    const hosp = compositeStats(c.code, questions, hospitalAnswers).score
+    const prev = prevScopedAnswers ? compositeStats(c.code, questions, prevScopedAnswers).score : null
+    return { comp: c, score: cur.score, items: `${cur.itemsWithScore}/${cur.itemsTotal}`, hosp, prev }
+  })
+  const valid = rows.map((r) => r.score).filter((s): s is number => s !== null)
+  const avg = valid.length === 0 ? null : valid.reduce((a, b) => a + b, 0) / valid.length
+
+  const hospValid = rows.map((r) => r.hosp).filter((s): s is number => s !== null)
+  const hospAvg = hospValid.length === 0 ? null : hospValid.reduce((a, b) => a + b, 0) / hospValid.length
+
+  function trend(curr: number | null, prev: number | null) {
+    if (curr === null || prev === null) return null
+    const delta = curr - prev
+    if (Math.abs(delta) < 1) return { arrow: '→', color: 'var(--muted)' }
+    if (delta > 0) return { arrow: '↑', color: 'var(--green)' }
+    return { arrow: '↓', color: 'var(--red)' }
+  }
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Composite Measure Results' : 'Keputusan Skor Komposit'}</div>
+        <div className="t2">{scopeName}</div>
+      </div>
+
+      <div className="rc-section">
+        <table className="rc-comp">
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>{language === 'en' ? 'Patient Safety Culture Composite Measures' : 'Skor Komposit Budaya Keselamatan'}</th>
+              <th>{language === 'en' ? '% Positive Response' : '% Positif'}</th>
+              <th style={{ width: 70 }}>{language === 'en' ? 'Score' : 'Skor'}</th>
+              <th style={{ width: 50 }}>Items</th>
+              {showBenchmark && <th style={{ width: 60 }}>{language === 'en' ? 'Hospital' : 'Hospital'}</th>}
+              {prevScopedAnswers && <th style={{ width: 50 }}>{language === 'en' ? 'Trend' : 'Trend'}</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ comp: c, score, items, hosp, prev }) => {
+              const bnd = band(score)
+              const tr = trend(score, prev)
+              return (
+                <tr key={c.code}>
+                  <td>
+                    <div className="rc-comp-name">{language === 'en' ? c.name_en : c.name_ms} {c.is_custom && <span className="rc-tag">HASA</span>}</div>
+                    <div className="rc-comp-code">{c.code}</div>
+                  </td>
+                  <td>
+                    {score === null ? (
+                      <span className="rc-na">{language === 'en' ? 'insufficient data' : 'data tidak cukup'}</span>
+                    ) : (
+                      <div className="rc-cbar"><div className="rc-cbar-fill" style={{ width: `${score}%`, background: BAND_COLOR[bnd] }} /></div>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: score === null ? 'var(--muted)' : BAND_COLOR[bnd] }}>
+                    {score === null ? '—' : `${Math.round(score)}%`}
+                  </td>
+                  <td style={{ textAlign: 'center', fontSize: 9, color: 'var(--muted)' }}>{items}</td>
+                  {showBenchmark && (
+                    <td style={{ textAlign: 'right', fontSize: 10, color: hosp === null ? 'var(--muted)' : BAND_COLOR[band(hosp)], fontWeight: 600 }}>
+                      {hosp === null ? '—' : `${Math.round(hosp)}%`}
+                    </td>
+                  )}
+                  {prevScopedAnswers && (
+                    <td style={{ textAlign: 'center', color: tr?.color ?? 'var(--muted)', fontWeight: 700 }}>
+                      {tr ? tr.arrow : '—'}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
+            <tr className="rc-avg-row">
+              <td><b>{language === 'en' ? 'Composite Measure Average' : 'Purata Skor Komposit'}</b></td>
+              <td>
+                {avg === null ? <span className="rc-na">—</span>
+                  : <div className="rc-cbar"><div className="rc-cbar-fill" style={{ width: `${avg}%`, background: BAND_COLOR[band(avg)] }} /></div>}
+              </td>
+              <td style={{ textAlign: 'right', fontWeight: 700, color: avg === null ? 'var(--muted)' : BAND_COLOR[band(avg)] }}>
+                {avg === null ? '—' : `${Math.round(avg)}%`}
+              </td>
+              <td />
+              {showBenchmark && (
+                <td style={{ textAlign: 'right', fontSize: 10, color: hospAvg === null ? 'var(--muted)' : BAND_COLOR[band(hospAvg)], fontWeight: 700 }}>
+                  {hospAvg === null ? '—' : `${Math.round(hospAvg)}%`}
+                </td>
+              )}
+              {prevScopedAnswers && <td />}
+            </tr>
+          </tbody>
+        </table>
+
+        <div className="rc-legend">
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.strength }} /> {language === 'en' ? 'Strength ≥75%' : 'Kekuatan ≥75%'}</span>
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.watch }} /> {language === 'en' ? 'Watch 50–74%' : 'Pemantauan 50–74%'}</span>
+          <span><span className="rc-legend-dot" style={{ background: BAND_COLOR.gap }} /> {language === 'en' ? 'Gap <50%' : 'Jurang <50%'}</span>
+          {showBenchmark && <span style={{ color: 'var(--muted)' }}>{language === 'en' ? '"Hospital" column = whole-hospital benchmark' : 'Lajur "Hospital" = penanda aras seluruh hospital'}</span>}
+          {prevScopedAnswers && <span style={{ color: 'var(--muted)' }}>{language === 'en' ? '"Trend" = vs previous campaign' : '"Trend" = berbanding kempen lepas'}</span>}
+        </div>
+      </div>
+
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+/* ----- Page(s): Item-Level ----- */
+
+function ReportItemLevel({
+  scopeName, scopedAnswers, hospitalAnswers, showBenchmark, questions, composites, language,
+}: {
+  scopeName: string
+  scopedAnswers: PscsAnswer[]
+  hospitalAnswers: PscsAnswer[]
+  showBenchmark: boolean
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  language: 'en' | 'ms'
+}) {
+  // Group composites into pages so each page fits ~roughly the same amount.
+  // We'll do 3 composites per page conservatively.
+  const comps = composites.filter((c) => !c.is_rating)
+  const COMPS_PER_PAGE = 3
+  const pages: PscsComposite[][] = []
+  for (let i = 0; i < comps.length; i += COMPS_PER_PAGE) pages.push(comps.slice(i, i + COMPS_PER_PAGE))
+
+  return (
+    <>
+      {pages.map((chunk, idx) => (
+        <div className="rc-page" key={`itemlevel-${idx}`}>
+          <div className="rc-h">
+            <div className="t1">{language === 'en' ? 'Item-Level Results' : 'Keputusan Per Item'} {pages.length > 1 ? `(${idx + 1}/${pages.length})` : ''}</div>
+            <div className="t2">{scopeName}</div>
+          </div>
+          {chunk.map((c) => {
+            const qs = questions.filter((q) => q.composite_code === c.code && q.active).sort((a, b) => a.sort_order - b.sort_order)
+            return (
+              <div className="rc-section" key={c.code}>
+                <div className="rc-st">{c.code} · {language === 'en' ? c.name_en : c.name_ms}</div>
+                <table className="rc-items">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }}>ID</th>
+                      <th>{language === 'en' ? 'Item' : 'Item'}</th>
+                      <th style={{ width: 200 }}>+ / – / Neutral</th>
+                      <th style={{ width: 50 }}>n</th>
+                      <th style={{ width: 50 }}>{language === 'en' ? '%+' : '%+'}</th>
+                      {showBenchmark && <th style={{ width: 50 }}>{language === 'en' ? 'Hosp.' : 'Hosp.'}</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {qs.map((q) => {
+                      const st = itemStats(q, scopedAnswers)
+                      const hospSt = itemStats(q, hospitalAnswers)
+                      const hospPct = hospSt.total >= 3 ? hospSt.pct_positive : null
+                      return (
+                        <tr key={q.id}>
+                          <td style={{ fontFamily: 'monospace', fontSize: 9 }}>{q.id}{q.wording === '-' && <span style={{ color: 'var(--red)', marginLeft: 2 }}>−</span>}</td>
+                          <td style={{ fontSize: 9.5, lineHeight: 1.35 }}>{language === 'en' ? q.text_en : q.text_ms}</td>
+                          <td>
+                            {st.total < 3 ? <span className="rc-na">{language === 'en' ? 'insufficient' : 'tidak cukup'}</span> : (
+                              <div className="rc-itembar">
+                                <div className="rc-itembar-seg pos" style={{ width: `${st.pct_positive}%` }} />
+                                <div className="rc-itembar-seg neu" style={{ width: `${st.pct_neutral}%` }} />
+                                <div className="rc-itembar-seg neg" style={{ width: `${st.pct_negative}%` }} />
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center', fontSize: 9, color: 'var(--muted)' }}>{st.total}</td>
+                          <td style={{ textAlign: 'right', fontSize: 10, fontWeight: 700, color: st.total < 3 ? 'var(--muted)' : BAND_COLOR[band(st.pct_positive)] }}>
+                            {st.total < 3 ? '—' : `${Math.round(st.pct_positive)}%`}
+                          </td>
+                          {showBenchmark && (
+                            <td style={{ textAlign: 'right', fontSize: 9, color: hospPct === null ? 'var(--muted)' : BAND_COLOR[band(hospPct)] }}>
+                              {hospPct === null ? '—' : `${Math.round(hospPct)}%`}
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
+          <div className="rc-itembar-key">
+            <span><span className="rc-itembar-seg pos inline" /> {language === 'en' ? 'Positive' : 'Positif'}</span>
+            <span><span className="rc-itembar-seg neu inline" /> {language === 'en' ? 'Neutral' : 'Neutral'}</span>
+            <span><span className="rc-itembar-seg neg inline" /> {language === 'en' ? 'Negative' : 'Negatif'}</span>
+            <span style={{ color: 'var(--red)', marginLeft: 12 }}>−</span> = {language === 'en' ? 'negatively worded (reverse-scored)' : 'pernyataan negatif (skor terbalik)'}
+          </div>
+          <ReportFooter language={language} />
+        </div>
+      ))}
+    </>
+  )
+}
+
+/* ----- Page: Events Reported & Patient Safety Rating ----- */
+
+function ReportEventsRating({
+  scopeName, scopedAnswers, language,
+}: {
+  scopeName: string
+  scopedAnswers: PscsAnswer[]
+  language: 'en' | 'ms'
+}) {
+  const d3 = distribution('D3', scopedAnswers)
+  const e1 = distribution('E1', scopedAnswers)
+  const d3Positive = d3.items.filter((b) => b.value >= 2).reduce((s, b) => s + b.pct, 0)
+  const e1Positive = e1.items.filter((b) => b.value >= 4).reduce((s, b) => s + b.pct, 0)
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Events Reported & Patient Safety Rating' : 'Insiden Dilaporkan & Tahap Keselamatan Pesakit'}</div>
+        <div className="t2">{scopeName}</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div className="rc-section">
+          <div className="rc-st">D3 · {language === 'en' ? 'Events Reported (past 12 months)' : 'Insiden Dilaporkan (12 bulan)'}</div>
+          <div className="rc-bigpct" style={{ color: BAND_COLOR[band(d3Positive)] }}>{d3.total === 0 ? '—' : `${Math.round(d3Positive)}%`}</div>
+          <div className="rc-bigpct-cap">{language === 'en' ? 'reported ≥1 event' : 'laporkan ≥1 insiden'}</div>
+          <RcBucketTable
+            buckets={d3.items}
+            labels={language === 'en' ? ['None', '1–2', '3–5', '6–10', '11 or more'] : ['Tiada', '1–2', '3–5', '6–10', '11 atau lebih']}
+            positiveFrom={2} />
+        </div>
+        <div className="rc-section">
+          <div className="rc-st">E1 · {language === 'en' ? 'Patient Safety Rating' : 'Tahap Keselamatan Pesakit'}</div>
+          <div className="rc-bigpct" style={{ color: BAND_COLOR[band(e1Positive)] }}>{e1.total === 0 ? '—' : `${Math.round(e1Positive)}%`}</div>
+          <div className="rc-bigpct-cap">{language === 'en' ? 'Very Good / Excellent' : 'Sangat Bagus / Cemerlang'}</div>
+          <RcBucketTable
+            buckets={e1.items}
+            labels={language === 'en' ? ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'] : ['Lemah', 'Boleh Tahan', 'Bagus', 'Sangat Bagus', 'Cemerlang']}
+            positiveFrom={4} />
+        </div>
+      </div>
+
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+function RcBucketTable({ buckets, labels, positiveFrom }: {
+  buckets: { value: number; count: number; pct: number }[]
+  labels: string[]
+  positiveFrom: number
+}) {
+  return (
+    <table className="rc-dist">
+      <thead><tr><th>Response</th><th>n</th><th>%</th></tr></thead>
+      <tbody>
+        {buckets.map((b, i) => (
+          <tr key={b.value}>
+            <td style={{ color: b.value >= positiveFrom ? 'var(--green)' : 'var(--red)' }}>{labels[i]}</td>
+            <td>{b.count}</td>
+            <td>{Math.round(b.pct)}%</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/* ----- Page(s): Cross-tabs by Position / Department / Sub-unit / Tenure / Contact ----- */
+
+function ReportCrossTabs({
+  scope, scopeName, scoped, scopedAnswers, questions, composites, positions, departments, language,
+}: {
+  scope: ReportScope
+  scopeName: string
+  scoped: PscsResponse[]
+  scopedAnswers: PscsAnswer[]
+  questions: PscsQuestion[]
+  composites: PscsComposite[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
+  language: 'en' | 'ms'
+}) {
+  // Which axes make sense at the current scope?
+  // - 'all'         : Department, Position, Tenure, Contact
+  // - 'directorate' : Department within directorate, Position, Tenure, Contact
+  // - 'department'  : Sub-unit (if any), Position, Tenure, Contact
+  // - 'subunit'     : Position, Tenure, Contact
+  const axes: { key: string; title_en: string; title_ms: string; groups: BreakdownGroup<PscsResponse>[] }[] = []
+
+  // Department axis
+  if (scope.kind === 'all' || scope.kind === 'directorate') {
+    const byKey = new Map<string, PscsResponse[]>()
+    for (const r of scoped) {
+      const k = r.department_code ?? '__none__'
+      if (!byKey.has(k)) byKey.set(k, [])
+      byKey.get(k)!.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries()).map(([k, rs]) => {
+      const d = departments.find((x) => x.code === k)
+      return {
+        key: k,
+        label_en: d?.name_en ?? (k === '__none__' ? 'Not specified' : k),
+        label_ms: d?.name_ms ?? (k === '__none__' ? 'Tidak dinyatakan' : k),
+        responses: rs,
+      }
+    }).sort((a, b) => b.responses.length - a.responses.length)
+    if (groups.length > 1) axes.push({ key: 'department', title_en: 'By Department', title_ms: 'Mengikut Jabatan', groups })
+  }
+
+  // Sub-unit axis (only when scope=department and that dept has sub-units)
+  if (scope.kind === 'department') {
+    const subs = departments.filter((d) => d.kind === 'subunit' && d.parent_code === scope.code)
+    if (subs.length > 0) {
+      const byKey = new Map<string, PscsResponse[]>()
+      for (const r of scoped) {
+        const k = r.sub_department_code ?? '__none__'
+        if (!byKey.has(k)) byKey.set(k, [])
+        byKey.get(k)!.push(r)
+      }
+      const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries()).map(([k, rs]) => {
+        const d = departments.find((x) => x.code === k)
+        return {
+          key: k,
+          label_en: d?.name_en ?? (k === '__none__' ? 'Department-level only' : k),
+          label_ms: d?.name_ms ?? (k === '__none__' ? 'Peringkat Jabatan sahaja' : k),
+          responses: rs,
+        }
+      }).sort((a, b) => b.responses.length - a.responses.length)
+      if (groups.length > 1) axes.push({ key: 'subunit', title_en: 'By Sub-unit', title_ms: 'Mengikut Sub-unit', groups })
+    }
+  }
+
+  // Position group axis (always shown)
+  {
+    const groupByPos = new Map<number, { en: string; ms: string }>()
+    for (const p of positions) groupByPos.set(p.id, { en: p.group_en, ms: p.group_ms })
+    const byKey = new Map<string, { en: string; ms: string; rs: PscsResponse[] }>()
+    for (const r of scoped) {
+      const g = r.position_id ? groupByPos.get(r.position_id) : null
+      const k = g?.en ?? '__none__'
+      if (!byKey.has(k)) byKey.set(k, { en: g?.en ?? 'Not specified', ms: g?.ms ?? 'Tidak dinyatakan', rs: [] })
+      byKey.get(k)!.rs.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = Array.from(byKey.entries())
+      .map(([k, v]) => ({ key: k, label_en: v.en, label_ms: v.ms, responses: v.rs }))
+      .sort((a, b) => b.responses.length - a.responses.length)
+    if (groups.length > 1) axes.push({ key: 'posgroup', title_en: 'By Position Group', title_ms: 'Mengikut Kumpulan Kakitangan', groups })
+  }
+
+  // Tenure axis
+  {
+    const order = [
+      { key: '<1y',   en: 'Less than 1 year', ms: 'Kurang dari 1 tahun' },
+      { key: '1-5y',  en: '1–5 years',        ms: '1–5 tahun' },
+      { key: '6-10y', en: '6–10 years',       ms: '6–10 tahun' },
+      { key: '11+y',  en: '11+ years',        ms: '11+ tahun' },
+    ]
+    const byKey = new Map<string, PscsResponse[]>()
+    for (const r of scoped) {
+      const k = r.tenure_hospital ?? '__none__'
+      if (!byKey.has(k)) byKey.set(k, [])
+      byKey.get(k)!.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = order
+      .filter((o) => byKey.has(o.key))
+      .map((o) => ({ key: o.key, label_en: o.en, label_ms: o.ms, responses: byKey.get(o.key)! }))
+    if (groups.length > 1) axes.push({ key: 'tenure', title_en: 'By Tenure in Hospital', title_ms: 'Mengikut Tempoh', groups })
+  }
+
+  // Patient contact axis
+  {
+    const yes: PscsResponse[] = [], no: PscsResponse[] = []
+    for (const r of scoped) {
+      if (r.direct_patient_contact === true) yes.push(r)
+      else if (r.direct_patient_contact === false) no.push(r)
+    }
+    const groups: BreakdownGroup<PscsResponse>[] = []
+    if (yes.length > 0) groups.push({ key: 'yes', label_en: 'Yes — direct patient contact', label_ms: 'Ya — interaksi langsung', responses: yes })
+    if (no.length > 0)  groups.push({ key: 'no',  label_en: 'No — no direct contact',       label_ms: 'Tidak — tiada interaksi langsung', responses: no })
+    if (groups.length > 1) axes.push({ key: 'contact', title_en: 'By Patient Contact', title_ms: 'Mengikut Interaksi Pesakit', groups })
+  }
+
+  void scopedAnswers // not directly used; matrix recomputes from group responses via breakdownMatrix
+
+  if (axes.length === 0) {
+    return null
+  }
+
+  return (
+    <>
+      {axes.map((axis) => (
+        <ReportCrossTabPage key={axis.key} title={language === 'en' ? axis.title_en : axis.title_ms} scopeName={scopeName} groups={axis.groups} composites={composites} questions={questions} allAnswers={scopedAnswers} language={language} />
+      ))}
+    </>
+  )
+}
+
+function ReportCrossTabPage({
+  title, scopeName, groups, composites, questions, allAnswers, language,
+}: {
+  title: string
+  scopeName: string
+  groups: BreakdownGroup<PscsResponse>[]
+  composites: PscsComposite[]
+  questions: PscsQuestion[]
+  allAnswers: PscsAnswer[]
+  language: 'en' | 'ms'
+}) {
+  const matrix = breakdownMatrix(groups, composites, questions, allAnswers, 3)
+  const compsForCols = composites.filter((c) => !c.is_rating)
+
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Composite Comparison' : 'Perbandingan Komposit'} — {title}</div>
+        <div className="t2">{scopeName}</div>
+      </div>
+      <div className="rc-section">
+        <table className="rc-matrix">
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>{language === 'en' ? 'Group' : 'Kumpulan'}</th>
+              <th style={{ width: 40 }}>n</th>
+              <th style={{ width: 50 }}>{language === 'en' ? 'Avg' : 'Purata'}</th>
+              {compsForCols.map((c) => (
+                <th key={c.code} title={language === 'en' ? c.name_en : c.name_ms}>{c.code}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((row) => (
+              <tr key={row.key} className={row.suppressed ? 'rc-suppressed' : ''}>
+                <td style={{ textAlign: 'left', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{language === 'en' ? row.label_en : row.label_ms}</td>
+                <td style={{ textAlign: 'center' }}>
+                  {row.n}{row.suppressed && <div style={{ fontSize: 8, color: 'var(--amber)', fontWeight: 700 }}>{language === 'en' ? 'small n' : 'n kecil'}</div>}
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: row.suppressed ? 'var(--muted)' : (row.overall === null ? 'var(--muted)' : BAND_COLOR[band(row.overall)]) }}>
+                  {row.suppressed ? '·' : (row.overall === null ? '—' : `${Math.round(row.overall)}%`)}
+                </td>
+                {compsForCols.map((c) => {
+                  const s = row.perComposite.get(c.code) ?? null
+                  return (
+                    <td key={c.code} style={{ textAlign: 'center', fontSize: 9.5, fontWeight: 700, color: row.suppressed ? 'var(--muted)' : (s === null ? 'var(--muted)' : BAND_COLOR[band(s)]) }}>
+                      {row.suppressed ? '·' : (s === null ? '—' : `${Math.round(s)}%`)}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="rc-legend" style={{ marginTop: 6 }}>
+          <span style={{ color: 'var(--muted)' }}>
+            {language === 'en'
+              ? '"small n" = fewer than 3 responses — cells hidden to protect anonymity. "—" = AHRQ per-item ≥3 valid responses rule not met.'
+              : '"n kecil" = kurang dari 3 maklum balas — sel disembunyikan. "—" = syarat AHRQ ≥3 maklum balas sah tidak dipenuhi.'}
+          </span>
+        </div>
+      </div>
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+/* ----- Page: Methodology ----- */
+
+function ReportMethodology({ language }: { language: 'en' | 'ms' }) {
+  return (
+    <div className="rc-page">
+      <div className="rc-h">
+        <div className="t1">{language === 'en' ? 'Methodology & Definitions' : 'Kaedah & Definisi'}</div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">{language === 'en' ? 'Scoring Rule (AHRQ SOPS 2.0)' : 'Kaedah Pemarkahan (AHRQ SOPS 2.0)'}</div>
+        <div className="rc-prose">
+          {language === 'en' ? (
+            <>
+              <p>Each item uses a 5-point scale (1 = strongest disagree/never · 5 = strongest agree/always). A 6th &ldquo;Don&apos;t Know / Not Applicable&rdquo; option is coded 0 and is <b>excluded</b> from both the numerator and denominator.</p>
+              <p><b>Positive response:</b> values 4–5 for positively-worded items, values 1–2 for negatively-worded items (reverse-scored). <b>Neutral:</b> value 3, regardless of wording. <b>Negative:</b> the inverse of positive.</p>
+              <p><b>Item % positive</b> is calculated only when at least 3 valid (non-zero) responses are recorded for that item.</p>
+              <p><b>Composite score</b> is the mean of its item % positives. A composite reports a score only when ≥ half of its items have a score (for 3-item composites, ≥ 2 of 3).</p>
+            </>
+          ) : (
+            <>
+              <p>Setiap item menggunakan skala 5-mata (1 = paling tidak bersetuju/tidak pernah · 5 = paling bersetuju/sentiasa). Pilihan ke-6 &quot;Tidak Tahu / Tidak Berkenaan&quot; dikodkan sebagai 0 dan <b>dikecualikan</b> dari pengangka dan penyebut.</p>
+              <p><b>Maklum balas positif:</b> nilai 4–5 untuk item positif, nilai 1–2 untuk item negatif (skor terbalik). <b>Neutral:</b> nilai 3. <b>Negatif:</b> sebaliknya.</p>
+              <p><b>Item % positif</b> dikira hanya apabila sekurang-kurangnya 3 maklum balas sah (bukan-sifar) direkodkan.</p>
+              <p><b>Skor komposit</b> adalah purata % positif item-itemnya. Komposit memberi skor hanya apabila ≥ separuh itemnya mempunyai skor.</p>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">{language === 'en' ? 'Color Bands' : 'Jalur Warna'}</div>
+        <div className="rc-bands">
+          <div><span className="rc-legend-dot" style={{ background: BAND_COLOR.strength }} /> <b>{language === 'en' ? 'Strength' : 'Kekuatan'}</b> — ≥ 75% {language === 'en' ? 'positive' : 'positif'}</div>
+          <div><span className="rc-legend-dot" style={{ background: BAND_COLOR.watch }} /> <b>{language === 'en' ? 'Watch' : 'Pemantauan'}</b> — 50–74% {language === 'en' ? 'positive' : 'positif'}</div>
+          <div><span className="rc-legend-dot" style={{ background: BAND_COLOR.gap }} /> <b>{language === 'en' ? 'Gap' : 'Jurang'}</b> — &lt; 50% {language === 'en' ? 'positive' : 'positif'}</div>
+          <div><span className="rc-legend-dot" style={{ background: BAND_COLOR.na }} /> <b>{language === 'en' ? 'Insufficient data' : 'Data tidak cukup'}</b></div>
+        </div>
+      </div>
+
+      <div className="rc-section">
+        <div className="rc-st">{language === 'en' ? 'Privacy Guard' : 'Perlindungan Privasi'}</div>
+        <div className="rc-prose">
+          {language === 'en'
+            ? <p>Cohorts with fewer than 3 responses are marked &ldquo;small n&rdquo; and their composite cells are hidden to protect respondent anonymity, on top of the AHRQ per-item &ge; 3 valid responses rule.</p>
+            : <p>Kumpulan dengan kurang daripada 3 maklum balas ditandakan &ldquo;n kecil&rdquo; dan sel komposit disembunyikan untuk menjaga anonimiti, di samping syarat AHRQ &ge; 3 maklum balas sah setiap item.</p>}
+        </div>
+      </div>
+
+      <ReportFooter language={language} />
+    </div>
+  )
+}
+
+/* ----- Shared report footer ----- */
+
+function ReportFooter({ language }: { language: 'en' | 'ms' }) {
+  const today = new Date().toISOString().slice(0, 10)
+  return (
+    <div className="rc-foot">
+      {language === 'en'
+        ? `RMCQ · Quality Assurance and Document Management Unit · Patient Safety Culture Survey · Confidential · Generated ${today}`
+        : `RMCQ · Unit Jaminan Kualiti dan Pengurusan Dokumen · Tinjauan Budaya Keselamatan Pesakit · Sulit · Dihasilkan ${today}`}
     </div>
   )
 }
