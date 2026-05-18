@@ -200,7 +200,7 @@ export default function PscsPage() {
             <>
               {tab === 'overview'   && <OverviewTab responses={filteredResponses} positions={positions!} departments={departments!} language={language} />}
               {tab === 'composites' && <CompositesTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} language={language} />}
-              {tab === 'item-level' && <ItemLevelTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} language={language} />}
+              {tab === 'item-level' && <ItemLevelTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
               {tab === 'breakdowns' && <BreakdownsTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
               {tab === 'comments'   && <CommentsTab responses={filteredResponses} departments={departments!} positions={positions!} language={language} />}
               {tab === 'reportcard' && <ReportCardTab campaign={campaign} campaigns={campaigns!} allResponses={responses!} allAnswers={answers!} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
@@ -429,17 +429,122 @@ function CompositesTab({ responses, answers, questions, composites, language }: 
 
 /* ======================== TAB 3 — ITEM-LEVEL ======================== */
 
-function ItemLevelTab({ responses, answers, questions, composites, language }: {
+type ItemCompareAxis = 'none' | 'department' | 'subunit' | 'posgroup' | 'position' | 'tenure' | 'hours' | 'contact'
+
+const ITEM_COMPARE_OPTIONS: { id: ItemCompareAxis; en: string; ms: string }[] = [
+  { id: 'none',       en: 'None (overall)',  ms: 'Tiada (keseluruhan)' },
+  { id: 'department', en: 'Department',      ms: 'Jabatan' },
+  { id: 'subunit',    en: 'Sub-unit',        ms: 'Sub-unit' },
+  { id: 'posgroup',   en: 'Position Group',  ms: 'Kumpulan Kakitangan' },
+  { id: 'position',   en: 'Staff Position',  ms: 'Jawatan' },
+  { id: 'tenure',     en: 'Tenure',          ms: 'Tempoh di Hospital' },
+  { id: 'hours',      en: 'Working Hours',   ms: 'Waktu Bekerja' },
+  { id: 'contact',    en: 'Patient Contact', ms: 'Interaksi Pesakit' },
+]
+
+function ItemLevelTab({ responses, answers, questions, composites, positions, departments, language }: {
   responses: PscsResponse[]
   answers: PscsAnswer[]
   questions: PscsQuestion[]
   composites: PscsComposite[]
+  positions: PscsPosition[]
+  departments: PscsDepartment[]
   language: 'en' | 'ms'
 }) {
-  void responses
+  const [compareBy, setCompareBy] = useState<ItemCompareAxis>('none')
+
+  // Lookup maps for cohort labels
+  const posById = useMemo(() => {
+    const m = new Map<number, PscsPosition>()
+    for (const p of positions) m.set(p.id, p)
+    return m
+  }, [positions])
+  const deptByCode = useMemo(() => {
+    const m = new Map<string, PscsDepartment>()
+    for (const d of departments) m.set(d.code, d)
+    return m
+  }, [departments])
+
+  // Group responses by the chosen axis (when compareBy !== 'none')
+  const groups = useMemo<{ key: string; label_en: string; label_ms: string; responses: PscsResponse[] }[]>(() => {
+    if (compareBy === 'none') return []
+    type G = { key: string; label_en: string; label_ms: string; responses: PscsResponse[]; sort: number }
+    const byKey = new Map<string, G>()
+    function add(key: string, label_en: string, label_ms: string, r: PscsResponse, sort = 0) {
+      const cur = byKey.get(key) ?? { key, label_en, label_ms, responses: [], sort }
+      cur.responses.push(r)
+      byKey.set(key, cur)
+    }
+    for (const r of responses) {
+      if (compareBy === 'department') {
+        if (!r.department_code) continue
+        const d = deptByCode.get(r.department_code)
+        add(r.department_code, d?.name_en ?? r.department_code, d?.name_ms ?? r.department_code, r, d?.sort_order)
+      } else if (compareBy === 'subunit') {
+        if (!r.sub_department_code) continue
+        const d = deptByCode.get(r.sub_department_code)
+        add(r.sub_department_code, d?.name_en ?? r.sub_department_code, d?.name_ms ?? r.sub_department_code, r, d?.sort_order)
+      } else if (compareBy === 'posgroup') {
+        const p = r.position_id ? posById.get(r.position_id) : null
+        if (!p) continue
+        add(p.group_en, p.group_en, p.group_ms, r, p.sort_order)
+      } else if (compareBy === 'position') {
+        const p = r.position_id ? posById.get(r.position_id) : null
+        if (!p) continue
+        add(String(p.id), p.name_en, p.name_ms, r, p.sort_order)
+      } else if (compareBy === 'tenure') {
+        const map: Record<string, { en: string; ms: string; sort: number }> = {
+          '<1y':   { en: 'Less than 1 year', ms: 'Kurang dari 1 tahun', sort: 1 },
+          '1-5y':  { en: '1–5 years',        ms: '1–5 tahun',           sort: 2 },
+          '6-10y': { en: '6–10 years',       ms: '6–10 tahun',          sort: 3 },
+          '11+y':  { en: '11+ years',        ms: '11+ tahun',           sort: 4 },
+        }
+        if (!r.tenure_hospital) continue
+        const lbl = map[r.tenure_hospital]
+        if (!lbl) continue
+        add(r.tenure_hospital, lbl.en, lbl.ms, r, lbl.sort)
+      } else if (compareBy === 'hours') {
+        const map: Record<string, { en: string; ms: string; sort: number }> = {
+          '<30':   { en: 'Less than 30 hrs/wk', ms: 'Kurang dari 30 jam/mgu', sort: 1 },
+          '30-40': { en: '30 to 40 hrs/wk',     ms: '30 hingga 40 jam/mgu',  sort: 2 },
+          '>40':   { en: 'More than 40 hrs/wk', ms: 'Lebih dari 40 jam/mgu', sort: 3 },
+        }
+        if (!r.hours_per_week) continue
+        const lbl = map[r.hours_per_week]
+        if (!lbl) continue
+        add(r.hours_per_week, lbl.en, lbl.ms, r, lbl.sort)
+      } else if (compareBy === 'contact') {
+        if (r.direct_patient_contact === true)       add('yes', 'Yes — direct patient contact', 'Ya — interaksi langsung', r, 1)
+        else if (r.direct_patient_contact === false) add('no',  'No — no direct contact',       'Tidak — tiada interaksi langsung', r, 2)
+      }
+    }
+    const out = Array.from(byKey.values())
+    out.sort((a, b) => a.sort - b.sort !== 0 ? a.sort - b.sort : b.responses.length - a.responses.length)
+    return out
+  }, [compareBy, responses, posById, deptByCode])
+
   return (
     <div className="pscs-page">
-      {composites.filter((c) => !c.is_rating).map((c) => {
+      <Panel title={language === 'en' ? 'Item-Level Results' : 'Keputusan Per Item'}>
+        <div className="bd-filters" style={{ marginBottom: 0 }}>
+          <FilterSelect
+            label={language === 'en' ? 'Compare by' : 'Bandingkan mengikut'}
+            value={compareBy}
+            onChange={(v) => setCompareBy(v as ItemCompareAxis)}
+            options={ITEM_COMPARE_OPTIONS.map((o) => ({ value: o.id, label: language === 'en' ? o.en : o.ms }))}
+            emphasis />
+          {compareBy !== 'none' && (
+            <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'flex-end', marginBottom: 5 }}>
+              {language === 'en'
+                ? `${groups.length} cohort${groups.length === 1 ? '' : 's'} · cells show % positive; "—" when fewer than 3 valid responses for that item in the cohort`
+                : `${groups.length} kumpulan · sel menunjukkan % positif; "—" jika kurang dari 3 maklum balas sah`}
+            </span>
+          )}
+        </div>
+      </Panel>
+
+      {/* Overall view (no comparison) — original stacked bars */}
+      {compareBy === 'none' && composites.filter((c) => !c.is_rating).map((c) => {
         const qs = questions.filter((q) => q.composite_code === c.code).sort((a, b) => a.sort_order - b.sort_order)
         if (qs.length === 0) return null
         return (
@@ -477,6 +582,58 @@ function ItemLevelTab({ responses, answers, questions, composites, language }: {
           </Panel>
         )
       })}
+
+      {/* Per-cohort matrix view */}
+      {compareBy !== 'none' && (groups.length === 0 ? (
+        <Panel title={language === 'en' ? 'Item × Cohort Matrix' : 'Matriks Item × Kumpulan'}>
+          <p className="bd-empty">{language === 'en' ? 'No responses with this axis populated yet.' : 'Tiada maklum balas dengan paksi ini.'}</p>
+        </Panel>
+      ) : composites.filter((c) => !c.is_rating).map((c) => {
+        const qs = questions.filter((q) => q.composite_code === c.code).sort((a, b) => a.sort_order - b.sort_order)
+        if (qs.length === 0) return null
+        return (
+          <Panel key={c.code} title={`${c.code} · ${language === 'en' ? c.name_en : c.name_ms}`}>
+            <div className="bd-table-wrap">
+              <table className="bd-matrix il-matrix">
+                <thead>
+                  <tr>
+                    <th className="bd-row-head" style={{ minWidth: 60 }}>ID</th>
+                    <th className="bd-row-head">{language === 'en' ? 'Item' : 'Item'}</th>
+                    {groups.map((g) => (
+                      <th key={g.key} className="bd-comp" title={`${language === 'en' ? g.label_en : g.label_ms} (n=${g.responses.length})`}>
+                        {language === 'en' ? g.label_en : g.label_ms}
+                        <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--muted)' }}>n={g.responses.length}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {qs.map((q) => (
+                    <tr key={q.id}>
+                      <td className="bd-row-head" style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                        {q.id}{q.wording === '-' && <span style={{ color: 'var(--red)', marginLeft: 3 }}>−</span>}
+                      </td>
+                      <td className="bd-row-head" style={{ fontSize: 11, maxWidth: 320, whiteSpace: 'normal', lineHeight: 1.35 }}>
+                        {language === 'en' ? q.text_en : q.text_ms}
+                      </td>
+                      {groups.map((g) => {
+                        const ans = answersForResponses(g.responses, answers)
+                        const st = itemStats(q, ans)
+                        if (st.total < 3) return <td key={g.key} className="bd-cell"><span className="bd-na">—</span></td>
+                        return (
+                          <td key={g.key} className="bd-cell">
+                            <span style={{ color: BAND_COLOR[band(st.pct_positive)], fontWeight: 700 }}>{Math.round(st.pct_positive)}%</span>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        )
+      }))}
     </div>
   )
 }
