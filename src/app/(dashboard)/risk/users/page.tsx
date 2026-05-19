@@ -41,6 +41,12 @@ export default function RiskUsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
+  // Inline edit state — only one row at a time
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName,  setEditName]  = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
@@ -153,6 +159,39 @@ export default function RiskUsersPage() {
       .update({ is_active: goalActive }).eq('id', user.id)
     if (error) { alert(`Update failed: ${error.code} ${error.message}`); return }
     await load()
+  }
+
+  function startEdit(u: RiskUser) {
+    setEditingId(u.id)
+    setEditName(u.name)
+    setEditEmail(u.email)
+  }
+  function cancelEdit() {
+    setEditingId(null); setEditName(''); setEditEmail('')
+  }
+  async function saveEdit() {
+    if (!editingId) return
+    const name = editName.trim()
+    const email = editEmail.trim().toLowerCase()
+    if (!name || !email) { alert('Name and email are both required.'); return }
+    setSavingEdit(true)
+    try {
+      const { error } = await supabase.from('risk_users')
+        .update({ name, email }).eq('id', editingId)
+      if (error) {
+        // Email UNIQUE collision is the likely failure mode
+        if (error.code === '23505') {
+          alert(`Email "${email}" is already used by another user.`)
+        } else {
+          alert(`Update failed: ${error.code} ${error.message}`)
+        }
+        return
+      }
+      cancelEdit()
+      await load()
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   async function deactivateRole(roleId: number) {
@@ -297,45 +336,86 @@ export default function RiskUsersPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map(({ user, roles }) => (
-                        <tr key={user.id}>
-                          <td style={{ fontWeight: 600 }}>{user.name}</td>
-                          <td style={{ fontSize: 11, color: 'var(--muted)' }}>{user.email}</td>
-                          <td>
-                            {roles.length === 0 ? (
-                              <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 11 }}>no roles</span>
-                            ) : (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                {roles.map((r) => (
-                                  <button key={r.id} type="button" className="role-pill"
-                                    onClick={() => deactivateRole(r.id)}
-                                    title="Click to remove this role assignment">
-                                    <b>{r.role}</b> · {deptLabel(r.dept_code)} ×
+                      {rows.map(({ user, roles }) => {
+                        const editing = editingId === user.id
+                        return (
+                          <tr key={user.id}>
+                            <td style={{ fontWeight: 600 }}>
+                              {editing ? (
+                                <input
+                                  type="text" value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                  style={{ width: '100%', padding: '4px 6px', fontSize: 12, border: '1px solid var(--blue)', borderRadius: 4 }} />
+                              ) : user.name}
+                            </td>
+                            <td style={{ fontSize: 11, color: 'var(--muted)' }}>
+                              {editing ? (
+                                <input
+                                  type="email" value={editEmail}
+                                  onChange={(e) => setEditEmail(e.target.value)}
+                                  style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: '1px solid var(--blue)', borderRadius: 4 }} />
+                              ) : user.email}
+                            </td>
+                            <td>
+                              {roles.length === 0 ? (
+                                <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 11 }}>no roles</span>
+                              ) : (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                  {roles.map((r) => (
+                                    <button key={r.id} type="button" className="role-pill"
+                                      onClick={() => deactivateRole(r.id)}
+                                      title="Click to remove this role assignment">
+                                      <b>{r.role}</b> · {deptLabel(r.dept_code)} ×
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right', fontSize: 11, color: 'var(--muted)' }}>
+                              {user.last_login ? user.last_login.slice(0, 10) : '—'}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <span style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                                fontSize: 10, fontWeight: 700,
+                                color: user.is_active ? '#166534' : '#991B1B',
+                                background: user.is_active ? '#DCFCE7' : '#FEE2E2',
+                              }}>{user.is_active ? 'ACTIVE' : 'INACTIVE'}</span>
+                            </td>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {editing ? (
+                                <>
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                                    disabled={savingEdit}
+                                    onClick={saveEdit}>
+                                    {savingEdit ? 'Saving…' : 'Save'}
+                                  </button>{' '}
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px' }}
+                                    disabled={savingEdit}
+                                    onClick={cancelEdit}>
+                                    Cancel
                                   </button>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'right', fontSize: 11, color: 'var(--muted)' }}>
-                            {user.last_login ? user.last_login.slice(0, 10) : '—'}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <span style={{
-                              display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                              fontSize: 10, fontWeight: 700,
-                              color: user.is_active ? '#166534' : '#991B1B',
-                              background: user.is_active ? '#DCFCE7' : '#FEE2E2',
-                            }}>{user.is_active ? 'ACTIVE' : 'INACTIVE'}</span>
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button type="button" className="signout-btn"
-                              style={{ fontSize: 11, padding: '4px 10px' }}
-                              onClick={() => toggleActive(user)}>
-                              {user.is_active ? 'Deactivate' : 'Reactivate'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                                </>
+                              ) : (
+                                <>
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px' }}
+                                    onClick={() => startEdit(user)}>
+                                    Edit
+                                  </button>{' '}
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px' }}
+                                    onClick={() => toggleActive(user)}>
+                                    {user.is_active ? 'Deactivate' : 'Reactivate'}
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
