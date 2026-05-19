@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
-  RiskDept, RiskCategory, RiskScope, CrossCuttingTheme,
+  RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
 import {
   computeRiskScore, formatRiskId,
@@ -28,8 +28,6 @@ interface FormState {
   action_owner: string
   implementation_period: string
   notes: string
-  is_isu_melintang: boolean
-  selected_themes: number[]
   likelihood: number
   impact_manusia: number
   impact_reputasi: number
@@ -43,7 +41,7 @@ const EMPTY: FormState = {
   description: '', cause_description: '', impact_description: '',
   existing_controls: '', additional_controls: '',
   control_classification: '', action_owner: '', implementation_period: '',
-  notes: '', is_isu_melintang: false, selected_themes: [],
+  notes: '',
   likelihood: 0,
   impact_manusia: 0, impact_reputasi: 0, impact_kewangan: 0,
   impact_operasi: 0, impact_objektif: 0,
@@ -60,7 +58,6 @@ export default function NewRiskPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const [depts, setDepts]   = useState<RiskDept[]>([])
-  const [themes, setThemes] = useState<CrossCuttingTheme[]>([])
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
   const [riskUserName, setRiskUserName] = useState<string>('')
 
@@ -97,15 +94,6 @@ export default function NewRiskPage() {
         .order('sort_order')
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
-
-      // Cross-cutting themes
-      const { data: themesData, error: themesErr } = await supabase
-        .from('cross_cutting_themes')
-        .select('*')
-        .eq('is_active', true)
-        .order('id')
-      if (themesErr) throw new Error(`Themes: ${themesErr.code ?? ''} ${themesErr.message}`)
-      setThemes((themesData ?? []) as CrossCuttingTheme[])
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -176,7 +164,6 @@ export default function NewRiskPage() {
           implementation_period: form.implementation_period.trim() || null,
           notes: form.notes.trim() || null,
           status: 'DRAFT',
-          is_isu_melintang: form.is_isu_melintang,
         })
         .select('id')
         .single()
@@ -203,16 +190,6 @@ export default function NewRiskPage() {
           risk_level: computed.riskLevel,
         })
       if (reviewErr) throw new Error(`Insert review: ${reviewErr.code ?? ''} ${reviewErr.message}`)
-
-      // Theme tags
-      if (form.selected_themes.length > 0) {
-        const { error: themeErr } = await supabase
-          .from('risk_theme_tags')
-          .insert(form.selected_themes.map((theme_id) => ({
-            risk_id: newRiskRowId, theme_id, tagged_by: riskUserId,
-          })))
-        if (themeErr) throw new Error(`Theme tags: ${themeErr.code ?? ''} ${themeErr.message}`)
-      }
 
       // Audit log entry
       const { error: auditErr } = await supabase
@@ -242,15 +219,6 @@ export default function NewRiskPage() {
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  function toggleTheme(themeId: number) {
-    setForm((prev) => ({
-      ...prev,
-      selected_themes: prev.selected_themes.includes(themeId)
-        ? prev.selected_themes.filter((t) => t !== themeId)
-        : [...prev.selected_themes, themeId],
-    }))
   }
 
   return (
@@ -329,24 +297,6 @@ export default function NewRiskPage() {
                         </label>
                       ))}
                     </div>
-                  </Field>
-                  <Field label="Cross-cutting" hint="Tick the themes this risk relates to (optional)">
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {themes.map((t) => (
-                        <label key={t.id} className={`theme-pill ${form.selected_themes.includes(t.id) ? 'active' : ''}`}>
-                          <input type="checkbox" checked={form.selected_themes.includes(t.id)}
-                            onChange={() => toggleTheme(t.id)} style={{ display: 'none' }} />
-                          {t.name}
-                        </label>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field label="Isu Melintang">
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                      <input type="checkbox" checked={form.is_isu_melintang}
-                        onChange={(e) => set('is_isu_melintang', e.target.checked)} />
-                      This is a cross-cutting hospital-wide issue
-                    </label>
                   </Field>
                 </div>
               </div>
