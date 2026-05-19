@@ -640,6 +640,10 @@ body{counter-reset:rcpage;}
 .rsp-value{font-size:24px;font-weight:700;color:var(--text);margin-top:4px;line-height:1;}
 @media (max-width:768px){.risk-form-grid{grid-template-columns:1fr;}}
 
+/* Risk module — role pill on /risk/users */
+.role-pill{display:inline-flex;align-items:center;padding:3px 9px;background:#EFF3F8;border:1px solid #C7D7EA;border-radius:99px;color:#1E40AF;font-size:11px;cursor:pointer;font-family:inherit;}
+.role-pill:hover{background:#FEE2E2;border-color:#FCA5A5;color:#991B1B;}
+
 /* Risk Register — workflow buttons on /risk/[id] */
 .risk-workflow-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 

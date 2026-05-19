@@ -193,6 +193,10 @@ export default function RiskListPage() {
             <div className="rec-badge">
               {loading ? 'Loading…' : `${filtered.length.toLocaleString()} risk${filtered.length === 1 ? '' : 's'}`}
             </div>
+            <Link href="/risk/users" className="signout-btn"
+              title="Risk module user management (admin)">
+              👥 Users
+            </Link>
             <Link href="/risk/new" className="signout-btn"
               style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
               + New Risk
