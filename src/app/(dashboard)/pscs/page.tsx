@@ -257,11 +257,6 @@ export default function PscsPage() {
       row.hasa_department_code      = r.department_code ?? ''
       row.hasa_sub_department_code  = r.sub_department_code ?? ''
       row.hasa_sub_department_name  = sub?.name_en ?? ''
-      row.hasa_tenure_hospital_raw  = r.tenure_hospital ?? ''
-      row.hasa_tenure_unit_raw      = r.tenure_unit ?? ''
-      row.hasa_hours_per_week_raw   = r.hours_per_week ?? ''
-      row.hasa_direct_contact_raw   = r.direct_patient_contact === true ? 'Yes'
-                                    : r.direct_patient_contact === false ? 'No' : ''
       row.hasa_comment              = r.comment ?? ''
       row.hasa_response_hash        = r.response_hash
       return row
