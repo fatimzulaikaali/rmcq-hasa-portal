@@ -136,17 +136,12 @@ export default function PscsPage() {
     // Lookup maps
     const posById = new Map(positions.map((p) => [p.id, p]))
     const deptByCode = new Map(departments.map((d) => [d.code, d]))
-    // Directorate lookup via department.parent_code
     function directorateFor(deptCode: string | null): PscsDepartment | null {
       if (!deptCode) return null
       const d = deptByCode.get(deptCode)
       if (!d || !d.parent_code) return null
       return deptByCode.get(d.parent_code) ?? null
     }
-
-    // Order questions: section A, B, ..., F by item_num
-    const orderedQuestions = [...questions.filter((q) => q.active)]
-      .sort((a, b) => a.section.localeCompare(b.section) || a.item_num - b.item_num)
 
     // Filter answers to selected campaign's responses
     const respIds = new Set(filteredResponses.map((r) => r.id))
@@ -157,92 +152,180 @@ export default function PscsPage() {
       ansByResp.get(a.response_id)!.set(a.question_id, a.value)
     }
 
-    // SHEET 1 — Responses (wide format, one row per response)
-    const responsesRows = filteredResponses.map((r) => {
-      const pos = r.position_id ? posById.get(r.position_id) ?? null : null
+    /* AHRQ HS2.0 spec column order (A-AP). HASA-specific extras go after. */
+    // Section A-F items in spec order (E..AL)
+    const SPEC_QUESTION_ORDER: string[] = [
+      'A1','A2','A3','A4','A5','A6','A7','A8','A9','A10','A11','A12','A13','A14',  // E..R
+      'B1','B2','B3',                                                                // S..U
+      'C1','C2','C3','C4','C5','C6','C7',                                            // V..AB
+      'D1','D2','D3',                                                                // AC..AE
+      'E1',                                                                           // AF
+      'F1','F2','F3','F4','F5','F6',                                                  // AG..AL
+    ]
+    const questionById = new Map(questions.map((q) => [q.id, q]))
+
+    /* AHRQ value encoders for each question's scale. */
+    // Likert (Agreement / Frequency): 1-5 stays 1-5; 0 (Don't Know) -> 9; null -> blank
+    function encLikert(v: number | undefined): number | '' {
+      if (v === undefined || v === null) return ''
+      if (v === 0) return 9
+      if (v >= 1 && v <= 5) return v
+      return ''
+    }
+    // D3 EventCount: 1->a, 2->b, 3->c, 4->d, 5->e; 0 or missing -> blank (no Don't Know in spec)
+    function encEventCount(v: number | undefined): string {
+      const map: Record<number, string> = { 1: 'a', 2: 'b', 3: 'c', 4: 'd', 5: 'e' }
+      return v != null && v in map ? map[v] : ''
+    }
+    // E1 Rating: AHRQ uses 1-5 the same as Likert but with no "9 = Don't Know" option
+    function encRating(v: number | undefined): number | '' {
+      if (v == null || v === 0) return ''
+      if (v >= 1 && v <= 5) return v
+      return ''
+    }
+    // BQ1, BQ2 tenure: <1y->a, 1-5y->b, 6-10y->c, 11+y->d
+    function encTenure(v: string | null): string {
+      const map: Record<string, string> = { '<1y': 'a', '1-5y': 'b', '6-10y': 'c', '11+y': 'd' }
+      return v && v in map ? map[v] : ''
+    }
+    // BQ3 hours: <30->a, 30-40->b, >40->c
+    function encHours(v: string | null): string {
+      const map: Record<string, string> = { '<30': 'a', '30-40': 'b', '>40': 'c' }
+      return v && v in map ? map[v] : ''
+    }
+    // BQ4 direct_patient_contact: true->a, false->b
+    function encContact(v: boolean | null): string {
+      if (v === true) return 'a'
+      if (v === false) return 'b'
+      return ''
+    }
+    // Per-question encoder by scale_type
+    function encAnswer(qid: string, v: number | undefined): number | string | '' {
+      const q = questionById.get(qid)
+      if (!q) return ''
+      if (q.scale_type === 'EventCount') return encEventCount(v)
+      if (q.scale_type === 'Rating')     return encRating(v)
+      return encLikert(v)
+    }
+
+    // SHEET 1 — Responses in AHRQ spec column order, with HASA extras after AP
+    const responsesRows = filteredResponses.map((r, idx) => {
+      const pos  = r.position_id ? posById.get(r.position_id) ?? null : null
       const dept = r.department_code ? deptByCode.get(r.department_code) ?? null : null
       const sub  = r.sub_department_code ? deptByCode.get(r.sub_department_code) ?? null : null
       const dir  = directorateFor(r.department_code)
-      const row: Record<string, string | number | null> = {
-        response_id:           r.id,
-        campaign_id:           r.campaign_id,
-        campaign_code:         campaign.code,
-        submitted_at:          r.submitted_at,
-        language:              r.language,
-        position_id:           r.position_id,
-        position_name:         pos?.name_en ?? '',
-        position_group:        pos?.group_en ?? '',
-        position_other:        r.position_other ?? '',
-        directorate_code:      dir?.code ?? '',
-        directorate_name:      dir?.name_en ?? '',
-        department_code:       r.department_code ?? '',
-        department_name:       dept?.name_en ?? '',
-        sub_department_code:   r.sub_department_code ?? '',
-        sub_department_name:   sub?.name_en ?? '',
-        tenure_hospital:       r.tenure_hospital ?? '',
-        tenure_unit:           r.tenure_unit ?? '',
-        hours_per_week:        r.hours_per_week ?? '',
-        direct_patient_contact: r.direct_patient_contact === true ? 'Yes'
-                              : r.direct_patient_contact === false ? 'No' : '',
-        comment:               r.comment ?? '',
-        response_hash:         r.response_hash,
+      const ans  = ansByResp.get(r.id)!
+      // UNIQUEID: sequential 001, 002, ... with 'N' suffix for Bahasa Malaysia respondents
+      // (AHRQ spec says append 'S' for Spanish, 'N' for any other non-English language)
+      const seq = String(idx + 1).padStart(3, '0')
+      const uniqueId = r.language === 'ms' ? `${seq}N` : seq
+
+      // A-AP: AHRQ spec columns
+      // Per HASA convention: SP and WA hold the raw text the respondent picked
+      // (e.g. "Medical Officer", "Department of Medicine"), not the AHRQ 1-24 /
+      // 1-34 numeric codes. Analysts can re-map later if needed for benchmarking.
+      const row: Record<string, string | number> = {
+        SITEID:   '1',                                   // Column A — single hospital
+        UNIQUEID: uniqueId,                              // Column B
+        SP:       pos?.name_en ?? '',                    // Column C — staff position text
+        WA:       dept?.name_en ?? '',                   // Column D — main department text
       }
-      // Append one column per question (numeric value or null when unanswered)
-      const ans = ansByResp.get(r.id)!
-      for (const q of orderedQuestions) {
-        row[q.id] = ans.has(q.id) ? ans.get(q.id)! : null
+      // Columns E..AL — survey items in spec order
+      for (const qid of SPEC_QUESTION_ORDER) {
+        const v = ans.get(qid)
+        row[qid] = encAnswer(qid, v)
       }
+      // Columns AM, AN, AO, AP — background questions
+      row.BQ1 = encTenure(r.tenure_hospital)
+      row.BQ2 = encTenure(r.tenure_unit)
+      row.BQ3 = encHours(r.hours_per_week)
+      row.BQ4 = encContact(r.direct_patient_contact)
+
+      // AQ onwards — HASA-specific extras (sub-unit, comment, raw codes, etc.)
+      // SP and WA already carry position_name and department_name above, so
+      // we don't duplicate those here.
+      row.hasa_response_id          = r.id
+      row.hasa_campaign_id          = r.campaign_id
+      row.hasa_campaign_code        = campaign.code
+      row.hasa_submitted_at         = r.submitted_at
+      row.hasa_language             = r.language
+      row.hasa_position_id          = r.position_id ?? ''
+      row.hasa_position_group       = pos?.group_en ?? ''
+      row.hasa_position_other       = r.position_other ?? ''
+      row.hasa_directorate_code     = dir?.code ?? ''
+      row.hasa_directorate_name     = dir?.name_en ?? ''
+      row.hasa_department_code      = r.department_code ?? ''
+      row.hasa_sub_department_code  = r.sub_department_code ?? ''
+      row.hasa_sub_department_name  = sub?.name_en ?? ''
+      row.hasa_tenure_hospital_raw  = r.tenure_hospital ?? ''
+      row.hasa_tenure_unit_raw      = r.tenure_unit ?? ''
+      row.hasa_hours_per_week_raw   = r.hours_per_week ?? ''
+      row.hasa_direct_contact_raw   = r.direct_patient_contact === true ? 'Yes'
+                                    : r.direct_patient_contact === false ? 'No' : ''
+      row.hasa_comment              = r.comment ?? ''
+      row.hasa_response_hash        = r.response_hash
       return row
     })
     const wsResponses = XLSX.utils.json_to_sheet(responsesRows)
 
-    // SHEET 2 — Codebook
+    // SHEET 2 — Codebook (with AHRQ encoding)
     const codebook: { Section: string; Code: string | number; 'Label (EN)': string; 'Label (MS)': string }[] = []
     function add(section: string, code: string | number, en: string, ms: string) {
       codebook.push({ Section: section, Code: code, 'Label (EN)': en, 'Label (MS)': ms })
     }
-    add('Agreement / Frequency scale', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
-    add('Agreement / Frequency scale', 1, 'Strongly Disagree / Never',    'Sangat Tidak Setuju / Tidak Pernah')
-    add('Agreement / Frequency scale', 2, 'Disagree / Rarely',            'Tidak Setuju / Jarang')
-    add('Agreement / Frequency scale', 3, 'Neither / Sometimes',          'Neutral / Kadang-kadang')
-    add('Agreement / Frequency scale', 4, 'Agree / Most of the time',     'Setuju / Selalu')
-    add('Agreement / Frequency scale', 5, 'Strongly Agree / Always',      'Sangat Setuju / Sentiasa')
-    add('EventCount scale (D3)', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
-    add('EventCount scale (D3)', 1, 'None',          'Tiada')
-    add('EventCount scale (D3)', 2, '1-2 events',    '1-2 insiden')
-    add('EventCount scale (D3)', 3, '3-5 events',    '3-5 insiden')
-    add('EventCount scale (D3)', 4, '6-10 events',   '6-10 insiden')
-    add('EventCount scale (D3)', 5, '11 or more events', '11 insiden atau lebih')
-    add('Rating scale (E1)', 0, "Don't Know / Not Applicable", 'Tidak Tahu / Tidak Berkenaan')
-    add('Rating scale (E1)', 1, 'Poor',      'Lemah')
-    add('Rating scale (E1)', 2, 'Fair',      'Boleh Tahan')
-    add('Rating scale (E1)', 3, 'Good',      'Bagus')
-    add('Rating scale (E1)', 4, 'Very Good', 'Sangat Bagus')
-    add('Rating scale (E1)', 5, 'Excellent', 'Cemerlang')
-    add('tenure_hospital / tenure_unit', '<1y',   'Less than 1 year', 'Kurang dari 1 tahun')
-    add('tenure_hospital / tenure_unit', '1-5y',  '1-5 years',        '1-5 tahun')
-    add('tenure_hospital / tenure_unit', '6-10y', '6-10 years',       '6-10 tahun')
-    add('tenure_hospital / tenure_unit', '11+y',  '11+ years',        '11+ tahun')
-    add('hours_per_week', '<30',   'Less than 30 hours per week', 'Kurang dari 30 jam seminggu')
-    add('hours_per_week', '30-40', '30 to 40 hours per week',     '30 hingga 40 jam seminggu')
-    add('hours_per_week', '>40',   'More than 40 hours per week', 'Lebih dari 40 jam seminggu')
-    add('direct_patient_contact', 'Yes', 'Yes - direct patient contact', 'Ya - interaksi langsung')
-    add('direct_patient_contact', 'No',  'No - no direct contact',       'Tidak - tiada interaksi langsung')
-    add('language', 'en', 'English',           'Bahasa Inggeris')
-    add('language', 'ms', 'Bahasa Malaysia',   'Bahasa Malaysia')
+    add('SITEID', '1', 'Hospital Al-Sultan Abdullah UiTM (single hospital constant per AHRQ spec)', 'Hospital Al-Sultan Abdullah UiTM (pemalar hospital tunggal)')
+    add('UNIQUEID', 'NNN',  'Sequential respondent ID (e.g. 001, 002, 003)', 'ID respondent berurutan')
+    add('UNIQUEID', 'NNNS', 'Suffix S = Spanish-language respondent (not used at HASA)', 'Akhiran S = bahasa Sepanyol (tidak digunakan)')
+    add('UNIQUEID', 'NNNN', 'Suffix N = non-English/non-Spanish respondent (used here for Bahasa Malaysia)', 'Akhiran N = bukan bahasa Inggeris/Sepanyol (digunakan untuk Bahasa Malaysia)')
+    add('SP (staff position)', 'text', 'Raw position text the respondent picked (e.g. "Medical Officer"). HASA convention — not the AHRQ 1-24 numeric code.', 'Teks jawatan asal (cth. "Medical Officer"). Konvensyen HASA — bukan kod AHRQ 1-24.')
+    add('WA (work area)',      'text', 'Raw main department text (e.g. "Department of Medicine"). HASA convention — not the AHRQ 1-34 numeric code. Sub-unit (when picked) is in hasa_sub_department_name after column AP.', 'Teks jabatan utama asal. Konvensyen HASA — bukan kod AHRQ 1-34. Sub-unit (jika dipilih) di hasa_sub_department_name selepas lajur AP.')
+    add('Likert items (A1-A14, B1-B3, C1-C7, D1-D2, E1, F1-F6)', 1, 'Strongly Disagree / Never', 'Sangat Tidak Setuju / Tidak Pernah')
+    add('Likert items (A1-A14, B1-B3, C1-C7, D1-D2, E1, F1-F6)', 2, 'Disagree / Rarely',         'Tidak Setuju / Jarang')
+    add('Likert items (A1-A14, B1-B3, C1-C7, D1-D2, E1, F1-F6)', 3, 'Neither / Sometimes',       'Neutral / Kadang-kadang')
+    add('Likert items (A1-A14, B1-B3, C1-C7, D1-D2, E1, F1-F6)', 4, 'Agree / Most of the time',  'Setuju / Selalu')
+    add('Likert items (A1-A14, B1-B3, C1-C7, D1-D2, E1, F1-F6)', 5, 'Strongly Agree / Always',   'Sangat Setuju / Sentiasa')
+    add('Likert items', 9, 'Does Not Apply or Don\'t Know (AHRQ-coded; stored as 0 in HASA DB)', 'Tidak Berkenaan / Tidak Tahu (kod AHRQ; disimpan sebagai 0 dalam pangkalan data HASA)')
+    add('D3 EventCount', 'a', 'None',          'Tiada')
+    add('D3 EventCount', 'b', '1 to 2 events', '1-2 insiden')
+    add('D3 EventCount', 'c', '3 to 5 events', '3-5 insiden')
+    add('D3 EventCount', 'd', '6 to 10 events','6-10 insiden')
+    add('D3 EventCount', 'e', '11 or more',    '11 atau lebih')
+    add('BQ1, BQ2 tenure', 'a', 'Less than 1 year', 'Kurang dari 1 tahun')
+    add('BQ1, BQ2 tenure', 'b', '1 to 5 years',     '1-5 tahun')
+    add('BQ1, BQ2 tenure', 'c', '6 to 10 years',    '6-10 tahun')
+    add('BQ1, BQ2 tenure', 'd', '11 or more years', '11+ tahun')
+    add('BQ3 hours_per_week', 'a', 'Less than 30 hours per week', 'Kurang dari 30 jam seminggu')
+    add('BQ3 hours_per_week', 'b', '30 to 40 hours per week',     '30 hingga 40 jam seminggu')
+    add('BQ3 hours_per_week', 'c', 'More than 40 hours per week', 'Lebih dari 40 jam seminggu')
+    add('BQ4 direct_patient_contact', 'a', 'YES — direct interaction or contact with patients', 'YA — interaksi langsung dengan pesakit')
+    add('BQ4 direct_patient_contact', 'b', 'NO — no direct interaction',                        'TIDAK — tiada interaksi langsung')
+    add('blank (any column)', '(empty cell)', 'MISSING / not answered', 'TIADA / tidak dijawab')
     const wsCodebook = XLSX.utils.json_to_sheet(codebook)
 
-    // SHEET 3 — Questions reference
-    const questionsRows = orderedQuestions.map((q) => ({
-      question_id:    q.id,
-      section:        q.section,
-      item_num:       q.item_num,
-      composite_code: q.composite_code,
-      wording:        q.wording,
-      scale_type:     q.scale_type,
-      text_en:        q.text_en,
-      text_ms:        q.text_ms,
-    }))
+    // SHEET 3 — Questions reference (in AHRQ spec column order)
+    // Map question_id to spec column letter for analyst convenience
+    const COL_LETTER: Record<string, string> = {
+      'A1':'E','A2':'F','A3':'G','A4':'H','A5':'I','A6':'J','A7':'K','A8':'L','A9':'M','A10':'N','A11':'O','A12':'P','A13':'Q','A14':'R',
+      'B1':'S','B2':'T','B3':'U',
+      'C1':'V','C2':'W','C3':'X','C4':'Y','C5':'Z','C6':'AA','C7':'AB',
+      'D1':'AC','D2':'AD','D3':'AE',
+      'E1':'AF',
+      'F1':'AG','F2':'AH','F3':'AI','F4':'AJ','F5':'AK','F6':'AL',
+    }
+    const questionsRows = SPEC_QUESTION_ORDER.map((qid) => {
+      const q = questionById.get(qid)
+      return {
+        spec_column:    COL_LETTER[qid] ?? '',
+        question_id:    qid,
+        section:        q?.section ?? '',
+        item_num:       q?.item_num ?? '',
+        composite_code: q?.composite_code ?? '',
+        wording:        q?.wording ?? '',
+        scale_type:     q?.scale_type ?? '',
+        text_en:        q?.text_en ?? '',
+        text_ms:        q?.text_ms ?? '',
+      }
+    })
     const wsQuestions = XLSX.utils.json_to_sheet(questionsRows)
 
     // Workbook + download
