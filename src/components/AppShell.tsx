@@ -5,8 +5,10 @@ import { usePathname } from 'next/navigation'
 import type { ReactNode } from 'react'
 
 const NAV = [
-  { href: '/ir', label: 'IR Dashboard', icon: '📊' },
-  { href: '/kpi', label: 'KPI Monitor', icon: '📈' },
+  { href: '/ir',   label: 'IR Dashboard',       icon: '📊' },
+  { href: '/kpi',  label: 'KPI Monitor',        icon: '📈' },
+  { href: '/pscs', label: 'Patient Safety Survey', icon: '🛡️' },
+  { href: '/risk', label: 'Risk Register',      icon: '⚠️' },
   { href: '/upload', label: 'Upload IR Database', icon: '⬆' },
 ] as const
 
