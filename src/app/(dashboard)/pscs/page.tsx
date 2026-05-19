@@ -23,7 +23,7 @@ import {
 } from '@/lib/pscs/types'
 import {
   BAND_COLOR, BAND_LABEL, band, BreakdownGroup, BreakdownRow, breakdownMatrix,
-  answersForResponses, compositeStats, distribution, itemStats,
+  answersForResponses, compositeStats, distribution, isStandaloneComposite, itemStats,
 } from '@/lib/pscs/scoring'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, Title)
@@ -540,7 +540,7 @@ function CompositesTab({ responses, answers, questions, composites, language }: 
 }) {
   void responses
   // 10 SOPS + REP_FREQ — exclude RATING (it's not a composite, shown separately)
-  const compsForChart = composites.filter((c) => !c.is_rating)
+  const compsForChart = composites.filter((c) => !isStandaloneComposite(c))
   const stats = useMemo(
     () => compsForChart.map((c) => ({ composite: c, stats: compositeStats(c.code, questions, answers) })),
     [compsForChart, questions, answers],
@@ -758,7 +758,7 @@ function ItemLevelTab({ responses, answers, questions, composites, positions, de
       </Panel>
 
       {/* Overall view (no comparison) — original stacked bars */}
-      {compareBy === 'none' && composites.filter((c) => !c.is_rating).map((c) => {
+      {compareBy === 'none' && composites.filter((c) => !isStandaloneComposite(c)).map((c) => {
         const qs = questions.filter((q) => q.composite_code === c.code).sort((a, b) => a.sort_order - b.sort_order)
         if (qs.length === 0) return null
         return (
@@ -802,7 +802,7 @@ function ItemLevelTab({ responses, answers, questions, composites, positions, de
         <Panel title={language === 'en' ? 'Item × Cohort Matrix' : 'Matriks Item × Kumpulan'}>
           <p className="bd-empty">{language === 'en' ? 'No responses with this axis populated yet.' : 'Tiada maklum balas dengan paksi ini.'}</p>
         </Panel>
-      ) : composites.filter((c) => !c.is_rating).map((c) => {
+      ) : composites.filter((c) => !isStandaloneComposite(c)).map((c) => {
         const qs = questions.filter((q) => q.composite_code === c.code).sort((a, b) => a.sort_order - b.sort_order)
         if (qs.length === 0) return null
         return (
@@ -1095,7 +1095,7 @@ function BreakdownsTab({
     () => breakdownMatrix(groups, composites, questions, answers, GROUP_MIN_RESPONSES),
     [groups, composites, questions, answers],
   )
-  const compsForMatrix = composites.filter((c) => !c.is_rating)
+  const compsForMatrix = composites.filter((c) => !isStandaloneComposite(c))
   const suppressedCount = matrix.filter((row) => row.suppressed).length
 
   /* ----- summary line ----- */
@@ -1804,7 +1804,7 @@ function ReportCover({
   // Top 5 strengths / gaps from items with ≥3 valid responses
   const allItems = useMemo(() => {
     return questions
-      .filter((q) => q.active && !composites.find((c) => c.code === q.composite_code)?.is_rating)
+      .filter((q) => q.active && !isStandaloneComposite(composites.find((c) => c.code === q.composite_code) ?? { code: '', is_rating: false } as PscsComposite))
       .map((q) => ({ q, st: itemStats(q, scopedAnswers) }))
       .filter((x) => x.st.total >= 3)
       .sort((a, b) => b.st.pct_positive - a.st.pct_positive)
@@ -1813,7 +1813,7 @@ function ReportCover({
   const topGaps = [...allItems].reverse().slice(0, 5)
 
   // Overall composite average
-  const compsForAvg = composites.filter((c) => !c.is_rating)
+  const compsForAvg = composites.filter((c) => !isStandaloneComposite(c))
   const compositeScores = compsForAvg
     .map((c) => compositeStats(c.code, questions, scopedAnswers).score)
     .filter((s): s is number => s !== null)
@@ -1856,7 +1856,7 @@ function ReportCover({
         </div>
         <div className="rc-cover-tile">
           <div className="l">{language === 'en' ? 'Items Scored' : 'Item Diskor'}</div>
-          <div className="v" style={{ color: 'var(--blue)' }}>{allItems.length}<span style={{ fontSize: 11, color: 'var(--muted)' }}> / {questions.filter((q) => q.active && !composites.find((c) => c.code === q.composite_code)?.is_rating).length}</span></div>
+          <div className="v" style={{ color: 'var(--blue)' }}>{allItems.length}<span style={{ fontSize: 11, color: 'var(--muted)' }}> / {questions.filter((q) => q.active && !isStandaloneComposite(composites.find((c) => c.code === q.composite_code) ?? { code: '', is_rating: false } as PscsComposite)).length}</span></div>
           <div className="s">{language === 'en' ? 'items with ≥3 valid responses' : 'item dengan ≥3 maklum balas sah'}</div>
         </div>
       </div>
@@ -2184,7 +2184,7 @@ function ReportComposites({
   composites: PscsComposite[]
   language: 'en' | 'ms'
 }) {
-  const comps = composites.filter((c) => !c.is_rating)
+  const comps = composites.filter((c) => !isStandaloneComposite(c))
   const rows = comps.map((c) => {
     const cur = compositeStats(c.code, questions, scopedAnswers)
     const hosp = compositeStats(c.code, questions, hospitalAnswers).score
@@ -2307,7 +2307,7 @@ function ReportItemLevel({
 }) {
   // Group composites into pages so each page fits ~roughly the same amount.
   // We'll do 3 composites per page conservatively.
-  const comps = composites.filter((c) => !c.is_rating)
+  const comps = composites.filter((c) => !isStandaloneComposite(c))
   const COMPS_PER_PAGE = 3
   const pages: PscsComposite[][] = []
   for (let i = 0; i < comps.length; i += COMPS_PER_PAGE) pages.push(comps.slice(i, i + COMPS_PER_PAGE))
@@ -2730,7 +2730,7 @@ function ReportCrossTabPage({
   showBenchmark: boolean
   language: 'en' | 'ms'
 }) {
-  const compsForRows = composites.filter((c) => !c.is_rating)
+  const compsForRows = composites.filter((c) => !isStandaloneComposite(c))
 
   // Pre-compute scope and hospital composite scores per (composite × column)
   // plus overall composite averages per column.
@@ -3082,7 +3082,7 @@ function ReportItemCrossTabPage({
   showBenchmark: boolean
   language: 'en' | 'ms'
 }) {
-  const compsForGroups = composites.filter((c) => !c.is_rating)
+  const compsForGroups = composites.filter((c) => !isStandaloneComposite(c))
 
   // Pre-compute per-(item × cohort) % positive for scope and hospital cohorts
   const colData = useMemo(() => cols.map((col) => {

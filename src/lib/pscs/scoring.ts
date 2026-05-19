@@ -27,6 +27,23 @@
 
 import { PscsAnswer, PscsComposite, PscsQuestion, ScaleType, Wording } from './types'
 
+/* ---------- composite display rules ---------- */
+/*
+ * Some composites have their own standalone display on the dashboard /
+ * report card and should NOT appear in the main composite list, the
+ * composite measure average, the composite cross-tabs, or the
+ * Strengths/Gaps callout:
+ *
+ *   - RATING (E1)  — Patient Safety Rating, shown as its own panel
+ *   - REP    (D3)  — Events Reported, shown as the events distribution chart
+ *
+ * REP_FREQ (D1 + D2) IS included in the main composite list and is the one
+ * publicly named "Reporting Patient Safety Events" on the HASA dashboard.
+ */
+export function isStandaloneComposite(c: PscsComposite): boolean {
+  return c.is_rating || c.code === 'REP'
+}
+
 /* ---------- per-answer classification ---------- */
 
 export type Bucket = 'positive' | 'neutral' | 'negative' | 'excluded'
@@ -277,7 +294,7 @@ export function breakdownMatrix<T extends { id: string }>(
       const groupAnswers = answersForResponses(g.responses, answers)
       const scoresForAvg: number[] = []
       for (const c of composites) {
-        if (c.is_rating) continue
+        if (isStandaloneComposite(c)) continue
         const s = compositeStats(c.code, questions, groupAnswers).score
         perComposite.set(c.code, s)
         if (s !== null) scoresForAvg.push(s)
