@@ -166,18 +166,19 @@ export default function RiskDetailPage() {
   }
 
   async function handleReject() {
-    const reason = window.prompt('Rejection reason (short code, e.g. INSUFFICIENT_DETAIL, DUPLICATE, OUT_OF_SCOPE):', '')?.trim()
-    if (!reason) return
-    const comment = window.prompt('Detailed comment for the RLO:', '')?.trim()
-    if (comment === undefined) return
+    const text = window.prompt('Reason for rejecting this risk (this will be visible to the RLO):', '')?.trim()
+    if (!text) return
     await transition({
       newStatus: 'REJECTED',
       action: 'REJECT',
       role: 'RC',
-      comment: `Rejected: ${reason}${comment ? ` — ${comment}` : ''}`,
+      comment: `Rejected: ${text}`,
       extras: {
-        rejection_reason: reason.slice(0, 50),
-        rejection_comment: comment || null,
+        // rejection_reason is varchar(50), so we save a truncated version there
+        // and the full text in rejection_comment. The displayed badge uses the
+        // comment when it exists.
+        rejection_reason: text.slice(0, 50),
+        rejection_comment: text,
         rejected_by: currentUserId ?? undefined,
         rejected_at: new Date().toISOString(),
       },
