@@ -189,6 +189,10 @@ export default function IrPage() {
             <span className="nav-icon">🛡️</span>
             <span>Safety Culture</span>
           </Link>
+          <Link href="/risk" className="nav-item">
+            <span className="nav-icon">⚠️</span>
+            <span>Risk Register</span>
+          </Link>
         </div>
 
         <div className="sb-filters">

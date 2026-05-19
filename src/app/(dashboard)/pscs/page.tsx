@@ -352,6 +352,10 @@ export default function PscsPage() {
             <span className="nav-icon">📈</span>
             <span>KPI Monitor</span>
           </Link>
+          <Link href="/risk" className="nav-item">
+            <span className="nav-icon">⚠️</span>
+            <span>Risk Register</span>
+          </Link>
         </div>
 
         <div className="sb-filters">
