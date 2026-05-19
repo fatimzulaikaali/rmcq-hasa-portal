@@ -129,7 +129,7 @@ export default function NewRiskPage() {
 
   const canSubmit = !submitting && errors.length === 0 && riskUserId !== null
 
-  async function handleSubmit() {
+  async function handleSubmit(targetStatus: 'DRAFT' | 'PENDING_HOD') {
     if (!canSubmit || !computed || !riskUserId) return
     setSubmitting(true); setSubmitError(null)
     try {
@@ -163,7 +163,7 @@ export default function NewRiskPage() {
           action_owner: form.action_owner.trim() || null,
           implementation_period: form.implementation_period.trim() || null,
           notes: form.notes.trim() || null,
-          status: 'DRAFT',
+          status: targetStatus,
         })
         .select('id')
         .single()
@@ -198,11 +198,13 @@ export default function NewRiskPage() {
           risk_id: newRiskRowId,
           entity_type: 'risk',
           entity_id: newRiskRowId,
-          action_type: 'CREATE',
+          action_type: targetStatus === 'PENDING_HOD' ? 'CREATE_AND_SUBMIT' : 'CREATE',
           performed_by: riskUserId,
           user_role: 'RLO',
-          new_value: { risk_id, status: 'DRAFT', dept_code: form.dept_code },
-          comment: 'Risk created via /risk/new',
+          new_value: { risk_id, status: targetStatus, dept_code: form.dept_code },
+          comment: targetStatus === 'PENDING_HOD'
+            ? 'Risk created and submitted to HOD via /risk/new'
+            : 'Risk created via /risk/new',
         })
       if (auditErr) {
         // Non-fatal — audit log failure shouldn't block redirect
@@ -266,7 +268,7 @@ export default function NewRiskPage() {
           )}
 
           {!loading && !loadError && (
-            <form onSubmit={(e) => { e.preventDefault(); void handleSubmit() }}>
+            <form onSubmit={(e) => { e.preventDefault(); void handleSubmit('DRAFT') }}>
               {/* Section 1 — Identification */}
               <div className="panel">
                 <div className="pf"><div><div className="pt">1. Risk Identification</div><div className="psub">Department, category, and scope of the risk.</div></div></div>
@@ -416,17 +418,23 @@ export default function NewRiskPage() {
                     <div><div className="at">Could not save</div><div className="as">{submitError}</div></div>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
                   <Link href="/risk" className="signout-btn">Cancel</Link>
                   <button type="submit" className="signout-btn"
-                    style={{ background: canSubmit ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: canSubmit ? 'var(--blue)' : '#9CA3AF', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+                    style={{ background: canSubmit ? '#fff' : '#9CA3AF', color: canSubmit ? 'var(--text)' : '#fff', borderColor: canSubmit ? 'var(--border)' : '#9CA3AF', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
                     disabled={!canSubmit}>
                     {submitting ? 'Saving…' : '💾 Save as DRAFT'}
                   </button>
+                  <button type="button" className="signout-btn"
+                    style={{ background: canSubmit ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: canSubmit ? 'var(--blue)' : '#9CA3AF', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+                    disabled={!canSubmit}
+                    onClick={() => void handleSubmit('PENDING_HOD')}>
+                    {submitting ? 'Saving…' : '→ Submit to HOD'}
+                  </button>
                 </div>
                 <div style={{ marginTop: 8, fontSize: 10, color: 'var(--muted)' }}>
-                  After saving, the risk will appear in the register with status DRAFT.
-                  Submission to HOD &rarr; RC for approval will come in Phase 3.5.
+                  <b>Save as DRAFT</b> — keep working on it; only you see it. <br />
+                  <b>Submit to HOD</b> — send to your HOD for endorsement now. They will see it in their queue.
                 </div>
               </div>
             </form>

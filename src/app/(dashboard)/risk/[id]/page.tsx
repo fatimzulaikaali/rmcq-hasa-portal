@@ -6,7 +6,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { getModuleAccess } from '@/lib/risk/auth'
+import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
+import type { RiskRole } from '@/lib/risk/types'
 import {
   Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
 } from '@/lib/risk/types'
@@ -48,6 +49,7 @@ export default function RiskDetailPage() {
   const [users, setUsers]     = useState<Map<number, RiskUser>>(new Map())
   const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [userRoles, setUserRoles] = useState<{ role: RiskRole; dept_code: string | null }[]>([])
   const [transitioning, setTransitioning] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [isAdminUser, setIsAdminUser] = useState(true)
@@ -76,10 +78,12 @@ export default function RiskDetailPage() {
 
       setRisk(riskData as Risk)
 
-      // Resolve the current Supabase auth user → risk_users.id for workflow actions
-      const { data: ru } = await supabase.from('risk_users')
-        .select('id').eq('auth_user_id', user.id).maybeSingle()
-      setCurrentUserId(ru?.id ?? null)
+      // Resolve the current Risk-module user (id + roles) for workflow gating
+      const ruRes = await resolveCurrentRiskUser(supabase)
+      if (ruRes.ok) {
+        setCurrentUserId(ruRes.user.riskUserId)
+        setUserRoles(ruRes.user.roles)
+      }
 
       const [
         { data: deptData, error: deptErr },
@@ -224,6 +228,23 @@ export default function RiskDetailPage() {
 
   const latest = reviews[0] ?? null
 
+  /* Role-based capability checks for the workflow buttons.
+   * A user qualifies if they hold one of the listed roles AND that role is
+   * either hospital-wide (dept_code null) or scoped to this risk's dept. */
+  function hasRole(roles: RiskRole[], deptCode?: string): boolean {
+    return userRoles.some((r) =>
+      roles.includes(r.role) &&
+      (r.dept_code === null || !deptCode || r.dept_code === deptCode))
+  }
+  const riskDept = risk?.dept_code
+  const canSubmit       = hasRole(['RLO', 'ADMIN'], riskDept)
+  const canEndorse      = hasRole(['HOD', 'ADMIN'], riskDept)
+  const canValidate     = hasRole(['RC', 'ADMIN'])
+  const canManageActive = hasRole(['RC', 'ADMIN'])               // monitoring / reactivate / reopen
+  const canRequestClose = hasRole(['RLO', 'HOD', 'ADMIN'], riskDept)
+  const canClose        = hasRole(['RC', 'ADMIN'])
+  const canReject       = hasRole(['HOD', 'RC', 'ADMIN'], riskDept)
+
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
@@ -355,79 +376,101 @@ export default function RiskDetailPage() {
                 )}
                 <div className="risk-workflow-actions">
                   {risk.status === 'DRAFT' && (
-                    <>
-                      <WfBtn primary disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'PENDING_HOD', action: 'SUBMIT_TO_HOD', role: 'RLO', comment: 'Submitted to HOD for endorsement' })}>
-                        → Submit to HOD
-                      </WfBtn>
-                      <WfHint>RLO submits the draft to the department HOD for endorsement.</WfHint>
-                    </>
+                    canSubmit ? (
+                      <>
+                        <WfBtn primary disabled={transitioning} onClick={() =>
+                          transition({ newStatus: 'PENDING_HOD', action: 'SUBMIT_TO_HOD', role: 'RLO', comment: 'Submitted to HOD for endorsement' })}>
+                          → Submit to HOD
+                        </WfBtn>
+                        <WfHint>Submit the draft to the department HOD for endorsement.</WfHint>
+                      </>
+                    ) : <WfHint>This risk is in draft. Only the RLO can submit it to the HOD.</WfHint>
                   )}
                   {risk.status === 'PENDING_HOD' && (
-                    <>
-                      <WfBtn primary disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
-                        ✓ Endorse (HOD)
-                      </WfBtn>
-                      <WfBtn danger disabled={transitioning} onClick={handleReject}>
-                        ✗ Reject
-                      </WfBtn>
-                      <WfHint>HOD endorses → forwards to Risk Coordinator for validation. Reject sends it back as REJECTED.</WfHint>
-                    </>
+                    (canEndorse || canReject) ? (
+                      <>
+                        {canEndorse && (
+                          <WfBtn primary disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
+                            ✓ Endorse (HOD)
+                          </WfBtn>
+                        )}
+                        {canReject && (
+                          <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
+                        )}
+                        <WfHint>HOD endorses → forwards to Risk Coordinator. Reject sends it back as REJECTED.</WfHint>
+                      </>
+                    ) : <WfHint>Awaiting HOD endorsement. Only the department HOD can act here.</WfHint>
                   )}
                   {risk.status === 'PENDING_RC' && (
-                    <>
-                      <WfBtn primary disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
-                        ✓ Validate (RC)
-                      </WfBtn>
-                      <WfBtn danger disabled={transitioning} onClick={handleReject}>
-                        ✗ Reject
-                      </WfBtn>
-                      <WfHint>RC validates the risk and its scoring → status becomes ACTIVE.</WfHint>
-                    </>
+                    (canValidate || canReject) ? (
+                      <>
+                        {canValidate && (
+                          <WfBtn primary disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
+                            ✓ Validate (RC)
+                          </WfBtn>
+                        )}
+                        {canReject && (
+                          <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
+                        )}
+                        <WfHint>RC validates the risk and its scoring → status becomes ACTIVE.</WfHint>
+                      </>
+                    ) : <WfHint>Awaiting Risk Coordinator validation. Only RC can act here.</WfHint>
                   )}
                   {risk.status === 'ACTIVE' && (
-                    <>
-                      <WfBtn primary disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'MONITORING', action: 'MOVE_TO_MONITORING', role: 'RC', comment: 'Moved to monitoring' })}>
-                        → Move to Monitoring
-                      </WfBtn>
-                      <WfBtn disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested by RLO' })}>
-                        Request Closure
-                      </WfBtn>
-                      <WfHint>Active risks are being treated. Move to Monitoring once controls are in place; Request Closure once the risk no longer applies.</WfHint>
-                    </>
+                    (canManageActive || canRequestClose) ? (
+                      <>
+                        {canManageActive && (
+                          <WfBtn primary disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'MONITORING', action: 'MOVE_TO_MONITORING', role: 'RC', comment: 'Moved to monitoring' })}>
+                            → Move to Monitoring
+                          </WfBtn>
+                        )}
+                        {canRequestClose && (
+                          <WfBtn disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested' })}>
+                            Request Closure
+                          </WfBtn>
+                        )}
+                        <WfHint>Active risks are being treated. RC moves to Monitoring; RLO/HOD can request closure.</WfHint>
+                      </>
+                    ) : <WfHint>This risk is active and being treated.</WfHint>
                   )}
                   {risk.status === 'MONITORING' && (
-                    <>
-                      <WfBtn disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested by RLO' })}>
-                        Request Closure
-                      </WfBtn>
-                      <WfBtn disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'ACTIVE', action: 'REACTIVATE', role: 'RC', comment: 'Reactivated from monitoring' })}>
-                        ← Back to Active
-                      </WfBtn>
-                      <WfHint>Risk is being monitored. Request closure when ready to close, or send back to Active if treatment slipped.</WfHint>
-                    </>
+                    (canRequestClose || canManageActive) ? (
+                      <>
+                        {canRequestClose && (
+                          <WfBtn disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested' })}>
+                            Request Closure
+                          </WfBtn>
+                        )}
+                        {canManageActive && (
+                          <WfBtn disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'ACTIVE', action: 'REACTIVATE', role: 'RC', comment: 'Reactivated from monitoring' })}>
+                            ← Back to Active
+                          </WfBtn>
+                        )}
+                        <WfHint>Risk is being monitored. Request closure when ready, or send back to Active.</WfHint>
+                      </>
+                    ) : <WfHint>This risk is being monitored.</WfHint>
                   )}
                   {risk.status === 'PENDING_CLOSURE' && (
-                    <>
-                      <WfBtn primary disabled={transitioning} onClick={handleClose}>
-                        ✓ Close Risk (RC)
-                      </WfBtn>
-                      <WfBtn disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'ACTIVE', action: 'REOPEN_TO_ACTIVE', role: 'RC', comment: 'Closure rejected — back to active' })}>
-                        ← Reject closure
-                      </WfBtn>
-                      <WfHint>RC has the final say on closure. Either approve close, or send back to ACTIVE if more work is needed.</WfHint>
-                    </>
+                    canClose ? (
+                      <>
+                        <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
+                        <WfBtn disabled={transitioning} onClick={() =>
+                          transition({ newStatus: 'ACTIVE', action: 'REOPEN_TO_ACTIVE', role: 'RC', comment: 'Closure rejected — back to active' })}>
+                          ← Reject closure
+                        </WfBtn>
+                        <WfHint>RC has the final say on closure. Approve close, or send back to ACTIVE.</WfHint>
+                      </>
+                    ) : <WfHint>Closure requested — awaiting Risk Coordinator decision.</WfHint>
                   )}
                   {risk.status === 'REJECTED' && (
                     <>
-                      <WfHint>This risk was rejected and is read-only. Use the Risk Register page to create a fresh submission.</WfHint>
+                      <WfHint>This risk was rejected and is read-only. Create a fresh submission from the Risk Register.</WfHint>
                       {risk.rejection_comment && (
                         <div className="risk-def-block-value" style={{ marginTop: 6 }}>
                           <b>Reason:</b> {risk.rejection_reason ?? '—'}<br />
@@ -437,14 +480,16 @@ export default function RiskDetailPage() {
                     </>
                   )}
                   {risk.status === 'CLOSED' && (
-                    <>
-                      <WfHint>Risk is closed. Click below if you need to reopen for further treatment.</WfHint>
-                      <WfBtn disabled={transitioning} onClick={() =>
-                        transition({ newStatus: 'ACTIVE', action: 'REOPEN', role: 'RC', comment: 'Risk reopened',
-                          extras: { date_closed: undefined, closed_by: undefined } })}>
-                        ↻ Reopen
-                      </WfBtn>
-                    </>
+                    canManageActive ? (
+                      <>
+                        <WfHint>Risk is closed. Reopen if further treatment is needed.</WfHint>
+                        <WfBtn disabled={transitioning} onClick={() =>
+                          transition({ newStatus: 'ACTIVE', action: 'REOPEN', role: 'RC', comment: 'Risk reopened',
+                            extras: { date_closed: undefined, closed_by: undefined } })}>
+                          ↻ Reopen
+                        </WfBtn>
+                      </>
+                    ) : <WfHint>This risk is closed.</WfHint>
                   )}
                 </div>
               </div>
