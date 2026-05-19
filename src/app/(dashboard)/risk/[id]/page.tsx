@@ -157,6 +157,12 @@ export default function RiskDetailPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {risk && (
+              <Link href={`/risk/${risk.id}/review`} className="signout-btn"
+                style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
+                + New Review Cycle
+              </Link>
+            )}
             <Link href="/risk" className="signout-btn">← Back to register</Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
