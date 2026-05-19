@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
   RiskStatus, RiskLevel, RiskCategory,
@@ -35,6 +36,10 @@ export default function RiskListPage() {
   const [categoryF, setCategoryF] = useState<CategoryFilter>('all')
   const [deptF,     setDeptF]     = useState<DeptFilter>('all')
 
+  // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
+  const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
+  const [isAdminUser, setIsAdminUser]   = useState(true)
+
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
@@ -42,6 +47,11 @@ export default function RiskListPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
+
+      // Resolve the user's module access (admin-style vs dept-scoped)
+      const access = await getModuleAccess(supabase)
+      setAllowedDepts(access.deptScopes)
+      setIsAdminUser(access.allModules)
 
       const { data: deptsData, error: deptsErr } = await supabase
         .from('pscs_departments')
@@ -86,12 +96,14 @@ export default function RiskListPage() {
   }
 
   const filtered = useMemo(() => rows.filter((r) => {
+    // Hard dept-scope filter — dept-restricted users only see their dept's risks
+    if (allowedDepts !== null && !allowedDepts.includes(r.risk.dept_code)) return false
     if (statusF   !== 'all' && r.risk.status        !== statusF)   return false
     if (categoryF !== 'all' && r.risk.category      !== categoryF) return false
     if (deptF     !== 'all' && r.risk.dept_code     !== deptF)     return false
     if (levelF    !== 'all' && r.latest?.risk_level !== levelF)    return false
     return true
-  }), [rows, statusF, categoryF, deptF, levelF])
+  }), [rows, statusF, categoryF, deptF, levelF, allowedDepts])
 
   const activeFilters =
     (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) +
@@ -122,15 +134,19 @@ export default function RiskListPage() {
 
         <div className="nav-section">
           <div className="nav-lbl">Portal</div>
-          <Link href="/ir" className="nav-item">
-            <span className="nav-icon">🩺</span><span>IR Dashboard</span>
-          </Link>
-          <Link href="/kpi" className="nav-item">
-            <span className="nav-icon">📈</span><span>KPI Monitor</span>
-          </Link>
-          <Link href="/pscs" className="nav-item">
-            <span className="nav-icon">🛡️</span><span>Safety Culture</span>
-          </Link>
+          {isAdminUser && (
+            <>
+              <Link href="/ir" className="nav-item">
+                <span className="nav-icon">🩺</span><span>IR Dashboard</span>
+              </Link>
+              <Link href="/kpi" className="nav-item">
+                <span className="nav-icon">📈</span><span>KPI Monitor</span>
+              </Link>
+              <Link href="/pscs" className="nav-item">
+                <span className="nav-icon">🛡️</span><span>Safety Culture</span>
+              </Link>
+            </>
+          )}
         </div>
 
         <div className="sb-filters">

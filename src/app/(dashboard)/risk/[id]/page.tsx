@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
 } from '@/lib/risk/types'
@@ -49,6 +50,7 @@ export default function RiskDetailPage() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [transitioning, setTransitioning] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
+  const [isAdminUser, setIsAdminUser] = useState(true)
 
   useEffect(() => { void load() }, [riskRowId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -63,6 +65,15 @@ export default function RiskDetailPage() {
         .from('risks').select('*').eq('id', riskRowId).maybeSingle()
       if (riskErr) throw new Error(`Risk: ${riskErr.code ?? ''} ${riskErr.message}`)
       if (!riskData) { setNotFound(true); return }
+
+      // Dept-scope guard — dept-restricted users can't see risks outside their dept
+      const access = await getModuleAccess(supabase)
+      setIsAdminUser(access.allModules)
+      if (access.deptScopes !== null && !access.deptScopes.includes((riskData as Risk).dept_code)) {
+        setNotFound(true)
+        return
+      }
+
       setRisk(riskData as Risk)
 
       // Resolve the current Supabase auth user → risk_users.id for workflow actions
@@ -223,9 +234,13 @@ export default function RiskDetailPage() {
         </div>
         <div className="nav-section">
           <div className="nav-lbl">Portal</div>
-          <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
-          <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
-          <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
+          {isAdminUser && (
+            <>
+              <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
+              <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
+              <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
+            </>
+          )}
           <Link href="/risk" className="nav-item"><span className="nav-icon">⚠️</span><span>Risk Register</span></Link>
         </div>
       </aside>

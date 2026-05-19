@@ -2,10 +2,12 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
 import { AppShell, Topbar } from '@/components/AppShell'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   parseRows,
   type IncidentRow,
@@ -25,7 +27,16 @@ interface ImportResult {
 const CHUNK = 200
 
 export default function UploadPage() {
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+
+  // Module access gate — dept-scoped Risk users get bounced to /risk
+  useEffect(() => {
+    void (async () => {
+      const access = await getModuleAccess(supabase)
+      if (!access.allModules) router.replace('/risk')
+    })()
+  }, [supabase, router])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)

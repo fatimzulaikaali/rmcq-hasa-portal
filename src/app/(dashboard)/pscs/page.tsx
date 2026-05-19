@@ -18,6 +18,7 @@ import {
 import { Bar } from 'react-chartjs-2'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   PscsAnswer, PscsCampaign, PscsComposite, PscsDepartment, PscsPosition, PscsQuestion, PscsResponse,
 } from '@/lib/pscs/types'
@@ -79,6 +80,13 @@ export default function PscsPage() {
     }
     ;(async () => {
       try {
+        // Module access gate — dept-scoped Risk users get bounced to /risk
+        const access = await getModuleAccess(supabase)
+        if (!access.allModules) {
+          router.replace('/risk')
+          return
+        }
+
         const [c, q, comps, p, d, r, a] = await Promise.all([
           fetchAll<PscsCampaign>('pscs_campaigns'),
           fetchAll<PscsQuestion>('pscs_questions'),

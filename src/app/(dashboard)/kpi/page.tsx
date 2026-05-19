@@ -12,6 +12,7 @@ import {
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   KpiDefinition, KpiDataRow, KpiSiqRecord, KpiDepartment,
   Frequency, Period, AchievementStatus, FREQUENCIES, PERIODS,
@@ -95,6 +96,13 @@ export default function KpiPage() {
     }
     ;(async () => {
       try {
+        // Module access gate — dept-scoped Risk users get bounced to /risk
+        const access = await getModuleAccess(supabase)
+        if (!access.allModules) {
+          router.replace('/risk')
+          return
+        }
+
         const [allDefsRaw, allData, allSiq, allDepts] = await Promise.all([
           fetchAll<KpiDefinition>('kpi_definitions'),
           fetchAll<KpiDataRow>('kpi_data'),

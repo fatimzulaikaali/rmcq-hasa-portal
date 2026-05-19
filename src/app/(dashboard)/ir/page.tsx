@@ -21,6 +21,7 @@ import {
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   parseRows as parseIrRows,
   detectHeaderRow as detectIrHeaderRow,
@@ -144,6 +145,13 @@ export default function IrPage() {
     let cancelled = false
     const supabase = createClient()
     ;(async () => {
+      // Module access gate — dept-scoped Risk users get bounced to /risk
+      const access = await getModuleAccess(supabase)
+      if (!access.allModules) {
+        router.replace('/risk')
+        return
+      }
+
       const { data, error } = await supabase
         .from('incidents')
         .select(
@@ -160,7 +168,7 @@ export default function IrPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [refreshTick])
+  }, [refreshTick, router])
 
   const filtered = useMemo(() => (rows ? applyFilters(rows, filters) : []), [rows, filters])
 
