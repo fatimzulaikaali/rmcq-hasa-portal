@@ -332,10 +332,6 @@ export default function NewRiskPage() {
                     <textarea rows={2} value={form.additional_controls} onChange={(e) => set('additional_controls', e.target.value)}
                       placeholder="What new controls are you planning?" />
                   </Field>
-                  <Field label="Control classification (5C)">
-                    <input type="text" value={form.control_classification} onChange={(e) => set('control_classification', e.target.value)}
-                      placeholder="e.g. Corrective, Compensating, Detective…" />
-                  </Field>
                   <Field label="Action owner">
                     <input type="text" value={form.action_owner} onChange={(e) => set('action_owner', e.target.value)}
                       placeholder="Person responsible for implementing the controls" />

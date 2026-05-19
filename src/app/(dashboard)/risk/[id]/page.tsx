@@ -243,7 +243,7 @@ export default function RiskDetailPage() {
                     <b>{risk.category}</b> <span style={{ color: 'var(--muted)' }}>— {RISK_CATEGORY_LABEL[risk.category]}</span>
                   </DefLine>
                   <DefLine label="Scope">{RISK_SCOPE_LABEL[risk.scope]}</DefLine>
-                  <DefLine label="Risk owner">{nameOf(risk.risk_owner_id)}</DefLine>
+                  <DefLine label="Risk owner">{dept?.name_en ?? risk.dept_code}</DefLine>
                   <DefLine label="Created by">{nameOf(risk.created_by)}</DefLine>
                   <DefLine label="Date opened">{fmtDate(risk.date_opened)}</DefLine>
                   <DefLine label="Date closed">{fmtDate(risk.date_closed)}</DefLine>
@@ -276,7 +276,6 @@ export default function RiskDetailPage() {
                 <DefBlock label="Existing controls">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <DefBlock label="Additional controls proposed">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <div className="risk-detail-grid">
-                  <DefLine label="Control classification (5C)">{risk.control_classification || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
                   <DefLine label="Action owner">{risk.action_owner || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
                   <DefLine label="Implementation period">{risk.implementation_period || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
                 </div>
