@@ -618,6 +618,13 @@ body{counter-reset:rcpage;}
 .dc-title{font-size:12px;font-weight:700;color:#16202E;margin-bottom:4px;}
 .dc-pct{font-size:14px;font-weight:700;margin-bottom:8px;}
 
+/* Risk Register — table on /risk */
+.risk-table{width:100%;border-collapse:collapse;font-size:12px;}
+.risk-table thead th{background:#F3F4F6;color:#374151;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:7px 10px;border-bottom:2px solid var(--border);text-align:left;}
+.risk-table tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.risk-table tbody tr:hover{background:#F9FAFB;}
+.risk-table tbody tr:last-child td{border-bottom:none;}
+
 /* Filter field */
 .filter-field{margin-bottom:8px;}
 .filter-field label{display:block;font-size:10px;color:#A8B4C7;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;}
