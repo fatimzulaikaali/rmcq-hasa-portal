@@ -317,6 +317,16 @@ export default function PscsPage() {
               <span>{t.label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="tab-export"
+            onClick={downloadExcel}
+            disabled={loading || !campaign || filteredResponses.length === 0}
+            title={language === 'en'
+              ? `Download raw responses + codebook for campaign ${campaign?.code ?? ''}`
+              : `Muat turun maklum balas mentah + buku kod untuk kempen ${campaign?.code ?? ''}`}>
+            ⬇ {language === 'en' ? 'Export to Excel' : 'Eksport ke Excel'}
+          </button>
         </div>
 
         <div className="content">
@@ -324,7 +334,7 @@ export default function PscsPage() {
           {loading && !loadError && <div className="ac blue"><div className="ai">⏳</div><div><div className="at">Loading…</div></div></div>}
           {!loading && !loadError && (
             <>
-              {tab === 'overview'   && <OverviewTab responses={filteredResponses} positions={positions!} departments={departments!} language={language} campaign={campaign} onExportExcel={downloadExcel} canExport={filteredResponses.length > 0} />}
+              {tab === 'overview'   && <OverviewTab responses={filteredResponses} positions={positions!} departments={departments!} language={language} />}
               {tab === 'composites' && <CompositesTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} language={language} />}
               {tab === 'item-level' && <ItemLevelTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
               {tab === 'breakdowns' && <BreakdownsTab responses={filteredResponses} answers={filteredAnswers} questions={questions!} composites={composites!} positions={positions!} departments={departments!} language={language} />}
@@ -340,14 +350,11 @@ export default function PscsPage() {
 
 /* ======================== TAB 1 — OVERVIEW ======================== */
 
-function OverviewTab({ responses, positions, departments, language, campaign, onExportExcel, canExport }: {
+function OverviewTab({ responses, positions, departments, language }: {
   responses: PscsResponse[]
   positions: PscsPosition[]
   departments: PscsDepartment[]
   language: 'en' | 'ms'
-  campaign: PscsCampaign | null
-  onExportExcel: () => void
-  canExport: boolean
 }) {
   const total = responses.length
 
@@ -409,9 +416,6 @@ function OverviewTab({ responses, positions, departments, language, campaign, on
     return { yes, no, unk }
   }, [responses])
 
-  const today = new Date().toISOString().slice(0, 10)
-  const fileName = campaign ? `PSCS_RawData_${campaign.code}_${today}.xlsx` : '—'
-
   return (
     <div className="pscs-page">
       <Panel title="Survey Overview">
@@ -420,36 +424,6 @@ function OverviewTab({ responses, positions, departments, language, campaign, on
           <Tile label={language === 'en' ? 'Position groups' : 'Kumpulan kakitangan'} value={String(byPositionGroup.length)} color="#14B8A6" />
           <Tile label={language === 'en' ? 'Directorates covered' : 'Direktorat dilibatkan'} value={String(byDirectorate.length)} color="#F59E0B" />
           <Tile label={language === 'en' ? 'With patient contact' : 'Interaksi pesakit'} value={`${byContact.yes}`} color="#16A34A" />
-        </div>
-      </Panel>
-
-      <Panel title={language === 'en' ? '📥 Export Raw Data' : '📥 Eksport Data Mentah'}>
-        <div className="export-card">
-          <div className="export-card-text">
-            <div className="export-card-title">
-              {language === 'en' ? 'Download survey responses to Excel' : 'Muat turun maklum balas tinjauan ke Excel'}
-            </div>
-            <div className="export-card-sub">
-              {language === 'en'
-                ? `One row per response, one column per question (wide format), plus reference sheets (Codebook, Questions). File: ${fileName}`
-                : `Satu baris per maklum balas, satu lajur per soalan (format luas), termasuk helaian rujukan (Buku Kod, Soalan). Fail: ${fileName}`}
-            </div>
-            <div className="export-card-sub" style={{ marginTop: 4 }}>
-              {language === 'en'
-                ? `Scope: ${total} response${total === 1 ? '' : 's'} in campaign ${campaign?.code ?? '—'}.`
-                : `Skop: ${total} maklum balas dalam kempen ${campaign?.code ?? '—'}.`}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="export-btn"
-            onClick={onExportExcel}
-            disabled={!canExport}
-            title={canExport
-              ? (language === 'en' ? 'Generate .xlsx' : 'Hasilkan .xlsx')
-              : (language === 'en' ? 'No responses to export' : 'Tiada maklum balas untuk dieksport')}>
-            ⬇ {language === 'en' ? 'Export to Excel' : 'Eksport ke Excel'}
-          </button>
         </div>
       </Panel>
 
