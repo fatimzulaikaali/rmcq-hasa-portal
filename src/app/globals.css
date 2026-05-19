@@ -618,6 +618,28 @@ body{counter-reset:rcpage;}
 .dc-title{font-size:12px;font-weight:700;color:#16202E;margin-bottom:4px;}
 .dc-pct{font-size:14px;font-weight:700;margin-bottom:8px;}
 
+/* Risk Register — New Risk form on /risk/new */
+.risk-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;}
+.risk-field{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.risk-field.full{grid-column:1 / -1;}
+.risk-field > label{font-size:11px;font-weight:700;color:#16202E;text-transform:uppercase;letter-spacing:.03em;}
+.risk-field input[type=text],.risk-field select,.risk-field textarea{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:#fff;color:var(--text);}
+.risk-field textarea{resize:vertical;min-height:60px;line-height:1.5;}
+.risk-field select:focus,.risk-field input:focus,.risk-field textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(24,95,165,.15);}
+.risk-field-hint{font-size:10px;color:var(--muted);margin-top:2px;}
+.theme-pill{display:inline-flex;align-items:center;padding:4px 10px;border:1px solid var(--border);border-radius:99px;background:#fff;font-size:11px;color:var(--text);cursor:pointer;transition:all .12s;}
+.theme-pill:hover{border-color:var(--blue);}
+.theme-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.score-pills{display:flex;gap:4px;}
+.score-pill{flex:1;padding:8px 0;border:1px solid var(--border);border-radius:5px;background:#fff;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .12s;font-family:inherit;}
+.score-pill:hover{border-color:var(--blue);color:var(--blue);}
+.score-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.risk-score-preview{display:flex;gap:24px;margin-top:14px;padding:14px;background:#F9FAFB;border:1px solid var(--border);border-radius:6px;align-items:center;justify-content:space-around;flex-wrap:wrap;}
+.rsp-block{text-align:center;}
+.rsp-label{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.rsp-value{font-size:24px;font-weight:700;color:var(--text);margin-top:4px;line-height:1;}
+@media (max-width:768px){.risk-form-grid{grid-template-columns:1fr;}}
+
 /* Risk Register — table on /risk */
 .risk-table{width:100%;border-collapse:collapse;font-size:12px;}
 .risk-table thead th{background:#F3F4F6;color:#374151;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:7px 10px;border-bottom:2px solid var(--border);text-align:left;}

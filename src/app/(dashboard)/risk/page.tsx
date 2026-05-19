@@ -193,14 +193,10 @@ export default function RiskListPage() {
             <div className="rec-badge">
               {loading ? 'Loading…' : `${filtered.length.toLocaleString()} risk${filtered.length === 1 ? '' : 's'}`}
             </div>
-            <button
-              type="button"
-              className="signout-btn"
-              style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)', opacity: 0.5, cursor: 'not-allowed' }}
-              disabled
-              title="Coming in Phase 3.2">
+            <Link href="/risk/new" className="signout-btn"
+              style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
               + New Risk
-            </button>
+            </Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
