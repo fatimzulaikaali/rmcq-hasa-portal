@@ -46,6 +46,9 @@ export default function RiskDetailPage() {
   const [logs, setLogs]       = useState<AuditLog[]>([])
   const [users, setUsers]     = useState<Map<number, RiskUser>>(new Map())
   const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [transitioning, setTransitioning] = useState(false)
+  const [transitionError, setTransitionError] = useState<string | null>(null)
 
   useEffect(() => { void load() }, [riskRowId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -61,6 +64,11 @@ export default function RiskDetailPage() {
       if (riskErr) throw new Error(`Risk: ${riskErr.code ?? ''} ${riskErr.message}`)
       if (!riskData) { setNotFound(true); return }
       setRisk(riskData as Risk)
+
+      // Resolve the current Supabase auth user → risk_users.id for workflow actions
+      const { data: ru } = await supabase.from('risk_users')
+        .select('id').eq('auth_user_id', user.id).maybeSingle()
+      setCurrentUserId(ru?.id ?? null)
 
       const [
         { data: deptData, error: deptErr },
@@ -111,6 +119,84 @@ export default function RiskDetailPage() {
   async function signOut() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  /* Transition the risk to a new status + write an audit log entry. */
+  async function transition(opts: {
+    newStatus: Risk['status']
+    action: string                    // audit action_type
+    role?: 'RLO' | 'HOD' | 'RC' | 'ADMIN'
+    comment?: string
+    extras?: Partial<Risk>             // additional fields to update (e.g. rejection_* on reject)
+  }) {
+    if (!risk || !currentUserId) return
+    setTransitioning(true); setTransitionError(null)
+    try {
+      const payload: Partial<Risk> = {
+        status: opts.newStatus,
+        ...(opts.extras ?? {}),
+      }
+      const { data: updated, error: upErr } = await supabase.from('risks')
+        .update(payload).eq('id', risk.id).select('*').single()
+      if (upErr) throw new Error(`Status update: ${upErr.code ?? ''} ${upErr.message}`)
+      setRisk(updated as Risk)
+
+      const { error: auditErr } = await supabase.from('risk_audit_logs').insert({
+        risk_id: risk.id,
+        entity_type: 'risk',
+        entity_id: risk.id,
+        action_type: opts.action,
+        performed_by: currentUserId,
+        user_role: opts.role ?? 'ADMIN',
+        old_value: { status: risk.status },
+        new_value: { status: opts.newStatus, ...(opts.extras ?? {}) },
+        comment: opts.comment ?? null,
+      })
+      if (auditErr) console.warn('Audit log insert failed:', auditErr)
+
+      // Refresh logs locally so timeline updates immediately
+      const { data: logsData } = await supabase.from('risk_audit_logs')
+        .select('*').eq('risk_id', risk.id).order('performed_at', { ascending: false })
+      setLogs((logsData ?? []) as AuditLog[])
+    } catch (e) {
+      setTransitionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTransitioning(false)
+    }
+  }
+
+  async function handleReject() {
+    const reason = window.prompt('Rejection reason (short code, e.g. INSUFFICIENT_DETAIL, DUPLICATE, OUT_OF_SCOPE):', '')?.trim()
+    if (!reason) return
+    const comment = window.prompt('Detailed comment for the RLO:', '')?.trim()
+    if (comment === undefined) return
+    await transition({
+      newStatus: 'REJECTED',
+      action: 'REJECT',
+      role: 'RC',
+      comment: `Rejected: ${reason}${comment ? ` — ${comment}` : ''}`,
+      extras: {
+        rejection_reason: reason.slice(0, 50),
+        rejection_comment: comment || null,
+        rejected_by: currentUserId ?? undefined,
+        rejected_at: new Date().toISOString(),
+      },
+    })
+  }
+
+  async function handleClose() {
+    const closingNote = window.prompt('Closing note (optional):', '')
+    if (closingNote === null) return  // cancel
+    await transition({
+      newStatus: 'CLOSED',
+      action: 'CLOSE',
+      role: 'RC',
+      comment: closingNote.trim() || 'Risk closed',
+      extras: {
+        date_closed: new Date().toISOString(),
+        closed_by: currentUserId ?? undefined,
+      },
+    })
   }
 
   function nameOf(uid: number | null | undefined): string {
@@ -236,6 +322,114 @@ export default function RiskDetailPage() {
                   <div className="tv" style={{ color: 'var(--teal)' }}>
                     {daysOpen(risk.date_opened, risk.date_closed)}
                   </div>
+                </div>
+              </div>
+
+              {/* Status & Workflow Actions */}
+              <div className="panel" style={{ marginTop: 14 }}>
+                <div className="pf"><div>
+                  <div className="pt">Status &amp; Workflow</div>
+                  <div className="psub">Current: <b>{RISK_STATUS_LABEL[risk.status]}</b>. Pick the next action below.</div>
+                </div></div>
+                {transitionError && (
+                  <div className="ac red" style={{ marginBottom: 10 }}>
+                    <div className="ai">⚠️</div>
+                    <div><div className="at">Workflow error</div><div className="as">{transitionError}</div></div>
+                  </div>
+                )}
+                <div className="risk-workflow-actions">
+                  {risk.status === 'DRAFT' && (
+                    <>
+                      <WfBtn primary disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'PENDING_HOD', action: 'SUBMIT_TO_HOD', role: 'RLO', comment: 'Submitted to HOD for endorsement' })}>
+                        → Submit to HOD
+                      </WfBtn>
+                      <WfHint>RLO submits the draft to the department HOD for endorsement.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'PENDING_HOD' && (
+                    <>
+                      <WfBtn primary disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
+                        ✓ Endorse (HOD)
+                      </WfBtn>
+                      <WfBtn danger disabled={transitioning} onClick={handleReject}>
+                        ✗ Reject
+                      </WfBtn>
+                      <WfHint>HOD endorses → forwards to Risk Coordinator for validation. Reject sends it back as REJECTED.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'PENDING_RC' && (
+                    <>
+                      <WfBtn primary disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
+                        ✓ Validate (RC)
+                      </WfBtn>
+                      <WfBtn danger disabled={transitioning} onClick={handleReject}>
+                        ✗ Reject
+                      </WfBtn>
+                      <WfHint>RC validates the risk and its scoring → status becomes ACTIVE.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'ACTIVE' && (
+                    <>
+                      <WfBtn primary disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'MONITORING', action: 'MOVE_TO_MONITORING', role: 'RC', comment: 'Moved to monitoring' })}>
+                        → Move to Monitoring
+                      </WfBtn>
+                      <WfBtn disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested by RLO' })}>
+                        Request Closure
+                      </WfBtn>
+                      <WfHint>Active risks are being treated. Move to Monitoring once controls are in place; Request Closure once the risk no longer applies.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'MONITORING' && (
+                    <>
+                      <WfBtn disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested by RLO' })}>
+                        Request Closure
+                      </WfBtn>
+                      <WfBtn disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'ACTIVE', action: 'REACTIVATE', role: 'RC', comment: 'Reactivated from monitoring' })}>
+                        ← Back to Active
+                      </WfBtn>
+                      <WfHint>Risk is being monitored. Request closure when ready to close, or send back to Active if treatment slipped.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'PENDING_CLOSURE' && (
+                    <>
+                      <WfBtn primary disabled={transitioning} onClick={handleClose}>
+                        ✓ Close Risk (RC)
+                      </WfBtn>
+                      <WfBtn disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'ACTIVE', action: 'REOPEN_TO_ACTIVE', role: 'RC', comment: 'Closure rejected — back to active' })}>
+                        ← Reject closure
+                      </WfBtn>
+                      <WfHint>RC has the final say on closure. Either approve close, or send back to ACTIVE if more work is needed.</WfHint>
+                    </>
+                  )}
+                  {risk.status === 'REJECTED' && (
+                    <>
+                      <WfHint>This risk was rejected and is read-only. Use the Risk Register page to create a fresh submission.</WfHint>
+                      {risk.rejection_comment && (
+                        <div className="risk-def-block-value" style={{ marginTop: 6 }}>
+                          <b>Reason:</b> {risk.rejection_reason ?? '—'}<br />
+                          {risk.rejection_comment}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {risk.status === 'CLOSED' && (
+                    <>
+                      <WfHint>Risk is closed. Click below if you need to reopen for further treatment.</WfHint>
+                      <WfBtn disabled={transitioning} onClick={() =>
+                        transition({ newStatus: 'ACTIVE', action: 'REOPEN', role: 'RC', comment: 'Risk reopened',
+                          extras: { date_closed: undefined, closed_by: undefined } })}>
+                        ↻ Reopen
+                      </WfBtn>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -451,6 +645,42 @@ function DefBlock({ label, children }: { label: string; children: React.ReactNod
     <div className="risk-def-block">
       <div className="risk-def-label">{label}</div>
       <div className="risk-def-block-value">{children}</div>
+    </div>
+  )
+}
+
+function WfBtn({ children, primary, danger, disabled, onClick }: {
+  children: React.ReactNode
+  primary?: boolean
+  danger?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}) {
+  const bg = primary ? 'var(--blue)' : danger ? 'var(--red)' : '#fff'
+  const fg = (primary || danger) ? '#fff' : 'var(--text)'
+  const border = primary ? 'var(--blue)' : danger ? 'var(--red)' : 'var(--border)'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="signout-btn"
+      style={{
+        background: disabled ? '#9CA3AF' : bg,
+        color: fg,
+        borderColor: disabled ? '#9CA3AF' : border,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.7 : 1,
+      }}>
+      {children}
+    </button>
+  )
+}
+
+function WfHint({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 11, color: 'var(--muted)', flexBasis: '100%' }}>
+      {children}
     </div>
   )
 }

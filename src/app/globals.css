@@ -640,6 +640,9 @@ body{counter-reset:rcpage;}
 .rsp-value{font-size:24px;font-weight:700;color:var(--text);margin-top:4px;line-height:1;}
 @media (max-width:768px){.risk-form-grid{grid-template-columns:1fr;}}
 
+/* Risk Register — workflow buttons on /risk/[id] */
+.risk-workflow-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+
 /* Risk Register — detail page on /risk/[id] */
 .risk-detail-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 18px;}
 @media (max-width:900px){.risk-detail-grid{grid-template-columns:1fr 1fr;}}
