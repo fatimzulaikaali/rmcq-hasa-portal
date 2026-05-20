@@ -49,6 +49,12 @@ export default function RiskUsersPage() {
   const [editEmail, setEditEmail] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
+  // Inline "add role" state — only one row at a time
+  const [addRoleUserId, setAddRoleUserId] = useState<number | null>(null)
+  const [newRole, setNewRole] = useState<RiskRole | ''>('')
+  const [newRoleDept, setNewRoleDept] = useState('all')
+  const [savingRole, setSavingRole] = useState(false)
+
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
@@ -124,25 +130,7 @@ export default function RiskUsersPage() {
       }
 
       // 2) INSERT role
-      const { error: roleErr } = await supabase.from('risk_user_roles').insert({
-        user_id: userId,
-        dept_code: add.dept_code === 'all' ? null : add.dept_code,
-        role: add.role,
-        assigned_by: currentUserId,
-        is_active: true,
-      })
-      if (roleErr) {
-        // Likely UNIQUE(user_id, dept_code, role) conflict — re-activate instead
-        if (roleErr.code === '23505') {
-          await supabase.from('risk_user_roles')
-            .update({ is_active: true })
-            .eq('user_id', userId)
-            .eq('dept_code', add.dept_code === 'all' ? null : add.dept_code)
-            .eq('role', add.role)
-        } else {
-          throw new Error(`Insert role: ${roleErr.code ?? ''} ${roleErr.message}`)
-        }
-      }
+      await assignRole(userId, add.role, add.dept_code)
 
       setAdd(EMPTY_ADD)
       await load()
@@ -150,6 +138,52 @@ export default function RiskUsersPage() {
       setSubmitError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  /* Assign a role to a user. Handles the UNIQUE(user_id, dept_code, role)
+   * conflict by re-activating a previously-removed role instead of erroring. */
+  async function assignRole(userId: number, role: RiskRole, deptScope: string) {
+    const dept_code = deptScope === 'all' ? null : deptScope
+    const { error: roleErr } = await supabase.from('risk_user_roles').insert({
+      user_id: userId, dept_code, role,
+      assigned_by: currentUserId, is_active: true,
+    })
+    if (roleErr) {
+      if (roleErr.code === '23505') {
+        // Role row already exists (possibly inactive) — re-activate it.
+        // Postgres NULL needs .is(); a real dept code needs .eq().
+        let q = supabase.from('risk_user_roles')
+          .update({ is_active: true })
+          .eq('user_id', userId)
+          .eq('role', role)
+        q = dept_code === null ? q.is('dept_code', null) : q.eq('dept_code', dept_code)
+        await q
+      } else {
+        throw new Error(`Insert role: ${roleErr.code ?? ''} ${roleErr.message}`)
+      }
+    }
+  }
+
+  function startAddRole(userId: number) {
+    setAddRoleUserId(userId)
+    setNewRole('')
+    setNewRoleDept('all')
+  }
+  function cancelAddRole() {
+    setAddRoleUserId(null); setNewRole(''); setNewRoleDept('all')
+  }
+  async function saveAddRole(userId: number) {
+    if (!newRole) { alert('Pick a role to add.'); return }
+    setSavingRole(true)
+    try {
+      await assignRole(userId, newRole, newRoleDept)
+      cancelAddRole()
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingRole(false)
     }
   }
 
@@ -327,7 +361,7 @@ export default function RiskUsersPage() {
               <div className="panel">
                 <div className="pf"><div>
                   <div className="pt">All Risk Module Users</div>
-                  <div className="psub">{rows.length} user{rows.length === 1 ? '' : 's'} · click a role pill to remove it</div>
+                  <div className="psub">{rows.length} user{rows.length === 1 ? '' : 's'} · click a role pill to remove it, or &quot;+ role&quot; to add another</div>
                 </div></div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="risk-table">
@@ -363,17 +397,55 @@ export default function RiskUsersPage() {
                               ) : user.email}
                             </td>
                             <td>
-                              {roles.length === 0 ? (
-                                <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 11 }}>no roles</span>
-                              ) : (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                  {roles.map((r) => (
-                                    <button key={r.id} type="button" className="role-pill"
-                                      onClick={() => deactivateRole(r.id)}
-                                      title="Click to remove this role assignment">
-                                      <b>{r.role}</b> · {deptLabel(r.dept_code)} ×
-                                    </button>
-                                  ))}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                                {roles.length === 0 && (
+                                  <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 11 }}>no roles</span>
+                                )}
+                                {roles.map((r) => (
+                                  <button key={r.id} type="button" className="role-pill"
+                                    onClick={() => deactivateRole(r.id)}
+                                    title="Click to remove this role assignment">
+                                    <b>{r.role}</b> · {deptLabel(r.dept_code)} ×
+                                  </button>
+                                ))}
+                                {addRoleUserId !== user.id && (
+                                  <button type="button" className="role-pill role-pill-add"
+                                    onClick={() => startAddRole(user.id)}
+                                    title="Add another role to this user">
+                                    + role
+                                  </button>
+                                )}
+                              </div>
+                              {addRoleUserId === user.id && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8 }}>
+                                  <select value={newRole}
+                                    onChange={(e) => setNewRole(e.target.value as RiskRole)}
+                                    style={{ fontSize: 11, padding: '4px 6px', border: '1px solid var(--blue)', borderRadius: 4 }}>
+                                    <option value="">— role —</option>
+                                    {(Object.keys(RISK_ROLE_LABEL) as RiskRole[]).map((r) => (
+                                      <option key={r} value={r}>{r} — {RISK_ROLE_LABEL[r]}</option>
+                                    ))}
+                                  </select>
+                                  <select value={newRoleDept}
+                                    onChange={(e) => setNewRoleDept(e.target.value)}
+                                    style={{ fontSize: 11, padding: '4px 6px', border: '1px solid var(--blue)', borderRadius: 4 }}>
+                                    <option value="all">Hospital-wide</option>
+                                    {depts.map((d) => (
+                                      <option key={d.code} value={d.code}>{d.name_en}</option>
+                                    ))}
+                                  </select>
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                                    disabled={savingRole}
+                                    onClick={() => saveAddRole(user.id)}>
+                                    {savingRole ? 'Adding…' : 'Add'}
+                                  </button>
+                                  <button type="button" className="signout-btn"
+                                    style={{ fontSize: 11, padding: '4px 10px' }}
+                                    disabled={savingRole}
+                                    onClick={cancelAddRole}>
+                                    Cancel
+                                  </button>
                                 </div>
                               )}
                             </td>

@@ -663,6 +663,8 @@ body{counter-reset:rcpage;}
 /* Risk module — role pill on /risk/users */
 .role-pill{display:inline-flex;align-items:center;padding:3px 9px;background:#EFF3F8;border:1px solid #C7D7EA;border-radius:99px;color:#1E40AF;font-size:11px;cursor:pointer;font-family:inherit;}
 .role-pill:hover{background:#FEE2E2;border-color:#FCA5A5;color:#991B1B;}
+.role-pill-add{background:#fff;border-style:dashed;border-color:#9CA3AF;color:#6B7280;}
+.role-pill-add:hover{background:#ECFDF5;border-color:#6EE7B7;border-style:solid;color:#065F46;}
 
 /* Risk Register — workflow buttons on /risk/[id] */
 .risk-workflow-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
