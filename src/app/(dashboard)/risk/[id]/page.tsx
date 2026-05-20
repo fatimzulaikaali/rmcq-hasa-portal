@@ -200,6 +200,18 @@ export default function RiskDetailPage() {
     })
   }
 
+  async function handleReviseResubmit() {
+    if (!risk) return
+    if (!window.confirm('Reopen this rejected risk for correction? It will go back to DRAFT so you can amend it and resubmit to the HOD. The HOD\'s comment stays visible to guide you.')) return
+    await transition({
+      newStatus: 'DRAFT',
+      action: 'REVISE_REOPEN',
+      role: 'RLO',
+      comment: 'Reopened for revision after HOD rejection',
+      // keep rejection_* fields so the DRAFT shows the HOD feedback notice
+    })
+  }
+
   async function handleClose() {
     const closingNote = window.prompt('Closing note (optional):', '')
     if (closingNote === null) return  // cancel
@@ -375,27 +387,41 @@ export default function RiskDetailPage() {
                     <div><div className="at">Workflow error</div><div className="as">{transitionError}</div></div>
                   </div>
                 )}
+                {/* HOD feedback after a prior rejection — shown while back in DRAFT */}
+                {risk.status === 'DRAFT' && risk.rejection_comment && (
+                  <div className="ac amber" style={{ marginBottom: 10 }}>
+                    <div className="ai">↩</div>
+                    <div>
+                      <div className="at">Previously rejected by HOD — please address before resubmitting</div>
+                      <div className="as">
+                        {risk.rejection_reason && <><b>{risk.rejection_reason}</b> — </>}{risk.rejection_comment}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="risk-workflow-actions">
                   {risk.status === 'DRAFT' && (
                     canSubmit ? (
                       <>
+                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn">✎ Edit</Link>
                         <WfBtn primary disabled={transitioning} onClick={() =>
                           transition({ newStatus: 'PENDING_HOD', action: 'SUBMIT_TO_HOD', role: 'RLO', comment: 'Submitted to HOD for endorsement' })}>
                           → Submit to HOD
                         </WfBtn>
-                        <WfHint>Submit the draft to the department HOD for endorsement.</WfHint>
+                        <WfHint>Edit the details if needed, then submit to the department HOD for endorsement.</WfHint>
                       </>
-                    ) : <WfHint>This risk is in draft. Only the RLO can submit it to the HOD.</WfHint>
+                    ) : <WfHint>This risk is in draft. Only the RLO can edit and submit it to the HOD.</WfHint>
                   )}
                   {risk.status === 'PENDING_HOD' && (
                     canEndorse ? (
                       <>
+                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn">✎ Amend</Link>
                         <WfBtn primary disabled={transitioning} onClick={() =>
                           transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
                           ✓ Endorse (HOD)
                         </WfBtn>
                         <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        <WfHint>HOD endorses → forwards to Risk Coordinator. Reject sends it back as REJECTED.</WfHint>
+                        <WfHint>Amend the risk if it needs tweaking, then Endorse → forwards to RC. Reject sends it back to the RLO with your comment.</WfHint>
                       </>
                     ) : <WfHint>Awaiting HOD endorsement. Only the department HOD can act here.</WfHint>
                   )}
@@ -463,13 +489,20 @@ export default function RiskDetailPage() {
                   )}
                   {risk.status === 'REJECTED' && (
                     <>
-                      <WfHint>This risk was rejected and is read-only. Create a fresh submission from the Risk Register.</WfHint>
                       {risk.rejection_comment && (
-                        <div className="risk-def-block-value" style={{ marginTop: 6 }}>
-                          <b>Reason:</b> {risk.rejection_reason ?? '—'}<br />
+                        <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
+                          <b>Rejected{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
                           {risk.rejection_comment}
                         </div>
                       )}
+                      {canSubmit ? (
+                        <>
+                          <WfBtn primary disabled={transitioning} onClick={handleReviseResubmit}>
+                            ↻ Revise &amp; Resubmit
+                          </WfBtn>
+                          <WfHint>Address the HOD&apos;s comment, then resubmit. This reopens the same risk ({risk.risk_id}) as a draft — or leave it as-is to keep it archived.</WfHint>
+                        </>
+                      ) : <WfHint>This risk was rejected. The originating RLO can revise &amp; resubmit it.</WfHint>}
                     </>
                   )}
                   {risk.status === 'CLOSED' && (
