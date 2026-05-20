@@ -18,17 +18,31 @@ import { getModuleAccess } from '@/lib/risk/auth'
  * The component resolves access itself so pages don't have to pass it in. */
 export function RiskSidebar({ onClose, active, children }: {
   onClose: () => void
-  active: 'risk' | 'committees'
+  active: 'risk' | 'committees' | 'actions'
   children?: React.ReactNode
 }) {
   const supabase = useMemo(() => createClient(), [])
   const [showGlobal, setShowGlobal] = useState(false)
+  const [actionCount, setActionCount] = useState(0)
 
   useEffect(() => {
     void (async () => {
       try {
         const access = await getModuleAccess(supabase)
         setShowGlobal(access.allModules)
+
+        // Count committee action items awaiting a response that the user can see
+        // (their dept for dept-scoped roles, all for hospital-wide roles).
+        let q = supabase.from('risk_action_items')
+          .select('id, risks!inner(dept_code)', { count: 'exact', head: false })
+          .in('status', ['PENDING', 'OVERDUE'])
+        if (access.deptScopes !== null) {
+          q = access.deptScopes.length
+            ? q.in('risks.dept_code', access.deptScopes)
+            : q.eq('id', -1) // no dept scope -> nothing
+        }
+        const { data } = await q
+        setActionCount((data ?? []).length)
       } catch { /* leave hidden on error */ }
     })()
   }, [supabase])
@@ -52,6 +66,10 @@ export function RiskSidebar({ onClose, active, children }: {
           )}
           <Link href="/risk" className={`nav-item ${active === 'risk' ? 'active' : ''}`}>
             <span className="nav-icon">⚠️</span><span>Risk Register</span>
+          </Link>
+          <Link href="/risk/actions" className={`nav-item nav-sub ${active === 'actions' ? 'active' : ''}`}>
+            <span className="nav-icon">📌</span><span>Action Items</span>
+            {actionCount > 0 && <span className="nav-badge">{actionCount}</span>}
           </Link>
           {showGlobal && (
             <Link href="/risk/meetings" className={`nav-item nav-sub ${active === 'committees' ? 'active' : ''}`}>

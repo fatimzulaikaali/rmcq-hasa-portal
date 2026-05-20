@@ -13,12 +13,19 @@ import type { ActiveRole } from '@/lib/risk/activeRole'
 import type { RiskRole } from '@/lib/risk/types'
 import {
   Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
+  RiskMeeting, RiskMeetingAgenda, RiskActionItem, CommitteeOutcome, ActionStatus,
 } from '@/lib/risk/types'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
   RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
   RISK_SCOPE_LABEL, RISK_ROLE_LABEL,
+  COMMITTEE_OUTCOME_LABEL, ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
 } from '@/lib/risk/scoring'
+
+/* An agenda decision joined with its meeting (for the Committee Reviews section). */
+interface CommitteeReview extends RiskMeetingAgenda {
+  risk_meetings: RiskMeeting | null
+}
 
 interface AuditLog {
   id: number
@@ -51,6 +58,8 @@ export default function RiskDetailPage() {
   const [logs, setLogs]       = useState<AuditLog[]>([])
   const [users, setUsers]     = useState<Map<number, RiskUser>>(new Map())
   const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
+  const [committeeReviews, setCommitteeReviews] = useState<CommitteeReview[]>([])
+  const [actionItems, setActionItems] = useState<RiskActionItem[]>([])
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [activeRole, setActiveRole] = useState<ActiveRole | null>(null)
   const [transitioning, setTransitioning] = useState(false)
@@ -92,6 +101,8 @@ export default function RiskDetailPage() {
         { data: logsData, error: logsErr },
         { data: usersData, error: usersErr },
         { data: tagsData, error: tagsErr },
+        { data: agendaData, error: agendaErr },
+        { data: actionData, error: actionErr },
       ] = await Promise.all([
         supabase.from('pscs_departments')
           .select('code,risk_code,name_en,name_ms,kind,parent_code,sort_order')
@@ -102,12 +113,18 @@ export default function RiskDetailPage() {
           .eq('risk_id', riskRowId).order('performed_at', { ascending: false }),
         supabase.from('risk_users').select('id,auth_user_id,name,email,is_active,created_at,last_login'),
         supabase.from('risk_theme_tags').select('theme_id, cross_cutting_themes(*)').eq('risk_id', riskRowId),
+        supabase.from('risk_meeting_agenda').select('*, risk_meetings(*)')
+          .eq('risk_id', riskRowId).order('created_at', { ascending: false }),
+        supabase.from('risk_action_items').select('*')
+          .eq('risk_id', riskRowId).order('id', { ascending: false }),
       ])
       if (deptErr)    throw new Error(`Department: ${deptErr.code ?? ''} ${deptErr.message}`)
       if (reviewsErr) throw new Error(`Reviews: ${reviewsErr.code ?? ''} ${reviewsErr.message}`)
       if (logsErr)    throw new Error(`Audit logs: ${logsErr.code ?? ''} ${logsErr.message}`)
       if (usersErr)   throw new Error(`Users: ${usersErr.code ?? ''} ${usersErr.message}`)
       if (tagsErr)    throw new Error(`Theme tags: ${tagsErr.code ?? ''} ${tagsErr.message}`)
+      if (agendaErr)  throw new Error(`Committee reviews: ${agendaErr.code ?? ''} ${agendaErr.message}`)
+      if (actionErr)  throw new Error(`Action items: ${actionErr.code ?? ''} ${actionErr.message}`)
 
       setDept(deptData as RiskDept | null)
       setReviews((reviewsData ?? []) as RiskReview[])
@@ -125,6 +142,11 @@ export default function RiskDetailPage() {
         if (cct) ts.push(cct)
       }
       setThemes(ts)
+
+      // committee decisions (only those that have actually been decided) + action items
+      const reviews = ((agendaData ?? []) as CommitteeReview[]).filter((a) => a.outcome)
+      setCommitteeReviews(reviews)
+      setActionItems((actionData ?? []) as RiskActionItem[])
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -261,6 +283,23 @@ export default function RiskDetailPage() {
     })
   }
 
+  /* RLO/HOD records feedback against a committee directive. */
+  async function respondToAction(item: RiskActionItem, text: string) {
+    if (!text.trim()) return
+    setTransitionError(null)
+    try {
+      const { error } = await supabase.from('risk_action_items')
+        .update({ response: text.trim(), status: 'RESPONDED', updated_at: new Date().toISOString() })
+        .eq('id', item.id)
+      if (error) throw new Error(`Respond: ${error.code ?? ''} ${error.message}`)
+      const { data } = await supabase.from('risk_action_items')
+        .select('*').eq('risk_id', riskRowId).order('id', { ascending: false })
+      setActionItems((data ?? []) as RiskActionItem[])
+    } catch (e) {
+      setTransitionError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   function nameOf(uid: number | null | undefined): string {
     if (!uid) return '—'
     return users.get(uid)?.name ?? `user #${uid}`
@@ -294,6 +333,7 @@ export default function RiskDetailPage() {
   const canManageActive = hasRole(['RC'])                        // monitoring / reactivate / reopen
   const canRequestClose = hasRole(['RLO', 'HOD'], riskDept)      // RLO or HOD of this dept
   const canClose        = hasRole(['RC'])                        // RC closes
+  const canRespond      = hasRole(['RLO', 'HOD'], riskDept)      // dept responds to committee directives
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -590,6 +630,68 @@ export default function RiskDetailPage() {
                 </div>
               </div>
 
+              {/* Committee Reviews — decisions from RTC/ROC meetings */}
+              {committeeReviews.length > 0 && (
+                <div className="panel" style={{ marginTop: 14 }}>
+                  <div className="pf"><div>
+                    <div className="pt">Committee Reviews</div>
+                    <div className="psub">Decisions recorded for this risk at RTC / ROC meetings</div>
+                  </div></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {committeeReviews.map((cr) => {
+                      const mt = cr.risk_meetings
+                      return (
+                        <div key={cr.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>
+                              {mt ? (
+                                <Link href={`/risk/meetings/${mt.id}`} style={{ color: 'var(--blue)' }}>
+                                  {mt.meeting_type} · {mt.title}
+                                </Link>
+                              ) : 'Meeting'}
+                              <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {mt?.meeting_date ?? fmtDate(cr.decided_at)}</span>
+                            </div>
+                            {cr.outcome && (
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 4, color: '#166534', background: '#DCFCE7' }}>
+                                {COMMITTEE_OUTCOME_LABEL[cr.outcome as CommitteeOutcome]}
+                              </span>
+                            )}
+                          </div>
+                          {cr.discussion_notes && (
+                            <div style={{ fontSize: 12, marginTop: 6 }}>{cr.discussion_notes}</div>
+                          )}
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                            Recorded by {nameOf(cr.decided_by)}{cr.decided_at ? ` on ${cr.decided_at.slice(0, 10)}` : ''}
+                            {cr.review_id ? ' · risk was re-scored at this meeting' : ''}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Committee Action Items — directives & clarifications, with RLO feedback */}
+              {actionItems.length > 0 && (
+                <div className="panel">
+                  <div className="pf"><div>
+                    <div className="pt">Committee Action Items</div>
+                    <div className="psub">Directives &amp; clarifications from the committee — the department&apos;s feedback is reviewed at the next meeting</div>
+                  </div></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {actionItems.map((a) => (
+                      <ActionItemBlock
+                        key={a.id}
+                        item={a}
+                        ownerName={nameOf(a.assigned_to)}
+                        canRespond={canRespond}
+                        onRespond={(text) => respondToAction(a, text)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Section 1 — Identification */}
               <div className="panel" style={{ marginTop: 14 }}>
                 <div className="pf"><div><div className="pt">1. Risk Identification</div></div></div>
@@ -802,6 +904,72 @@ function DefBlock({ label, children }: { label: string; children: React.ReactNod
     <div className="risk-def-block">
       <div className="risk-def-label">{label}</div>
       <div className="risk-def-block-value">{children}</div>
+    </div>
+  )
+}
+
+const ACTION_STATUS_BADGE: Record<ActionStatus, { bg: string; fg: string }> = {
+  PENDING:   { bg: '#FEF3C7', fg: '#92400E' },
+  RESPONDED: { bg: '#DBEAFE', fg: '#1E40AF' },
+  ACCEPTED:  { bg: '#DCFCE7', fg: '#166534' },
+  OVERDUE:   { bg: '#FEE2E2', fg: '#991B1B' },
+  ESCALATED: { bg: '#EDE9FE', fg: '#5B21B6' },
+}
+
+function ActionItemBlock({ item, ownerName, canRespond, onRespond }: {
+  item: RiskActionItem
+  ownerName: string
+  canRespond: boolean
+  onRespond: (text: string) => void
+}) {
+  const [text, setText] = useState(item.response ?? '')
+  const [editing, setEditing] = useState(false)
+  const sb = ACTION_STATUS_BADGE[item.status]
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          {ACTION_TYPE_LABEL[item.action_type]}
+          <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
+            {' '}· owner {ownerName}{item.due_date ? ` · due ${item.due_date}` : ''}
+          </span>
+        </div>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sb.fg, background: sb.bg }}>
+          {ACTION_STATUS_LABEL[item.status]}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, marginTop: 5 }}>{item.description}</div>
+
+      {item.response && !editing && (
+        <div style={{ marginTop: 8, background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Department feedback</div>
+          <div style={{ fontSize: 13, marginTop: 2, whiteSpace: 'pre-wrap' }}>{item.response}</div>
+        </div>
+      )}
+
+      {canRespond && (editing || !item.response) ? (
+        <div style={{ marginTop: 8 }}>
+          <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
+            placeholder="Your feedback / progress on this directive…"
+            style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 13 }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+            {editing && (
+              <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+                onClick={() => { setText(item.response ?? ''); setEditing(false) }}>Cancel</button>
+            )}
+            <button type="button" className="signout-btn"
+              style={{ fontSize: 11, padding: '4px 12px', background: text.trim() ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: text.trim() ? 'var(--blue)' : '#9CA3AF' }}
+              disabled={!text.trim()} onClick={() => { onRespond(text); setEditing(false) }}>
+              {item.response ? 'Update feedback' : 'Submit feedback'}
+            </button>
+          </div>
+        </div>
+      ) : canRespond && item.response ? (
+        <div style={{ marginTop: 6 }}>
+          <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+            onClick={() => setEditing(true)}>✎ Edit feedback</button>
+        </div>
+      ) : null}
     </div>
   )
 }

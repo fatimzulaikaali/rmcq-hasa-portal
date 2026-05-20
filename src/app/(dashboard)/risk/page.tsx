@@ -56,6 +56,7 @@ export default function RiskListPage() {
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
   const [isAdminRole, setIsAdminRole]   = useState(false)
   const [activeRole,  setActiveRole]    = useState<ActiveRole | null>(null)
+  const [openDirectiveRiskIds, setOpenDirectiveRiskIds] = useState<Set<number>>(new Set())
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -79,12 +80,18 @@ export default function RiskListPage() {
       if (deptsErr) throw new Error(`Loading departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
 
-      const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }] = await Promise.all([
+      const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }, { data: openActions }] = await Promise.all([
         supabase.from('risks').select('*').order('created_at', { ascending: false }),
         supabase.from('risk_reviews').select('*').order('cycle_number', { ascending: false }),
+        supabase.from('risk_action_items').select('risk_id').in('status', ['PENDING', 'OVERDUE']),
       ])
       if (risksErr) throw new Error(`Loading risks: ${risksErr.code ?? ''} ${risksErr.message}`)
       if (reviewsErr) throw new Error(`Loading reviews: ${reviewsErr.code ?? ''} ${reviewsErr.message}`)
+
+      // Risks with an outstanding committee directive awaiting feedback.
+      setOpenDirectiveRiskIds(new Set(
+        ((openActions ?? []) as { risk_id: number | null }[])
+          .map((a) => a.risk_id).filter((id): id is number => id !== null)))
 
       const latestByRisk = new Map<number, RiskReview>()
       for (const r of (reviewsData ?? []) as RiskReview[]) {
@@ -125,11 +132,13 @@ export default function RiskListPage() {
   const attentionRows = useMemo(() => {
     if (!activeRole) return []
     const statuses = ATTENTION_BY_ROLE[activeRole.role] ?? []
-    if (statuses.length === 0) return []
+    // The dept (RLO/HOD) also needs to act on risks with an open committee directive.
+    const deptRole = activeRole.role === 'RLO' || activeRole.role === 'HOD'
+    if (statuses.length === 0 && !deptRole) return []
     return scopedRows.filter((r) =>
-      statuses.includes(r.risk.status) &&
-      (r.risk.status !== 'OUT_OF_SCOPE' || r.risk.pending_ack))
-  }, [scopedRows, activeRole])
+      (statuses.includes(r.risk.status) && (r.risk.status !== 'OUT_OF_SCOPE' || r.risk.pending_ack)) ||
+      (deptRole && openDirectiveRiskIds.has(r.risk.id)))
+  }, [scopedRows, activeRole, openDirectiveRiskIds])
 
   // Terminal statuses. Out-of-scope is terminal only ONCE the RLO has acknowledged
   // it; until then it lives solely in the attention tab (not active, not archive).
