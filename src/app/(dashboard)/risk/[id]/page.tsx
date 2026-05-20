@@ -435,13 +435,27 @@ export default function RiskDetailPage() {
                     canValidate ? (
                       <>
                         <WfBtn primary disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
-                          ✓ Validate (RC)
+                          transition({ newStatus: 'TABLED_RTC', action: 'VALIDATE_TABLE_RTC', role: 'RC', comment: 'Validated by RC — tabled for Risk Technical Committee' })}>
+                          ✓ Validate &amp; table for RTC
                         </WfBtn>
                         <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        <WfHint>RC validates the risk and its scoring → status becomes ACTIVE.</WfHint>
+                        <WfHint>RC confirms this is a true risk under our jurisdiction, then tables it for the Risk Technical Committee. The committee&apos;s decision (at its meeting) is what makes it Active.</WfHint>
                       </>
                     ) : <WfHint>Awaiting Risk Coordinator validation. Only RC can act here.</WfHint>
+                  )}
+                  {risk.status === 'TABLED_RTC' && (
+                    <WfHint>
+                      Tabled for the Risk Technical Committee (RTC). Add it to an RTC meeting&apos;s agenda from the {' '}
+                      <Link href="/risk/meetings" style={{ color: 'var(--blue)' }}>Meetings</Link> page — the committee&apos;s
+                      recorded decision there (endorse, escalate to ROC, send back, or recommend closure) moves the risk forward.
+                    </WfHint>
+                  )}
+                  {risk.status === 'TABLED_ROC' && (
+                    <WfHint>
+                      Escalated to the Risk Owner Committee (ROC). Add it to an ROC meeting&apos;s agenda from the {' '}
+                      <Link href="/risk/meetings" style={{ color: 'var(--blue)' }}>Meetings</Link> page — the committee&apos;s
+                      recorded decision there moves the risk forward.
+                    </WfHint>
                   )}
                   {risk.status === 'ACTIVE' && (
                     (canManageActive || canRequestClose) ? (

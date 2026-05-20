@@ -155,6 +155,11 @@ export default function RiskListPage() {
               </Link>
             </>
           )}
+          {isAdminUser && (
+            <Link href="/risk/meetings" className="nav-item">
+              <span className="nav-icon">📋</span><span>Committees</span>
+            </Link>
+          )}
         </div>
 
         <div className="sb-filters">

@@ -9,6 +9,7 @@
 
 import {
   RiskLevel, RiskCategory, RiskStatus, RiskScope, RiskRole, MeetingType,
+  MeetingStatus, CommitteeOutcome, ActionType, ActionStatus,
 } from './types'
 
 export interface ComputedRiskScore {
@@ -78,6 +79,8 @@ export const RISK_STATUS_LABEL: Record<RiskStatus, string> = {
   DRAFT:            'Draft',
   PENDING_HOD:      'Pending HOD',
   PENDING_RC:       'Pending RC',
+  TABLED_RTC:       'Tabled for RTC',
+  TABLED_ROC:       'Tabled for ROC',
   ACTIVE:           'Active',
   MONITORING:       'Monitoring',
   REJECTED:         'Rejected',
@@ -89,6 +92,8 @@ export const RISK_STATUS_BADGE: Record<RiskStatus, { bg: string; fg: string }> =
   DRAFT:           { bg: '#F3F4F6', fg: '#374151' },
   PENDING_HOD:     { bg: '#DBEAFE', fg: '#1E40AF' },
   PENDING_RC:      { bg: '#E0E7FF', fg: '#3730A3' },
+  TABLED_RTC:      { bg: '#CFFAFE', fg: '#155E75' },
+  TABLED_ROC:      { bg: '#EDE9FE', fg: '#5B21B6' },
   ACTIVE:          { bg: '#DCFCE7', fg: '#166534' },
   MONITORING:      { bg: '#FEF3C7', fg: '#854D0E' },
   REJECTED:        { bg: '#FEE2E2', fg: '#991B1B' },
@@ -113,5 +118,56 @@ export const RISK_ROLE_LABEL: Record<RiskRole, string> = {
 
 export const MEETING_TYPE_LABEL: Record<MeetingType, string> = {
   RTC: 'Risk Technical Committee',
-  ROC: 'Risk Oversight Committee',
+  ROC: 'Risk Owner Committee',
+}
+
+export const MEETING_STATUS_LABEL: Record<MeetingStatus, string> = {
+  PLANNED:     'Planned',
+  IN_PROGRESS: 'In progress',
+  COMPLETED:   'Completed',
+  CANCELLED:   'Cancelled',
+}
+
+/* Human label for each committee decision, and how it moves the risk. */
+export const COMMITTEE_OUTCOME_LABEL: Record<CommitteeOutcome, string> = {
+  ENDORSE_ACTIVE:  'Endorse → Active',
+  ESCALATE_ROC:    'Escalate → ROC',
+  SEND_BACK_RTC:   'Send back to RTC',
+  SEND_BACK_DEPT:  'Send back to dept',
+  RECOMMEND_CLOSE: 'Recommend closure',
+}
+
+export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
+  CLARIFICATION: 'Clarification',
+  DIRECTIVE:     'Directive',
+}
+
+export const ACTION_STATUS_LABEL: Record<ActionStatus, string> = {
+  PENDING:   'Pending',
+  RESPONDED: 'Responded',
+  ACCEPTED:  'Accepted',
+  OVERDUE:   'Overdue',
+  ESCALATED: 'Escalated',
+}
+
+/* Maps a committee outcome to the risk status it produces.
+ * `meetingType` matters only for ENDORSE/escalation context, but every outcome
+ * here resolves to a single next status regardless of which committee recorded it. */
+export function outcomeToStatus(outcome: CommitteeOutcome): RiskStatus {
+  switch (outcome) {
+    case 'ENDORSE_ACTIVE':  return 'ACTIVE'
+    case 'ESCALATE_ROC':    return 'TABLED_ROC'
+    case 'SEND_BACK_RTC':   return 'TABLED_RTC'
+    case 'SEND_BACK_DEPT':  return 'REJECTED'
+    case 'RECOMMEND_CLOSE': return 'PENDING_CLOSURE'
+  }
+}
+
+/* Which outcomes a given committee may record (RTC can escalate to ROC;
+ * ROC can send back to RTC; both can endorse / send to dept / recommend close). */
+export function allowedOutcomes(meetingType: MeetingType): CommitteeOutcome[] {
+  if (meetingType === 'RTC') {
+    return ['ENDORSE_ACTIVE', 'ESCALATE_ROC', 'SEND_BACK_DEPT', 'RECOMMEND_CLOSE']
+  }
+  return ['ENDORSE_ACTIVE', 'SEND_BACK_RTC', 'SEND_BACK_DEPT', 'RECOMMEND_CLOSE']
 }
