@@ -11,7 +11,7 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import type {
   RiskMeeting, RiskMeetingAgenda, RiskActionItem, Risk, RiskReview, RiskUser,
-  CommitteeOutcome, MeetingStatus, ActionType, CrossCuttingTheme,
+  CommitteeOutcome, MeetingStatus, ActionType, CrossCuttingTheme, RiskLevel,
 } from '@/lib/risk/types'
 import {
   computeRiskScore, outcomeToStatus, allowedOutcomes,
@@ -136,16 +136,6 @@ export default function RiskMeetingDetailPage() {
       const onAgenda = new Set(agendaRiskIds)
       setAvailable(((tabledRisks ?? []) as Risk[]).filter((r) => !onAgenda.has(r.id)))
 
-      // Latest review per risk (for scoring display + re-score prefill)
-      const allRiskIds = Array.from(new Set([...agendaRiskIds, ...((tabledRisks ?? []) as Risk[]).map((r) => r.id)]))
-      if (allRiskIds.length) {
-        const { data: reviews } = await supabase.from('risk_reviews')
-          .select('*').in('risk_id', allRiskIds).order('cycle_number', { ascending: false })
-        const lr = new Map<number, RiskReview>()
-        for (const rv of (reviews ?? []) as RiskReview[]) if (!lr.has(rv.risk_id)) lr.set(rv.risk_id, rv)
-        setLatestReviewByRisk(lr)
-      }
-
       // Cross-cutting themes (RTC tagging + ROC summary grouping)
       const { data: themesData } = await supabase
         .from('cross_cutting_themes').select('*').eq('is_active', true).order('id')
@@ -181,6 +171,23 @@ export default function RiskMeetingDetailPage() {
         } else {
           setRtcRiskById(new Map())
         }
+      }
+
+      // Latest review per risk — for re-score prefill + the ROC level/cycle breakdowns.
+      // Covers agenda + tabled + the RTC-rollup risks.
+      const reviewRiskIds = Array.from(new Set([
+        ...agendaRiskIds,
+        ...((tabledRisks ?? []) as Risk[]).map((r) => r.id),
+        ...rtcRiskList.map((r) => r.id),
+      ]))
+      if (reviewRiskIds.length) {
+        const { data: reviews } = await supabase.from('risk_reviews')
+          .select('*').in('risk_id', reviewRiskIds).order('cycle_number', { ascending: false })
+        const lr = new Map<number, RiskReview>()
+        for (const rv of (reviews ?? []) as RiskReview[]) if (!lr.has(rv.risk_id)) lr.set(rv.risk_id, rv)
+        setLatestReviewByRisk(lr)
+      } else {
+        setLatestReviewByRisk(new Map())
       }
 
       // Theme tags — for current agenda risks + any ROC-summary RTC risks
@@ -457,10 +464,15 @@ export default function RiskMeetingDetailPage() {
   const orderedFlat = useMemo(() => groups.flatMap((g) => g.items), [groups])
   const decidedCount = agenda.filter((a) => a.outcome).length
 
-  // ROC rollup of the linked RTC sittings: outcome counts, the escalated risks
-  // (which the ROC must act on), and cross-cutting issues grouped by theme.
+  // ROC rollup of the linked RTC sittings. Aggregates over the DISTINCT risks
+  // presented at the linked RTC(s): totals by department, risk level, current
+  // review cycle, how many escalated to ROC, plus cross-cutting issues by theme.
   const rocSummary = useMemo(() => {
     if (!meeting || meeting.meeting_type !== 'ROC') return null
+    const risks = Array.from(rtcRiskById.values())
+    const total = risks.length
+
+    // outcome counts + escalated list (kept for the on-page working view)
     const counts: Partial<Record<CommitteeOutcome | 'UNDECIDED', number>> = {}
     const escalated: { item: RiskMeetingAgenda; risk: Risk }[] = []
     for (const a of rtcAgenda) {
@@ -471,7 +483,31 @@ export default function RiskMeetingDetailPage() {
         if (r) escalated.push({ item: a, risk: r })
       }
     }
-    const rtcRiskIds = Array.from(new Set(rtcAgenda.map((a) => a.risk_id)))
+    const escalatedCount = escalated.length
+
+    // by department
+    const deptMap = new Map<string, number>()
+    for (const r of risks) deptMap.set(r.dept_code, (deptMap.get(r.dept_code) ?? 0) + 1)
+    const byDept = Array.from(deptMap.entries())
+      .map(([code, n]) => ({ code, n }))
+      .sort((a, b) => b.n - a.n || a.code.localeCompare(b.code))
+
+    // by risk level + by current review cycle (from each risk's latest review)
+    const levelMap: Record<RiskLevel, number> = { EKSTREM: 0, TINGGI: 0, SEDERHANA: 0, RENDAH: 0 }
+    const cycleMap = new Map<number, number>()
+    let unscored = 0
+    for (const r of risks) {
+      const lr = latestReviewByRisk.get(r.id)
+      if (lr) {
+        levelMap[lr.risk_level]++
+        cycleMap.set(lr.cycle_number, (cycleMap.get(lr.cycle_number) ?? 0) + 1)
+      } else unscored++
+    }
+    const byCycle = Array.from(cycleMap.entries())
+      .map(([cycle, n]) => ({ cycle, n })).sort((a, b) => a.cycle - b.cycle)
+
+    // cross-cutting by theme
+    const rtcRiskIds = Array.from(rtcRiskById.keys())
     const byTheme = themes.map((t) => ({
       theme: t,
       risks: rtcRiskIds
@@ -479,8 +515,9 @@ export default function RiskMeetingDetailPage() {
         .map((rid) => rtcRiskById.get(rid))
         .filter((r): r is Risk => !!r),
     })).filter((g) => g.risks.length > 0)
-    return { counts, escalated, byTheme, total: rtcAgenda.length }
-  }, [meeting, rtcAgenda, rtcRiskById, themes, tagsByRisk])
+
+    return { total, counts, escalated, escalatedCount, byDept, levelMap, byCycle, unscored, byTheme }
+  }, [meeting, rtcAgenda, rtcRiskById, themes, tagsByRisk, latestReviewByRisk])
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -497,11 +534,14 @@ export default function RiskMeetingDetailPage() {
         <RocPresentOverlay
           meetingTitle={`${meeting.meeting_type} · ${meeting.title}`}
           linkedRtc={linkedRtc}
-          counts={rocSummary.counts}
-          total={rocSummary.total}
-          escalated={rocSummary.escalated}
-          byTheme={rocSummary.byTheme}
-          latestByRisk={latestReviewByRisk}
+          summary={{
+            total: rocSummary.total,
+            escalatedCount: rocSummary.escalatedCount,
+            byDept: rocSummary.byDept,
+            levelMap: rocSummary.levelMap,
+            byCycle: rocSummary.byCycle,
+            byTheme: rocSummary.byTheme,
+          }}
           deptLabel={deptLabel}
           onClose={() => setRocPresentOpen(false)}
         />
@@ -965,30 +1005,33 @@ function RiskSlideContent({ risk, latest, deptLabel, outcome }: {
   )
 }
 
-/* Full-screen ROC presentation deck: overview → each escalated risk → cross-cutting. */
-type RocSlide =
-  | { kind: 'overview' }
-  | { kind: 'risk'; item: RiskMeetingAgenda; risk: Risk }
-  | { kind: 'theme'; theme: CrossCuttingTheme; risks: Risk[] }
+/* Full-screen ROC presentation deck — high-level summary of the risks
+ * presented at the linked RTC sitting(s). One slide per breakdown; the
+ * individual escalated-risk details are presented separately, not here. */
+interface RocSummaryData {
+  total: number
+  escalatedCount: number
+  byDept: { code: string; n: number }[]
+  levelMap: Record<RiskLevel, number>
+  byCycle: { cycle: number; n: number }[]
+  byTheme: { theme: CrossCuttingTheme; risks: Risk[] }[]
+}
 
 function RocPresentOverlay({
-  meetingTitle, linkedRtc, counts, total, escalated, byTheme, latestByRisk, deptLabel, onClose,
+  meetingTitle, linkedRtc, summary, deptLabel, onClose,
 }: {
   meetingTitle: string
   linkedRtc: RiskMeeting[]
-  counts: Partial<Record<CommitteeOutcome | 'UNDECIDED', number>>
-  total: number
-  escalated: { item: RiskMeetingAgenda; risk: Risk }[]
-  byTheme: { theme: CrossCuttingTheme; risks: Risk[] }[]
-  latestByRisk: Map<number, RiskReview>
+  summary: RocSummaryData
   deptLabel: (code: string) => string
   onClose: () => void
 }) {
-  const slides: RocSlide[] = [
-    { kind: 'overview' },
-    ...escalated.map((e) => ({ kind: 'risk' as const, item: e.item, risk: e.risk })),
-    ...byTheme.map((t) => ({ kind: 'theme' as const, theme: t.theme, risks: t.risks })),
-  ]
+  const { total, escalatedCount, byDept, levelMap, byCycle, byTheme } = summary
+  const levelOrder: RiskLevel[] = ['EKSTREM', 'TINGGI', 'SEDERHANA', 'RENDAH']
+  const maxDept = Math.max(1, ...byDept.map((d) => d.n))
+
+  const slides: ('overview' | 'dept' | 'level' | 'cycle' | 'crosscut')[] =
+    ['overview', 'dept', 'level', 'cycle', 'crosscut']
   const n = slides.length
   const [index, setIndex] = useState(0)
   const i = Math.min(index, n - 1)
@@ -1004,61 +1047,108 @@ function RocPresentOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [n, onClose])
 
-  const outcomeOrder: CommitteeOutcome[] = ['ENDORSE_ACTIVE', 'ESCALATE_ROC', 'SEND_BACK_DEPT', 'RECOMMEND_CLOSE']
+  const titleFor: Record<typeof slides[number], string> = {
+    overview: 'Overview', dept: 'By Department', level: 'By Risk Level',
+    cycle: 'By Review Cycle', crosscut: 'Cross-cutting Issues',
+  }
 
   return (
     <div className="present-overlay">
       <div className="present-bar">
-        <div className="present-bar-title">{meetingTitle} — ROC Presentation</div>
-        <div className="present-bar-progress">Slide {i + 1} of {n}</div>
+        <div className="present-bar-title">{meetingTitle} — RTC Summary</div>
+        <div className="present-bar-progress">{titleFor[slide]} · {i + 1} of {n}</div>
         <button type="button" className="present-close" onClick={onClose}>✕ Exit</button>
       </div>
 
       <div className="present-stage">
-        {slide.kind === 'overview' && (
+        {slide === 'overview' && (
           <div className="present-slide">
             <div className="present-dept">RTC Summary</div>
             <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>Risks presented at the RTC</div>
             <div className="present-meta">
               {linkedRtc.map((rt) => <span key={rt.id}><b>{rt.title}</b> · {rt.meeting_date}</span>)}
             </div>
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 20 }}>
-              <RocStat label="Total presented" n={total} accent />
-              {outcomeOrder.map((o) => <RocStat key={o} label={COMMITTEE_OUTCOME_LABEL[o]} n={counts[o] ?? 0} />)}
-              {counts.UNDECIDED ? <RocStat label="Not yet decided" n={counts.UNDECIDED} /> : null}
-            </div>
-            <div style={{ marginTop: 24, fontSize: 15, color: '#93A4C0' }}>
-              {escalated.length} risk{escalated.length === 1 ? '' : 's'} escalated to ROC ·{' '}
-              {byTheme.length} cross-cutting theme{byTheme.length === 1 ? '' : 's'} — next slides walk through each.
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 24 }}>
+              <RocStat label="Total risks registered" n={total} accent />
+              <RocStat label="Issues to discuss in ROC" n={escalatedCount} />
+              <RocStat label="Departments involved" n={byDept.length} />
+              <RocStat label="Cross-cutting themes" n={byTheme.length} />
             </div>
           </div>
         )}
 
-        {slide.kind === 'risk' && (
-          <RiskSlideContent
-            risk={slide.risk}
-            latest={latestByRisk.get(slide.risk.id) ?? null}
-            deptLabel={deptLabel(slide.risk.dept_code)}
-            outcome={slide.item.outcome}
-          />
-        )}
-
-        {slide.kind === 'theme' && (
+        {slide === 'dept' && (
           <div className="present-slide">
-            <div className="present-dept">Cross-cutting Issue · Isu Melintang</div>
-            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 34 }}>{slide.theme.name}</div>
-            {slide.theme.description && (
-              <div style={{ fontSize: 16, color: '#CBD5E1', marginBottom: 16 }}>{slide.theme.description}</div>
-            )}
-            <div className="present-block-label">Affected risks ({slide.risks.length})</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-              {slide.risks.map((r) => (
-                <div key={r.id} style={{ fontSize: 17, color: '#F1F5F9' }}>
-                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#7DD3FC' }}>{r.risk_id}</span>
-                  <span style={{ color: '#93A4C0' }}> · {deptLabel(r.dept_code)}</span> — {r.description}
+            <div className="present-dept">By Department</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>Risks per department</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+              {byDept.length === 0 && <div style={{ color: '#93A4C0' }}>No risks.</div>}
+              {byDept.map((d) => (
+                <div key={d.code} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 280, fontSize: 16, color: '#F1F5F9', textAlign: 'right', flexShrink: 0 }}>{deptLabel(d.code)}</div>
+                  <div style={{ flex: 1, background: '#16213C', borderRadius: 6, overflow: 'hidden', height: 26 }}>
+                    <div style={{ width: `${(d.n / maxDept) * 100}%`, height: '100%', background: '#3B82F6', minWidth: 2 }} />
+                  </div>
+                  <div style={{ width: 36, fontSize: 18, fontWeight: 800, color: '#fff' }}>{d.n}</div>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {slide === 'level' && (
+          <div className="present-slide">
+            <div className="present-dept">By Risk Level</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>Risks by severity</div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 24 }}>
+              {levelOrder.map((lv) => (
+                <div key={lv} style={{ borderRadius: 12, padding: '18px 26px', minWidth: 150, background: RISK_LEVEL_BG[lv], border: `2px solid ${RISK_LEVEL_COLOR[lv]}` }}>
+                  <div style={{ fontSize: 44, fontWeight: 800, color: RISK_LEVEL_COLOR[lv] }}>{levelMap[lv]}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: RISK_LEVEL_COLOR[lv] }}>{RISK_LEVEL_LABEL[lv]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {slide === 'cycle' && (
+          <div className="present-slide">
+            <div className="present-dept">By Review Cycle</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>How many new vs. re-reviewed</div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 24 }}>
+              {byCycle.length === 0 && <div style={{ color: '#93A4C0' }}>No scored risks yet.</div>}
+              {byCycle.map(({ cycle, n: cn }) => (
+                <RocStat key={cycle} label={cycle === 1 ? '1st cycle (new)' : `${cycle}${cycle === 2 ? 'nd' : cycle === 3 ? 'rd' : 'th'} cycle`} n={cn} accent={cycle === 1} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {slide === 'crosscut' && (
+          <div className="present-slide">
+            <div className="present-dept">Cross-cutting Issues · Isu Melintang</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>By theme</div>
+            {byTheme.length === 0 ? (
+              <div style={{ color: '#93A4C0', marginTop: 12 }}>No cross-cutting themes tagged.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+                {byTheme.map(({ theme, risks }) => (
+                  <div key={theme.id}>
+                    <div style={{ fontSize: 19, fontWeight: 700, color: '#fff' }}>
+                      {theme.name} <span style={{ color: '#7DD3FC' }}>· {risks.length}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                      {risks.map((r) => (
+                        <span key={r.id} style={{ fontSize: 14, color: '#E5E7EB', background: '#16213C', borderRadius: 6, padding: '4px 10px' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#7DD3FC' }}>{r.risk_id}</span>
+                          <span style={{ color: '#93A4C0' }}> · {deptLabel(r.dept_code)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1067,7 +1157,7 @@ function RocPresentOverlay({
         <button type="button" className="present-nav" disabled={i === 0} onClick={() => setIndex(i - 1)}>◀ Previous</button>
         <div className="present-dots">
           {slides.map((s, idx) => (
-            <span key={idx} className={`present-dot ${idx === i ? 'on' : ''}`} onClick={() => setIndex(idx)} />
+            <span key={s} className={`present-dot ${idx === i ? 'on' : ''}`} onClick={() => setIndex(idx)} />
           ))}
         </div>
         <button type="button" className="present-nav" disabled={i === n - 1} onClick={() => setIndex(i + 1)}>Next ▶</button>
@@ -1079,9 +1169,9 @@ function RocPresentOverlay({
 function RocStat({ label, n, accent }: { label: string; n: number; accent?: boolean }) {
   return (
     <div style={{
-      background: accent ? '#1D4ED8' : '#16213C', borderRadius: 12, padding: '16px 22px', minWidth: 120,
+      background: accent ? '#1D4ED8' : '#16213C', borderRadius: 12, padding: '16px 22px', minWidth: 150,
     }}>
-      <div style={{ fontSize: 38, fontWeight: 800, color: '#fff' }}>{n}</div>
+      <div style={{ fontSize: 40, fontWeight: 800, color: '#fff' }}>{n}</div>
       <div style={{ fontSize: 13, color: accent ? '#DBEAFE' : '#8DA2C0' }}>{label}</div>
     </div>
   )
