@@ -672,28 +672,19 @@ body{counter-reset:rcpage;}
 .role-pill-add{background:#fff;border-style:dashed;border-color:#9CA3AF;color:#6B7280;}
 .role-pill-add:hover{background:#ECFDF5;border-color:#6EE7B7;border-style:solid;color:#065F46;}
 
-/* Risk Register — "Needs your attention" panel */
-.attention-panel{background:#FFFBEB;border:1px solid #FCD34D;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
-.attention-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#92400E;margin-bottom:8px;}
-.attention-bolt{font-size:15px;}
-.attention-count{font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;background:#F59E0B;color:#fff;}
-.attention-list{display:flex;flex-direction:column;gap:6px;}
-.attention-item{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fff;border:1px solid #FDE68A;border-radius:8px;text-decoration:none;color:var(--text);transition:all .12s;}
-.attention-item:hover{border-color:#F59E0B;box-shadow:0 1px 4px rgba(245,158,11,0.18);}
-.attention-rid{font-family:monospace;font-weight:700;font-size:12px;color:var(--blue);flex-shrink:0;}
-.attention-dept{font-size:12px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.attention-status{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;flex-shrink:0;}
-.attention-hint{font-size:12px;font-weight:600;color:#92400E;flex-shrink:0;}
-.attention-go{color:#F59E0B;font-weight:700;flex-shrink:0;}
-@media (max-width:768px){.attention-dept{display:none;}}
-
-/* Risk Register — Active / Archive tabs */
-.risk-tabs{display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--border);}
+/* Risk Register — Attention / Active / Archive tabs */
+.risk-tabs{display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
 .risk-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border:none;background:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;}
 .risk-tab:hover{color:var(--text);}
 .risk-tab.active{color:var(--blue);border-bottom-color:var(--blue);}
 .risk-tab-count{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;background:#EEF2FF;color:#3730A3;}
 .risk-tab.active .risk-tab-count{background:var(--blue);color:#fff;}
+/* the attention tab is amber to draw the eye */
+.risk-tab-attention{color:#B45309;}
+.risk-tab-attention:hover{color:#92400E;}
+.risk-tab-attention .risk-tab-count{background:#F59E0B;color:#fff;}
+.risk-tab-attention.active{color:#B45309;border-bottom-color:#F59E0B;}
+.risk-tab-attention.active .risk-tab-count{background:#B45309;}
 
 /* Risk Register — top filter bar */
 .risk-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;}

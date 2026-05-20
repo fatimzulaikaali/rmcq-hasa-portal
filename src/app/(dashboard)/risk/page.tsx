@@ -34,15 +34,6 @@ const ATTENTION_BY_ROLE: Record<RiskRole, RiskStatus[]> = {
   DIRECTOR:   [],
   ADMIN:      [],
 }
-const ACTION_HINT: Partial<Record<RiskStatus, string>> = {
-  DRAFT:           'Finish & submit to HOD',
-  RETURNED:        'Revise & resubmit',
-  PENDING_HOD:     'Awaiting your endorsement',
-  PENDING_RC:      'Awaiting your validation',
-  TABLED_RTC:      'Table for an RTC meeting',
-  TABLED_ROC:      'Table for an ROC meeting',
-  PENDING_CLOSURE: 'Confirm closure',
-}
 
 export default function RiskListPage() {
   const router = useRouter()
@@ -54,7 +45,8 @@ export default function RiskListPage() {
   const [rows, setRows]   = useState<RiskListRow[]>([])
   const [depts, setDepts] = useState<RiskDept[]>([])
 
-  const [view,      setView]      = useState<'active' | 'archive'>('active')
+  const [view,      setView]      = useState<'attention' | 'active' | 'archive'>('active')
+  const [viewTouched, setViewTouched] = useState(false)
   const [statusF,   setStatusF]   = useState<StatusFilter>('all')
   const [levelF,    setLevelF]    = useState<LevelFilter>('all')
   const [categoryF, setCategoryF] = useState<CategoryFilter>('all')
@@ -141,16 +133,23 @@ export default function RiskListPage() {
   const isArchived = (s: RiskStatus) => s === 'CLOSED' || s === 'OUT_OF_SCOPE' || s === 'REJECTED'
 
   // Rows belonging to the currently-selected tab.
-  const viewRows = useMemo(
-    () => scopedRows.filter((r) => (view === 'archive' ? isArchived(r.risk.status) : !isArchived(r.risk.status))),
-    [scopedRows, view])
+  const viewRows = useMemo(() => {
+    if (view === 'attention') return attentionRows
+    return scopedRows.filter((r) => (view === 'archive' ? isArchived(r.risk.status) : !isArchived(r.risk.status)))
+  }, [scopedRows, attentionRows, view])
   const activeCount  = useMemo(() => scopedRows.filter((r) => !isArchived(r.risk.status)).length, [scopedRows])
   const archiveCount = useMemo(() => scopedRows.filter((r) =>  isArchived(r.risk.status)).length, [scopedRows])
 
   // Status options offered in the filter, scoped to the current tab.
-  const statusOptions = useMemo(
-    () => (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => view === 'archive' ? isArchived(s) : !isArchived(s)),
-    [view])
+  const statusOptions = useMemo(() => {
+    if (view === 'attention') return activeRole ? (ATTENTION_BY_ROLE[activeRole.role] ?? []) : []
+    return (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => view === 'archive' ? isArchived(s) : !isArchived(s))
+  }, [view, activeRole])
+
+  // Land on the attention tab on first load when the user has items waiting.
+  useEffect(() => {
+    if (!viewTouched && attentionRows.length > 0) setView('attention')
+  }, [attentionRows, viewTouched])
 
   const filtered = useMemo(() => viewRows.filter((r) => {
     if (statusF   !== 'all' && r.risk.status        !== statusF)   return false
@@ -169,9 +168,10 @@ export default function RiskListPage() {
   }
 
   // Switching tabs clears the status filter (its valid options differ per tab).
-  function switchView(v: 'active' | 'archive') {
+  function switchView(v: 'attention' | 'active' | 'archive') {
     setView(v)
     setStatusF('all')
+    setViewTouched(true)
   }
 
   const counts = useMemo(() => {
@@ -231,32 +231,6 @@ export default function RiskListPage() {
 
           {!loading && !loadError && (
             <>
-              {attentionRows.length > 0 && (
-                <div className="attention-panel">
-                  <div className="attention-head">
-                    <span className="attention-bolt">⚡</span>
-                    Needs your attention
-                    <span className="attention-count">{attentionRows.length}</span>
-                  </div>
-                  <div className="attention-list">
-                    {attentionRows.map(({ risk, dept }) => {
-                      const sb = RISK_STATUS_BADGE[risk.status]
-                      return (
-                        <Link key={risk.id} href={`/risk/${risk.id}`} className="attention-item">
-                          <span className="attention-rid">{risk.risk_id}</span>
-                          <span className="attention-dept">{dept?.name_en ?? risk.dept_code}</span>
-                          <span className="attention-status" style={{ color: sb.fg, background: sb.bg }}>
-                            {RISK_STATUS_LABEL[risk.status]}
-                          </span>
-                          <span className="attention-hint">{ACTION_HINT[risk.status] ?? 'Action needed'}</span>
-                          <span className="attention-go">→</span>
-                        </Link>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
               <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
                 <div className="tile"><div className="tl">Total risks</div><div className="tv" style={{ color: 'var(--blue)' }}>{counts.total}</div></div>
                 <div className="tile"><div className="tl">Open</div><div className="tv" style={{ color: '#0EA5E9' }}>{counts.open}</div></div>
@@ -267,6 +241,12 @@ export default function RiskListPage() {
               </div>
 
               <div className="risk-tabs">
+                {attentionRows.length > 0 && (
+                  <button type="button" className={`risk-tab risk-tab-attention ${view === 'attention' ? 'active' : ''}`}
+                    onClick={() => switchView('attention')}>
+                    ⚡ Needs your attention <span className="risk-tab-count">{attentionRows.length}</span>
+                  </button>
+                )}
                 <button type="button" className={`risk-tab ${view === 'active' ? 'active' : ''}`}
                   onClick={() => switchView('active')}>
                   Active Register <span className="risk-tab-count">{activeCount}</span>
@@ -313,10 +293,14 @@ export default function RiskListPage() {
               <div className="panel" style={{ marginTop: 14 }}>
                 <div className="pf">
                   <div>
-                    <div className="pt">{view === 'archive' ? 'Archive — Closed &amp; Rejected' : 'Active Register'}</div>
+                    <div className="pt">{view === 'archive' ? 'Archive — Closed &amp; Out of Scope' : view === 'attention' ? 'Needs Your Attention' : 'Active Register'}</div>
                     <div className="psub">
-                      {filtered.length} of {viewRows.length} {view === 'archive' ? 'archived risks' : 'active risks'}
-                      {view === 'archive' ? ' · revising a rejected risk moves it back to the Active Register' : ' · use the filters above to narrow down'}
+                      {filtered.length} of {viewRows.length} {view === 'archive' ? 'archived risks' : view === 'attention' ? 'risks awaiting your action' : 'active risks'}
+                      {view === 'archive'
+                        ? ' · revising a returned risk moves it back to the Active Register'
+                        : view === 'attention'
+                          ? ' · these are waiting on your current role'
+                          : ' · use the filters above to narrow down'}
                     </div>
                   </div>
                 </div>
@@ -325,14 +309,16 @@ export default function RiskListPage() {
                   <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--muted)' }}>
                     {viewRows.length === 0 ? (
                       <>
-                        <div style={{ fontSize: 28, marginBottom: 8 }}>{view === 'archive' ? '🗄️' : '📭'}</div>
+                        <div style={{ fontSize: 28, marginBottom: 8 }}>{view === 'archive' ? '🗄️' : view === 'attention' ? '✅' : '📭'}</div>
                         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-                          {view === 'archive' ? 'Nothing archived yet' : 'No active risks'}
+                          {view === 'archive' ? 'Nothing archived yet' : view === 'attention' ? 'Nothing waiting on you' : 'No active risks'}
                         </div>
                         <div style={{ fontSize: 12 }}>
                           {view === 'archive'
-                            ? 'Closed and rejected risks will appear here.'
-                            : 'Risks move here as they progress through the workflow.'}
+                            ? 'Closed and out-of-scope risks will appear here.'
+                            : view === 'attention'
+                              ? 'You’re all caught up — no risks need your action right now.'
+                              : 'Risks move here as they progress through the workflow.'}
                         </div>
                       </>
                     ) : (
