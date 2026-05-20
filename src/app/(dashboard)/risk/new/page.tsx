@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
+import { RiskSidebar } from '@/components/RiskSidebar'
 import {
   RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
@@ -238,20 +239,7 @@ export default function NewRiskPage() {
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <div className="scrim" onClick={() => setSidebarOpen(false)} />
-      <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">⚠️ Risk Register</div>
-          <div className="sb-sub">Risk Management &amp; Clinical Quality (RMCQ)</div>
-        </div>
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
-          <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
-          <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
-          <Link href="/risk" className="nav-item"><span className="nav-icon">⚠️</span><span>Risk Register</span></Link>
-        </div>
-      </aside>
+      <RiskSidebar onClose={() => setSidebarOpen(false)} active="risk" />
 
       <div className="main">
         <header className="topbar">

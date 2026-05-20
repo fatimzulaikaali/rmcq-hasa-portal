@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
+import { RiskSidebar } from '@/components/RiskSidebar'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
   RiskStatus, RiskLevel, RiskCategory,
@@ -39,7 +40,6 @@ export default function RiskListPage() {
 
   // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
-  const [isAdminUser, setIsAdminUser]   = useState(true)
   const [isAdminRole, setIsAdminRole]   = useState(false)
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -53,7 +53,6 @@ export default function RiskListPage() {
       // Resolve the user's module access (admin-style vs dept-scoped)
       const access = await getModuleAccess(supabase)
       setAllowedDepts(access.deptScopes)
-      setIsAdminUser(access.allModules)
       setIsAdminRole(access.activeRole?.role === 'ADMIN')
 
       const { data: deptsData, error: deptsErr } = await supabase
@@ -133,35 +132,7 @@ export default function RiskListPage() {
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <div className="scrim" onClick={() => setSidebarOpen(false)} />
-      <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">⚠️ Risk Register</div>
-          <div className="sb-sub">Risk Management &amp; Clinical Quality (RMCQ)</div>
-        </div>
-
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          {isAdminUser && (
-            <>
-              <Link href="/ir" className="nav-item">
-                <span className="nav-icon">🩺</span><span>IR Dashboard</span>
-              </Link>
-              <Link href="/kpi" className="nav-item">
-                <span className="nav-icon">📈</span><span>KPI Monitor</span>
-              </Link>
-              <Link href="/pscs" className="nav-item">
-                <span className="nav-icon">🛡️</span><span>Safety Culture</span>
-              </Link>
-            </>
-          )}
-          {isAdminUser && (
-            <Link href="/risk/meetings" className="nav-item">
-              <span className="nav-icon">📋</span><span>Committees</span>
-            </Link>
-          )}
-        </div>
-
+      <RiskSidebar onClose={() => setSidebarOpen(false)} active="risk">
         <div className="sb-filters">
           <div className="sf-lbl">🔎 Filters</div>
           <div className="filter-field">
@@ -206,7 +177,7 @@ export default function RiskListPage() {
             </button>
           )}
         </div>
-      </aside>
+      </RiskSidebar>
 
       <div className="main">
         <header className="topbar">

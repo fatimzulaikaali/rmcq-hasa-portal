@@ -7,6 +7,7 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
+import { RiskSidebar } from '@/components/RiskSidebar'
 import { Risk, RiskReview, RiskDept, RiskCategory, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { resolveActiveRole } from '@/lib/risk/activeRole'
@@ -218,17 +219,7 @@ export default function EditRiskPage() {
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <div className="scrim" onClick={() => setSidebarOpen(false)} />
-      <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">⚠️ Risk Register</div>
-          <div className="sb-sub">Risk Management &amp; Clinical Quality (RMCQ)</div>
-        </div>
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          <Link href="/risk" className="nav-item"><span className="nav-icon">⚠️</span><span>Risk Register</span></Link>
-        </div>
-      </aside>
+      <RiskSidebar onClose={() => setSidebarOpen(false)} active="risk" />
 
       <div className="main">
         <header className="topbar">
