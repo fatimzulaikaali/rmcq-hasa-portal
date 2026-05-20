@@ -442,8 +442,11 @@ export default function RiskDetailPage() {
                   {risk.status === 'ACTIVE' && (
                     (canManageActive || canRequestClose) ? (
                       <>
+                        {canClose && (
+                          <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
+                        )}
                         {canManageActive && (
-                          <WfBtn primary disabled={transitioning} onClick={() =>
+                          <WfBtn disabled={transitioning} onClick={() =>
                             transition({ newStatus: 'MONITORING', action: 'MOVE_TO_MONITORING', role: 'RC', comment: 'Moved to monitoring' })}>
                             → Move to Monitoring
                           </WfBtn>
@@ -454,13 +457,16 @@ export default function RiskDetailPage() {
                             Request Closure
                           </WfBtn>
                         )}
-                        <WfHint>Active risks are being treated. RC moves to Monitoring; RLO/HOD can request closure.</WfHint>
+                        <WfHint>Active risks are being treated. The RC can close the risk directly (e.g. after a committee decision), move it to Monitoring, or the RLO/HOD can request closure for the RC to confirm.</WfHint>
                       </>
                     ) : <WfHint>This risk is active and being treated.</WfHint>
                   )}
                   {risk.status === 'MONITORING' && (
                     (canRequestClose || canManageActive) ? (
                       <>
+                        {canClose && (
+                          <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
+                        )}
                         {canRequestClose && (
                           <WfBtn disabled={transitioning} onClick={() =>
                             transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested' })}>
@@ -473,7 +479,7 @@ export default function RiskDetailPage() {
                             ← Back to Active
                           </WfBtn>
                         )}
-                        <WfHint>Risk is being monitored. Request closure when ready, or send back to Active.</WfHint>
+                        <WfHint>Risk is being monitored. The RC can close it directly, or the RLO/HOD can request closure. Send back to Active if treatment needs to resume.</WfHint>
                       </>
                     ) : <WfHint>This risk is being monitored.</WfHint>
                   )}
