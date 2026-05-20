@@ -229,21 +229,22 @@ export default function RiskDetailPage() {
   const latest = reviews[0] ?? null
 
   /* Role-based capability checks for the workflow buttons.
-   * A user qualifies if they hold one of the listed roles AND that role is
-   * either hospital-wide (dept_code null) or scoped to this risk's dept. */
+   * The clinical workflow is STRICTLY role-based — ADMIN is a system-admin
+   * hat (user management) and does NOT act in the risk approval workflow.
+   * A user qualifies if they hold the listed role AND that role is either
+   * hospital-wide (dept_code null) or scoped to this risk's dept. */
   function hasRole(roles: RiskRole[], deptCode?: string): boolean {
     return userRoles.some((r) =>
       roles.includes(r.role) &&
       (r.dept_code === null || !deptCode || r.dept_code === deptCode))
   }
   const riskDept = risk?.dept_code
-  const canSubmit       = hasRole(['RLO', 'ADMIN'], riskDept)
-  const canEndorse      = hasRole(['HOD', 'ADMIN'], riskDept)
-  const canValidate     = hasRole(['RC', 'ADMIN'])
-  const canManageActive = hasRole(['RC', 'ADMIN'])               // monitoring / reactivate / reopen
-  const canRequestClose = hasRole(['RLO', 'HOD', 'ADMIN'], riskDept)
-  const canClose        = hasRole(['RC', 'ADMIN'])
-  const canReject       = hasRole(['HOD', 'RC', 'ADMIN'], riskDept)
+  const canSubmit       = hasRole(['RLO'], riskDept)             // RLO of this dept
+  const canEndorse      = hasRole(['HOD'], riskDept)             // HOD of this dept
+  const canValidate     = hasRole(['RC'])                        // Risk Coordinator (hospital-wide)
+  const canManageActive = hasRole(['RC'])                        // monitoring / reactivate / reopen
+  const canRequestClose = hasRole(['RLO', 'HOD'], riskDept)      // RLO or HOD of this dept
+  const canClose        = hasRole(['RC'])                        // RC closes
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -387,33 +388,25 @@ export default function RiskDetailPage() {
                     ) : <WfHint>This risk is in draft. Only the RLO can submit it to the HOD.</WfHint>
                   )}
                   {risk.status === 'PENDING_HOD' && (
-                    (canEndorse || canReject) ? (
+                    canEndorse ? (
                       <>
-                        {canEndorse && (
-                          <WfBtn primary disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
-                            ✓ Endorse (HOD)
-                          </WfBtn>
-                        )}
-                        {canReject && (
-                          <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        )}
+                        <WfBtn primary disabled={transitioning} onClick={() =>
+                          transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
+                          ✓ Endorse (HOD)
+                        </WfBtn>
+                        <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
                         <WfHint>HOD endorses → forwards to Risk Coordinator. Reject sends it back as REJECTED.</WfHint>
                       </>
                     ) : <WfHint>Awaiting HOD endorsement. Only the department HOD can act here.</WfHint>
                   )}
                   {risk.status === 'PENDING_RC' && (
-                    (canValidate || canReject) ? (
+                    canValidate ? (
                       <>
-                        {canValidate && (
-                          <WfBtn primary disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
-                            ✓ Validate (RC)
-                          </WfBtn>
-                        )}
-                        {canReject && (
-                          <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        )}
+                        <WfBtn primary disabled={transitioning} onClick={() =>
+                          transition({ newStatus: 'ACTIVE', action: 'VALIDATE', role: 'RC', comment: 'Validated by RC — risk is now active' })}>
+                          ✓ Validate (RC)
+                        </WfBtn>
+                        <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
                         <WfHint>RC validates the risk and its scoring → status becomes ACTIVE.</WfHint>
                       </>
                     ) : <WfHint>Awaiting Risk Coordinator validation. Only RC can act here.</WfHint>

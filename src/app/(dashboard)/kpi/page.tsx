@@ -120,7 +120,7 @@ export default function KpiPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [refreshTick])
+  }, [refreshTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loading = defs == null || data == null || siq == null || depts == null
   const filteredDefs = useMemo(() => {

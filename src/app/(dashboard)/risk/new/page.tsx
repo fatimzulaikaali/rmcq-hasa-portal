@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { getModuleAccess } from '@/lib/risk/auth'
 import {
   RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
@@ -93,7 +94,19 @@ export default function NewRiskPage() {
         .eq('kind', 'department')
         .order('sort_order')
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
-      setDepts((deptsData ?? []) as RiskDept[])
+      let deptList = (deptsData ?? []) as RiskDept[]
+
+      // Restrict the department picker to the user's own department(s).
+      // Admins (deptScopes === null) keep the full list.
+      const access = await getModuleAccess(supabase)
+      if (access.deptScopes !== null) {
+        deptList = deptList.filter((d) => access.deptScopes!.includes(d.code))
+        // If they only belong to one department, pre-select it
+        if (deptList.length === 1) {
+          setForm((prev) => ({ ...prev, dept_code: deptList[0].code }))
+        }
+      }
+      setDepts(deptList)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -151,7 +164,6 @@ export default function NewRiskPage() {
           risk_id,
           dept_code: form.dept_code,
           created_by: riskUserId,
-          risk_owner_id: riskUserId,
           category: form.category,
           scope: form.scope,
           description: form.description.trim(),

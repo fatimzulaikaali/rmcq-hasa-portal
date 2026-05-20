@@ -116,7 +116,7 @@ export default function PscsPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [campaignId])
+  }, [campaignId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loading = !campaigns || !questions || !composites || !positions || !departments || !responses || !answers
   const campaign = useMemo(() => campaigns?.find((c) => c.id === campaignId) ?? null, [campaigns, campaignId])

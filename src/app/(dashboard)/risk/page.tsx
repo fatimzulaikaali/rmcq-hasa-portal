@@ -95,15 +95,20 @@ export default function RiskListPage() {
     router.push('/login')
   }
 
-  const filtered = useMemo(() => rows.filter((r) => {
-    // Hard dept-scope filter — dept-restricted users only see their dept's risks
-    if (allowedDepts !== null && !allowedDepts.includes(r.risk.dept_code)) return false
+  // Rows this user is allowed to see (dept-scoped), before any UI filters.
+  // The summary tiles are computed from this set so they reflect the user's
+  // scope (e.g. their department only), not the whole hospital.
+  const scopedRows = useMemo(() =>
+    allowedDepts === null ? rows : rows.filter((r) => allowedDepts.includes(r.risk.dept_code)),
+    [rows, allowedDepts])
+
+  const filtered = useMemo(() => scopedRows.filter((r) => {
     if (statusF   !== 'all' && r.risk.status        !== statusF)   return false
     if (categoryF !== 'all' && r.risk.category      !== categoryF) return false
     if (deptF     !== 'all' && r.risk.dept_code     !== deptF)     return false
     if (levelF    !== 'all' && r.latest?.risk_level !== levelF)    return false
     return true
-  }), [rows, statusF, categoryF, deptF, levelF, allowedDepts])
+  }), [scopedRows, statusF, categoryF, deptF, levelF])
 
   const activeFilters =
     (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) +
@@ -116,12 +121,12 @@ export default function RiskListPage() {
   const counts = useMemo(() => {
     const byLevel: Record<RiskLevel, number> = { EKSTREM: 0, TINGGI: 0, SEDERHANA: 0, RENDAH: 0 }
     let open = 0, closed = 0
-    for (const r of rows) {
+    for (const r of scopedRows) {
       if (r.latest) byLevel[r.latest.risk_level]++
       if (r.risk.status === 'CLOSED' || r.risk.status === 'REJECTED') closed++; else open++
     }
-    return { byLevel, open, closed, total: rows.length }
-  }, [rows])
+    return { byLevel, open, closed, total: scopedRows.length }
+  }, [scopedRows])
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -250,13 +255,13 @@ export default function RiskListPage() {
                 <div className="pf">
                   <div>
                     <div className="pt">Risk Register</div>
-                    <div className="psub">{filtered.length} of {rows.length} risks · use sidebar filters to narrow down</div>
+                    <div className="psub">{filtered.length} of {scopedRows.length} risks · use sidebar filters to narrow down</div>
                   </div>
                 </div>
 
                 {filtered.length === 0 ? (
                   <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--muted)' }}>
-                    {rows.length === 0 ? (
+                    {scopedRows.length === 0 ? (
                       <>
                         <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
                         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>

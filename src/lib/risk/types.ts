@@ -38,7 +38,6 @@ export interface Risk {
   risk_id: string
   dept_code: string
   created_by: number
-  risk_owner_id: number
   category: RiskCategory
   scope: RiskScope
   description: string
