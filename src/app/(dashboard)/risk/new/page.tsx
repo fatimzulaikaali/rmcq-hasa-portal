@@ -289,7 +289,7 @@ export default function NewRiskPage() {
                     <select value={form.dept_code} onChange={(e) => set('dept_code', e.target.value)}>
                       <option value="">— pick a department —</option>
                       {depts.map((d) => (
-                        <option key={d.code} value={d.code}>{d.risk_code} — {d.name_en}</option>
+                        <option key={d.code} value={d.code}>{d.name_en}</option>
                       ))}
                     </select>
                   </Field>

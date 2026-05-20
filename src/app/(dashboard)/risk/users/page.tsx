@@ -298,7 +298,7 @@ export default function RiskUsersPage() {
                     <select value={add.dept_code} onChange={(e) => setAdd({ ...add, dept_code: e.target.value })}>
                       <option value="all">Hospital-wide (no dept restriction)</option>
                       {depts.map((d) => (
-                        <option key={d.code} value={d.code}>{d.risk_code} — {d.name_en}</option>
+                        <option key={d.code} value={d.code}>{d.name_en}</option>
                       ))}
                     </select>
                   </div>

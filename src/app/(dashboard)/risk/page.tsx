@@ -188,7 +188,7 @@ export default function RiskListPage() {
             <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
               <option value="all">All departments</option>
               {depts.filter((d) => d.kind === 'department').map((d) => (
-                <option key={d.code} value={d.code}>{d.risk_code} — {d.name_en}</option>
+                <option key={d.code} value={d.code}>{d.name_en}</option>
               ))}
             </select>
           </div>
