@@ -385,12 +385,19 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
-  async function addActionItem(a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null }) {
+  /* Add an action item tied to a specific risk on the agenda (so it routes to
+   * that risk's department), with a named assignee. */
+  async function addActionItem(
+    agendaId: number, riskId: number,
+    a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null },
+  ) {
     if (!meeting || !a.description.trim()) return
     setBusy(true); setActionError(null)
     try {
       const { error } = await supabase.from('risk_action_items').insert({
         meeting_id: meeting.id,
+        agenda_id: agendaId,
+        risk_id: riskId,
         action_type: a.action_type,
         description: a.description.trim(),
         assigned_to: a.assigned_to,
@@ -831,6 +838,10 @@ export default function RiskMeetingDetailPage() {
                               themes={themes}
                               taggedThemeIds={tagsByRisk.get(risk.id) ?? []}
                               onToggleTheme={(themeId) => toggleTheme(risk.id, themeId)}
+                              actionItems={actions.filter((a) => a.risk_id === risk.id)}
+                              users={users}
+                              nameOf={nameOf}
+                              onAddAction={(payload) => addActionItem(item.id, risk.id, payload)}
                               onDecide={(opts) => recordDecision(item, risk, opts)}
                               onRemove={() => removeAgendaItem(item)}
                             />
@@ -840,42 +851,6 @@ export default function RiskMeetingDetailPage() {
                     ))}
                   </div>
                 )}
-              </div>
-
-              {/* Action items */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">Action Items</div>
-                  <div className="psub">Clarifications and directives raised in this meeting</div>
-                </div></div>
-                {actions.length === 0 ? (
-                  <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', marginBottom: isRC ? 12 : 0 }}>
-                    No action items yet.
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto', marginBottom: isRC ? 12 : 0 }}>
-                    <table className="risk-table">
-                      <thead>
-                        <tr>
-                          <th>Type</th><th>Description</th><th>Assigned to</th><th>Due</th>
-                          <th style={{ textAlign: 'center' }}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {actions.map((a) => (
-                          <tr key={a.id}>
-                            <td>{ACTION_TYPE_LABEL[a.action_type]}</td>
-                            <td>{a.description}</td>
-                            <td>{nameOf(a.assigned_to)}</td>
-                            <td>{a.due_date ?? '—'}</td>
-                            <td style={{ textAlign: 'center' }}>{ACTION_STATUS_LABEL[a.status]}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {isRC && <AddActionForm users={users} busy={busy} onAdd={addActionItem} />}
               </div>
 
               {/* Minutes */}
@@ -1232,7 +1207,7 @@ interface ScoreInputs {
 
 function AgendaItemCard({
   item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
-  themes, taggedThemeIds, onToggleTheme, onDecide, onRemove,
+  themes, taggedThemeIds, onToggleTheme, actionItems, users, nameOf, onAddAction, onDecide, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -1245,6 +1220,10 @@ function AgendaItemCard({
   themes: CrossCuttingTheme[]
   taggedThemeIds: number[]
   onToggleTheme: (themeId: number) => void
+  actionItems: RiskActionItem[]
+  users: RiskUser[]
+  nameOf: (uid: number | null | undefined) => string
+  onAddAction: (a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null }) => void
   onDecide: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
 }) {
@@ -1394,6 +1373,28 @@ function AgendaItemCard({
               Record decision
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Action items for THIS risk — directives go to the risk's department */}
+      {(actionItems.length > 0 || isRC) && (
+        <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+            Action items{actionItems.length > 0 ? ` (${actionItems.length})` : ''}
+          </div>
+          {actionItems.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: isRC ? 10 : 0 }}>
+              {actionItems.map((a) => (
+                <div key={a.id} style={{ fontSize: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 600 }}>{ACTION_TYPE_LABEL[a.action_type]}:</span>
+                  <span>{a.description}</span>
+                  <span style={{ color: 'var(--muted)' }}>→ {nameOf(a.assigned_to)}{a.due_date ? ` · due ${a.due_date}` : ''}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>[{ACTION_STATUS_LABEL[a.status]}]</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {isRC && <AddActionForm users={users} busy={busy} onAdd={onAddAction} />}
         </div>
       )}
     </div>
