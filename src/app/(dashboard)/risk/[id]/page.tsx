@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
+import type { ActiveRole } from '@/lib/risk/activeRole'
 import type { RiskRole } from '@/lib/risk/types'
 import {
   Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
@@ -50,7 +51,7 @@ export default function RiskDetailPage() {
   const [users, setUsers]     = useState<Map<number, RiskUser>>(new Map())
   const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
-  const [userRoles, setUserRoles] = useState<{ role: RiskRole; dept_code: string | null }[]>([])
+  const [activeRole, setActiveRole] = useState<ActiveRole | null>(null)
   const [transitioning, setTransitioning] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [isAdminUser, setIsAdminUser] = useState(true)
@@ -72,6 +73,7 @@ export default function RiskDetailPage() {
       // Dept-scope guard — dept-restricted users can't see risks outside their dept
       const access = await getModuleAccess(supabase)
       setIsAdminUser(access.allModules)
+      setActiveRole(access.activeRole)
       if (access.deptScopes !== null && !access.deptScopes.includes((riskData as Risk).dept_code)) {
         setNotFound(true)
         return
@@ -79,11 +81,10 @@ export default function RiskDetailPage() {
 
       setRisk(riskData as Risk)
 
-      // Resolve the current Risk-module user (id + roles) for workflow gating
+      // Resolve the current Risk-module user id for audit-log attribution
       const ruRes = await resolveCurrentRiskUser(supabase)
       if (ruRes.ok) {
         setCurrentUserId(ruRes.user.riskUserId)
-        setUserRoles(ruRes.user.roles)
       }
 
       const [
@@ -242,14 +243,17 @@ export default function RiskDetailPage() {
   const latest = reviews[0] ?? null
 
   /* Role-based capability checks for the workflow buttons.
-   * The clinical workflow is STRICTLY role-based — ADMIN is a system-admin
-   * hat (user management) and does NOT act in the risk approval workflow.
-   * A user qualifies if they hold the listed role AND that role is either
-   * hospital-wide (dept_code null) or scoped to this risk's dept. */
+   * Driven by the user's single ACTIVE role (the one chosen in the account
+   * switcher), NOT the union of every role they hold — acting as RC and acting
+   * as RLO are deliberately separate hats. The clinical workflow is STRICTLY
+   * role-based: ADMIN is a system-admin hat (user management) and does NOT act
+   * in the risk approval workflow. The active role qualifies if it matches one
+   * of the listed roles AND is either hospital-wide (dept_code null) or scoped
+   * to this risk's dept. */
   function hasRole(roles: RiskRole[], deptCode?: string): boolean {
-    return userRoles.some((r) =>
-      roles.includes(r.role) &&
-      (r.dept_code === null || !deptCode || r.dept_code === deptCode))
+    if (!activeRole) return false
+    return roles.includes(activeRole.role) &&
+      (activeRole.dept_code === null || !deptCode || activeRole.dept_code === deptCode)
   }
   const riskDept = risk?.dept_code
   const canSubmit       = hasRole(['RLO'], riskDept)             // RLO of this dept

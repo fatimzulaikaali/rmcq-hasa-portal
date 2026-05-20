@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RiskRole } from './types'
+import { resolveActiveRole, isGlobalRole, type ActiveRole } from './activeRole'
 
 export interface CurrentRiskUser {
   authUserId: string
@@ -107,13 +108,18 @@ export function hasDeptAccess(u: CurrentRiskUser, deptCode: string): boolean {
 
 /* ---------- Module-level access ----------
  *
+ * Access is driven by the user's *active role* (see activeRole.ts), NOT the
+ * union of every role they hold. A person who is both hospital-wide RC and
+ * RLO of Medicine acts as exactly one of those at a time; switching the active
+ * role re-scopes the entire portal.
+ *
  * Rule for the portal:
  *   - Users with NO risk_users record at all: see every module (PSCS / IR / KPI
  *     legacy users — they predate the Risk module and are unrestricted).
- *   - Users WITH ADMIN / RC / DIRECTOR role: see every module + all dept data
- *     (RMCQ officers).
- *   - Users with only dept-scoped roles (RLO / HOD / ROC_MEMBER / RTC_MEMBER):
- *     restricted to the Risk module, scoped to their dept(s).
+ *   - Active role is global (ADMIN / RC / DIRECTOR): see every module + all
+ *     dept data (RMCQ officers).
+ *   - Active role is dept-scoped (RLO / HOD / ROC_MEMBER / RTC_MEMBER):
+ *     restricted to the Risk module, scoped to that role's dept.
  */
 
 export interface ModuleAccess {
@@ -127,6 +133,8 @@ export interface ModuleAccess {
   deptScopes: string[] | null
   /** The resolved risk user (null if no risk_users record exists). */
   riskUser: CurrentRiskUser | null
+  /** The single role the user is currently acting as (null if no risk record). */
+  activeRole: ActiveRole | null
 }
 
 export async function getModuleAccess(supabase: SupabaseClient): Promise<ModuleAccess> {
@@ -134,19 +142,25 @@ export async function getModuleAccess(supabase: SupabaseClient): Promise<ModuleA
   if (!res.ok) {
     // User isn't tracked in risk_users — treat as legacy (no Risk module access,
     // but unrestricted on the other modules they were already using).
-    return { allModules: true, deptScopes: null, riskUser: null }
+    return { allModules: true, deptScopes: null, riskUser: null, activeRole: null }
   }
   const u = res.user
-  if (isAdmin(u)) {
-    return { allModules: true, deptScopes: null, riskUser: u }
+  const active = resolveActiveRole(u.roles)
+
+  // No active role resolvable (no roles at all) — lock to Risk module, no depts.
+  if (!active) {
+    return { allModules: false, deptScopes: [], riskUser: u, activeRole: null }
   }
-  // Dept-restricted user
-  const scopes = u.roles
-    .map((r) => r.dept_code)
-    .filter((d): d is string => d !== null)
+
+  if (isGlobalRole(active.role)) {
+    return { allModules: true, deptScopes: null, riskUser: u, activeRole: active }
+  }
+
+  // Dept-scoped active role — restricted to that single role's dept.
   return {
     allModules: false,
-    deptScopes: Array.from(new Set(scopes)),
+    deptScopes: active.dept_code ? [active.dept_code] : [],
     riskUser: u,
+    activeRole: active,
   }
 }

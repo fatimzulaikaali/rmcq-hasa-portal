@@ -646,6 +646,18 @@ body{counter-reset:rcpage;}
 .account-chip-body{display:flex;flex-direction:column;line-height:1.2;min-width:0;}
 .account-chip-name{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .account-chip-role{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.account-chip-wrap{position:relative;}
+.account-chip-btn{cursor:pointer;font-family:inherit;text-align:left;transition:background .12s;}
+.account-chip-btn:hover{background:#E5E7EB;}
+.account-chip-caret{font-size:10px;color:var(--muted);flex-shrink:0;margin-left:2px;}
+.account-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:240px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14);padding:5px;}
+.account-menu-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:6px 10px 4px;}
+.account-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:none;background:none;border-radius:7px;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text);text-align:left;}
+.account-menu-item:hover{background:#F3F4F6;}
+.account-menu-item.is-active{background:#EEF2FF;font-weight:600;}
+.account-menu-check{width:14px;flex-shrink:0;color:#4338CA;font-weight:700;}
+.account-menu-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media (max-width:768px){.account-chip-wrap{display:none;}}
 @media (max-width:768px){.account-chip{display:none;}}
 
 /* Risk module — role pill on /risk/users */

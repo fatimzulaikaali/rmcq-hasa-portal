@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { Risk, RiskReview, RiskDept, RiskCategory, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
+import { resolveActiveRole } from '@/lib/risk/activeRole'
 import {
   computeRiskScore,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
@@ -83,9 +84,14 @@ export default function EditRiskPage() {
       const r = riskData as Risk
       setRisk(r)
 
-      // Editability check: which role can edit at this status, scoped to dept
-      const has = (roles: RiskRole[]) => res.user.roles.some((ur) =>
-        roles.includes(ur.role) && (ur.dept_code === null || ur.dept_code === r.dept_code))
+      // Editability check: gated on the user's single ACTIVE role (the hat they
+      // chose in the account switcher), not the union of all their roles. The
+      // active role must match the role allowed to edit at this status and be
+      // either hospital-wide or scoped to this risk's dept.
+      const active = resolveActiveRole(res.user.roles)
+      const has = (roles: RiskRole[]) => !!active &&
+        roles.includes(active.role) &&
+        (active.dept_code === null || active.dept_code === r.dept_code)
       let allowed = false
       if (r.status === 'DRAFT' && has(['RLO']))            { allowed = true; setActorRole('RLO') }
       else if (r.status === 'PENDING_HOD' && has(['HOD'])) { allowed = true; setActorRole('HOD') }

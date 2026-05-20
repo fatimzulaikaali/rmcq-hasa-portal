@@ -8,7 +8,8 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { RiskRole, RiskDept, RiskUser } from '@/lib/risk/types'
 import { RISK_ROLE_LABEL } from '@/lib/risk/scoring'
-import { resolveCurrentRiskUser, isAdmin } from '@/lib/risk/auth'
+import { resolveCurrentRiskUser } from '@/lib/risk/auth'
+import { resolveActiveRole } from '@/lib/risk/activeRole'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 
 interface UserRow {
@@ -58,7 +59,10 @@ export default function RiskUsersPage() {
         if (res.reason === 'not_logged_in') { router.push('/login'); return }
         throw new Error(res.message)
       }
-      if (!isAdmin(res.user)) { setAccessDenied(true); return }
+      // User management is an ADMIN-only screen, gated on the ACTIVE role.
+      // (Switching to a non-admin role hides it, per active-role-controls-all.)
+      const active = resolveActiveRole(res.user.roles)
+      if (!active || active.role !== 'ADMIN') { setAccessDenied(true); return }
       setCurrentUserId(res.user.riskUserId)
 
       const [{ data: usersData, error: uErr }, { data: rolesData, error: rErr }, { data: deptsData, error: dErr }] = await Promise.all([

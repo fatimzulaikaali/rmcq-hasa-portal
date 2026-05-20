@@ -40,6 +40,7 @@ export default function RiskListPage() {
   // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
   const [isAdminUser, setIsAdminUser]   = useState(true)
+  const [isAdminRole, setIsAdminRole]   = useState(false)
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -53,6 +54,7 @@ export default function RiskListPage() {
       const access = await getModuleAccess(supabase)
       setAllowedDepts(access.deptScopes)
       setIsAdminUser(access.allModules)
+      setIsAdminRole(access.activeRole?.role === 'ADMIN')
 
       const { data: deptsData, error: deptsErr } = await supabase
         .from('pscs_departments')
@@ -216,7 +218,7 @@ export default function RiskListPage() {
             <div className="rec-badge">
               {loading ? 'Loading…' : `${filtered.length.toLocaleString()} risk${filtered.length === 1 ? '' : 's'}`}
             </div>
-            {isAdminUser && (
+            {isAdminRole && (
               <Link href="/risk/users" className="signout-btn"
                 title="Risk module user management (admin)">
                 👥 Users
