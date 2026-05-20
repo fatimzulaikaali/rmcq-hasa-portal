@@ -11,7 +11,7 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import type {
   RiskMeeting, RiskMeetingAgenda, RiskActionItem, Risk, RiskReview, RiskUser,
-  CommitteeOutcome, MeetingStatus, ActionType,
+  CommitteeOutcome, MeetingStatus, ActionType, CrossCuttingTheme,
 } from '@/lib/risk/types'
 import {
   computeRiskScore, outcomeToStatus, allowedOutcomes,
@@ -52,6 +52,17 @@ export default function RiskMeetingDetailPage() {
   const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map())
   const [isRC, setIsRC] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+
+  // Cross-cutting themes (RTC tagging + ROC summary)
+  const [themes, setThemes] = useState<CrossCuttingTheme[]>([])
+  const [tagsByRisk, setTagsByRisk] = useState<Map<number, number[]>>(new Map())
+
+  // ROC ↔ RTC linkage + rolled-up RTC data (only loaded for ROC meetings)
+  const [linkedRtc, setLinkedRtc] = useState<RiskMeeting[]>([])
+  const [availableRtc, setAvailableRtc] = useState<RiskMeeting[]>([])
+  const [rtcAgenda, setRtcAgenda] = useState<RiskMeetingAgenda[]>([])
+  const [rtcRiskById, setRtcRiskById] = useState<Map<number, Risk>>(new Map())
+  const [pickRtcId, setPickRtcId] = useState<string>('')
 
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -133,10 +144,62 @@ export default function RiskMeetingDetailPage() {
         setLatestReviewByRisk(lr)
       }
 
-      // Dept names for the risks involved
+      // Cross-cutting themes (RTC tagging + ROC summary grouping)
+      const { data: themesData } = await supabase
+        .from('cross_cutting_themes').select('*').eq('is_active', true).order('id')
+      setThemes((themesData ?? []) as CrossCuttingTheme[])
+
+      // For an ROC meeting: linked RTC sittings + their rolled-up agenda/risks.
+      const rtcRiskList: Risk[] = []
+      if (m.meeting_type === 'ROC') {
+        const { data: linksData } = await supabase
+          .from('risk_roc_rtc_links').select('rtc_meeting_id').eq('roc_meeting_id', m.id)
+        const linkedIds = ((linksData ?? []) as { rtc_meeting_id: number }[]).map((l) => l.rtc_meeting_id)
+
+        const { data: allRtcData } = await supabase
+          .from('risk_meetings').select('*').eq('meeting_type', 'RTC').order('meeting_date', { ascending: false })
+        const allRtc = (allRtcData ?? []) as RiskMeeting[]
+        setLinkedRtc(allRtc.filter((mm) => linkedIds.includes(mm.id)))
+        setAvailableRtc(allRtc.filter((mm) => !linkedIds.includes(mm.id)))
+
+        let rtcAgItems: RiskMeetingAgenda[] = []
+        if (linkedIds.length) {
+          const { data: rtcAgData } = await supabase
+            .from('risk_meeting_agenda').select('*').in('meeting_id', linkedIds).order('seq')
+          rtcAgItems = (rtcAgData ?? []) as RiskMeetingAgenda[]
+        }
+        setRtcAgenda(rtcAgItems)
+
+        const rtcRiskIds = Array.from(new Set(rtcAgItems.map((a) => a.risk_id)))
+        if (rtcRiskIds.length) {
+          const { data: rtcRisks } = await supabase.from('risks').select('*').in('id', rtcRiskIds)
+          const rr = new Map<number, Risk>()
+          for (const r of (rtcRisks ?? []) as Risk[]) { rr.set(r.id, r); rtcRiskList.push(r) }
+          setRtcRiskById(rr)
+        } else {
+          setRtcRiskById(new Map())
+        }
+      }
+
+      // Theme tags — for current agenda risks + any ROC-summary RTC risks
+      const tagRiskIds = Array.from(new Set([...agendaRiskIds, ...rtcRiskList.map((r) => r.id)]))
+      if (tagRiskIds.length) {
+        const { data: tags } = await supabase
+          .from('risk_theme_tags').select('risk_id, theme_id').in('risk_id', tagRiskIds)
+        const tm = new Map<number, number[]>()
+        for (const t of (tags ?? []) as { risk_id: number; theme_id: number }[]) {
+          const arr = tm.get(t.risk_id) ?? []; arr.push(t.theme_id); tm.set(t.risk_id, arr)
+        }
+        setTagsByRisk(tm)
+      } else {
+        setTagsByRisk(new Map())
+      }
+
+      // Dept names for every risk involved (agenda + tabled + RTC rollup)
       const deptCodes = Array.from(new Set([
         ...Array.from(rMap.values()).map((r) => r.dept_code),
         ...((tabledRisks ?? []) as Risk[]).map((r) => r.dept_code),
+        ...rtcRiskList.map((r) => r.dept_code),
       ]))
       if (deptCodes.length) {
         const { data: depts } = await supabase.from('pscs_departments').select('code,name_en').in('code', deptCodes)
@@ -326,6 +389,53 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
+  /* Tag / untag a risk with a cross-cutting theme (RC, during the RTC). */
+  async function toggleTheme(riskId: number, themeId: number) {
+    if (!currentUserId) return
+    const current = tagsByRisk.get(riskId) ?? []
+    const tagged = current.includes(themeId)
+    setBusy(true); setActionError(null)
+    try {
+      if (tagged) {
+        const { error } = await supabase.from('risk_theme_tags')
+          .delete().eq('risk_id', riskId).eq('theme_id', themeId)
+        if (error) throw new Error(`Untag: ${error.code ?? ''} ${error.message}`)
+      } else {
+        const { error } = await supabase.from('risk_theme_tags')
+          .insert({ risk_id: riskId, theme_id: themeId, tagged_by: currentUserId })
+        if (error && error.code !== '23505') throw new Error(`Tag: ${error.code ?? ''} ${error.message}`)
+      }
+      await load()
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Link / unlink an RTC sitting to this ROC meeting. */
+  async function linkRtc() {
+    if (!meeting || !pickRtcId) return
+    setBusy(true); setActionError(null)
+    try {
+      const { error } = await supabase.from('risk_roc_rtc_links').insert({
+        roc_meeting_id: meeting.id, rtc_meeting_id: parseInt(pickRtcId, 10), created_by: currentUserId,
+      })
+      if (error && error.code !== '23505') throw new Error(`Link RTC: ${error.code ?? ''} ${error.message}`)
+      setPickRtcId('')
+      await load()
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  async function unlinkRtc(rtcMeetingId: number) {
+    if (!meeting) return
+    setBusy(true); setActionError(null)
+    try {
+      const { error } = await supabase.from('risk_roc_rtc_links')
+        .delete().eq('roc_meeting_id', meeting.id).eq('rtc_meeting_id', rtcMeetingId)
+      if (error) throw new Error(`Unlink: ${error.code ?? ''} ${error.message}`)
+      await load()
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   // Agenda grouped by department (sorted), and the same items flattened in that
   // order — the flat list drives the full-screen presentation stepper.
   const groups = useMemo(() => {
@@ -344,6 +454,31 @@ export default function RiskMeetingDetailPage() {
 
   const orderedFlat = useMemo(() => groups.flatMap((g) => g.items), [groups])
   const decidedCount = agenda.filter((a) => a.outcome).length
+
+  // ROC rollup of the linked RTC sittings: outcome counts, the escalated risks
+  // (which the ROC must act on), and cross-cutting issues grouped by theme.
+  const rocSummary = useMemo(() => {
+    if (!meeting || meeting.meeting_type !== 'ROC') return null
+    const counts: Partial<Record<CommitteeOutcome | 'UNDECIDED', number>> = {}
+    const escalated: { item: RiskMeetingAgenda; risk: Risk }[] = []
+    for (const a of rtcAgenda) {
+      const key = (a.outcome ?? 'UNDECIDED') as CommitteeOutcome | 'UNDECIDED'
+      counts[key] = (counts[key] ?? 0) + 1
+      if (a.outcome === 'ESCALATE_ROC') {
+        const r = rtcRiskById.get(a.risk_id)
+        if (r) escalated.push({ item: a, risk: r })
+      }
+    }
+    const rtcRiskIds = Array.from(new Set(rtcAgenda.map((a) => a.risk_id)))
+    const byTheme = themes.map((t) => ({
+      theme: t,
+      risks: rtcRiskIds
+        .filter((rid) => (tagsByRisk.get(rid) ?? []).includes(t.id))
+        .map((rid) => rtcRiskById.get(rid))
+        .filter((r): r is Risk => !!r),
+    })).filter((g) => g.risks.length > 0)
+    return { counts, escalated, byTheme, total: rtcAgenda.length }
+  }, [meeting, rtcAgenda, rtcRiskById, themes, tagsByRisk])
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -438,6 +573,119 @@ export default function RiskMeetingDetailPage() {
                 </div>
               </div>
 
+              {/* ROC: RTC roll-up + cross-cutting summary */}
+              {meeting.meeting_type === 'ROC' && rocSummary && (
+                <>
+                  <div className="panel">
+                    <div className="pf"><div>
+                      <div className="pt">RTC Summary</div>
+                      <div className="psub">Roll-up of the RTC sitting(s) this ROC reviews — agenda item 1</div>
+                    </div></div>
+
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reviewing these RTC meetings:</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        {linkedRtc.length === 0 && (
+                          <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>None linked yet.</span>
+                        )}
+                        {linkedRtc.map((rt) => (
+                          <span key={rt.id} className="theme-pill active" style={{ gap: 6 }}>
+                            <Link href={`/risk/meetings/${rt.id}`} style={{ color: '#fff' }}>{rt.title} · {rt.meeting_date}</Link>
+                            {isRC && <span onClick={() => unlinkRtc(rt.id)} style={{ cursor: 'pointer', fontWeight: 700 }}>  ×</span>}
+                          </span>
+                        ))}
+                        {isRC && (
+                          <>
+                            <select value={pickRtcId} onChange={(e) => setPickRtcId(e.target.value)}
+                              style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
+                              <option value="">{availableRtc.length ? '— link an RTC meeting —' : 'No other RTC meetings'}</option>
+                              {availableRtc.map((rt) => <option key={rt.id} value={rt.id}>{rt.title} · {rt.meeting_date}</option>)}
+                            </select>
+                            <button type="button" className="signout-btn"
+                              style={{ fontSize: 12, padding: '6px 12px', background: pickRtcId ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: pickRtcId ? 'var(--blue)' : '#9CA3AF' }}
+                              disabled={!pickRtcId || busy} onClick={linkRtc}>+ Link</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {linkedRtc.length > 0 && (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                          <CountPill label="Total presented" n={rocSummary.total} strong />
+                          {(['ENDORSE_ACTIVE', 'ESCALATE_ROC', 'SEND_BACK_DEPT', 'RECOMMEND_CLOSE'] as CommitteeOutcome[]).map((o) => (
+                            <CountPill key={o} label={COMMITTEE_OUTCOME_LABEL[o]} n={rocSummary.counts[o] ?? 0} />
+                          ))}
+                          {rocSummary.counts.UNDECIDED ? <CountPill label="Not yet decided" n={rocSummary.counts.UNDECIDED} /> : null}
+                        </div>
+
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                          Escalated to ROC ({rocSummary.escalated.length}) — for discussion
+                        </div>
+                        {rocSummary.escalated.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                            Nothing was escalated to ROC from the linked RTC sitting(s).
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="risk-table">
+                              <thead><tr><th>Risk</th><th>Department</th><th style={{ textAlign: 'center' }}>Level</th><th>RTC discussion notes</th></tr></thead>
+                              <tbody>
+                                {rocSummary.escalated.map(({ item, risk }) => {
+                                  const lr = latestReviewByRisk.get(risk.id)
+                                  return (
+                                    <tr key={item.id}>
+                                      <td><Link href={`/risk/${risk.id}`} style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--blue)' }}>{risk.risk_id}</Link></td>
+                                      <td>{deptLabel(risk.dept_code)}</td>
+                                      <td style={{ textAlign: 'center' }}>
+                                        {lr ? (
+                                          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RISK_LEVEL_COLOR[lr.risk_level], background: RISK_LEVEL_BG[lr.risk_level] }}>
+                                            {RISK_LEVEL_LABEL[lr.risk_level]} · {(Math.round(lr.risk_score * 10) / 10).toFixed(1)}
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                      <td style={{ fontSize: 12 }}>{item.discussion_notes || '—'}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="panel">
+                    <div className="pf"><div>
+                      <div className="pt">Cross-cutting Issues (Isu Melintang)</div>
+                      <div className="psub">Themes spanning multiple risks presented at the RTC — to inform the ROC</div>
+                    </div></div>
+                    {rocSummary.byTheme.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                        No cross-cutting themes tagged on the linked RTC risks yet. Tag risks by theme on the RTC meeting&apos;s agenda.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {rocSummary.byTheme.map(({ theme, risks }) => (
+                          <div key={theme.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>
+                              {theme.name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {risks.length} risk{risks.length === 1 ? '' : 's'}</span>
+                            </div>
+                            {theme.description && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{theme.description}</div>}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                              {risks.map((r) => (
+                                <Link key={r.id} href={`/risk/${r.id}`} className="theme-pill">{r.risk_id} · {deptLabel(r.dept_code)}</Link>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               {/* Agenda */}
               <div className="panel">
                 <div className="pf" style={{ alignItems: 'flex-start' }}>
@@ -504,6 +752,9 @@ export default function RiskMeetingDetailPage() {
                               isRC={isRC}
                               busy={busy}
                               decidedByName={nameOf(item.decided_by)}
+                              themes={themes}
+                              taggedThemeIds={tagsByRisk.get(risk.id) ?? []}
+                              onToggleTheme={(themeId) => toggleTheme(risk.id, themeId)}
                               onDecide={(opts) => recordDecision(item, risk, opts)}
                               onRemove={() => removeAgendaItem(item)}
                             />
@@ -695,6 +946,18 @@ function Cell({ k, v }: { k: string; v: number }) {
   )
 }
 
+function CountPill({ label, n, strong }: { label: string; n: number; strong?: boolean }) {
+  return (
+    <div style={{
+      border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px',
+      background: strong ? '#EEF2FF' : '#fff', minWidth: 80,
+    }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: strong ? '#3730A3' : 'var(--text)' }}>{n}</div>
+      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{label}</div>
+    </div>
+  )
+}
+
 /* ---------- Agenda item card ---------- */
 
 interface ScoreInputs {
@@ -707,7 +970,8 @@ interface ScoreInputs {
 }
 
 function AgendaItemCard({
-  item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName, onDecide, onRemove,
+  item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
+  themes, taggedThemeIds, onToggleTheme, onDecide, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -717,9 +981,13 @@ function AgendaItemCard({
   isRC: boolean
   busy: boolean
   decidedByName: string
+  themes: CrossCuttingTheme[]
+  taggedThemeIds: number[]
+  onToggleTheme: (themeId: number) => void
   onDecide: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
 }) {
+  const [themesOpen, setThemesOpen] = useState(false)
   const [outcome, setOutcome] = useState<CommitteeOutcome | ''>('')
   const [notes, setNotes] = useState('')
   const [rescoreOpen, setRescoreOpen] = useState(false)
@@ -766,6 +1034,37 @@ function AgendaItemCard({
           }}>{RISK_STATUS_LABEL[risk.status]}</span>
         </div>
       </div>
+
+      {/* Cross-cutting themes — RC tags these during the RTC; ROC sees the summary */}
+      {(taggedThemeIds.length > 0 || (isRC && meetingType === 'RTC')) && (
+        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+          {taggedThemeIds.length > 0 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>Cross-cutting:</span>}
+          {taggedThemeIds.map((tid) => {
+            const t = themes.find((x) => x.id === tid)
+            return <span key={tid} className="theme-pill active">{t?.name ?? `#${tid}`}</span>
+          })}
+          {isRC && meetingType === 'RTC' && (
+            <div style={{ position: 'relative' }}>
+              <button type="button" className="role-pill role-pill-add" onClick={() => setThemesOpen((v) => !v)}>
+                {taggedThemeIds.length ? 'edit themes' : '+ cross-cutting theme'}
+              </button>
+              {themesOpen && (
+                <div className="theme-menu">
+                  {themes.map((t) => {
+                    const on = taggedThemeIds.includes(t.id)
+                    return (
+                      <button key={t.id} type="button" className={`theme-menu-item ${on ? 'on' : ''}`}
+                        disabled={busy} onClick={() => onToggleTheme(t.id)}>
+                        <span className="theme-menu-check">{on ? '✓' : ''}</span>{t.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {decided ? (
         <div className="ac" style={{ marginTop: 10, background: '#F0FDF4', border: '1px solid #BBF7D0' }}>

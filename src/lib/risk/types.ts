@@ -164,6 +164,14 @@ export interface RiskMeetingAgenda {
   created_at: string
 }
 
+export interface RiskRocRtcLink {
+  id: number
+  roc_meeting_id: number
+  rtc_meeting_id: number
+  created_by: number | null
+  created_at: string
+}
+
 export interface RiskActionItem {
   id: number
   meeting_id: number | null
