@@ -17,7 +17,15 @@ import {
   COMMITTEE_OUTCOME_LABEL, MEETING_TYPE_LABEL, MEETING_STATUS_LABEL,
   ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
+  RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
+
+interface AgendaEntry {
+  item: RiskMeetingAgenda
+  risk: Risk
+  latest: RiskReview | null
+  deptLabel: string
+}
 
 const MEETING_STATUSES: MeetingStatus[] = ['PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']
 
@@ -51,6 +59,8 @@ export default function RiskMeetingDetailPage() {
   const [pickRiskId, setPickRiskId] = useState<string>('')
   // Minutes editing
   const [minutesText, setMinutesText] = useState('')
+  // Presentation mode — index into the department-ordered agenda, or null
+  const [presentIndex, setPresentIndex] = useState<number | null>(null)
 
   useEffect(() => { void load() }, [meetingId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -188,6 +198,25 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
+  async function addAllTabled() {
+    if (!meeting || available.length === 0) return
+    setBusy(true); setActionError(null)
+    try {
+      // Insert every currently-tabled risk in department order so the agenda
+      // (and the presentation) reads dept-by-dept.
+      const ordered = [...available].sort((a, b) =>
+        (deptNames.get(a.dept_code) ?? a.dept_code).localeCompare(deptNames.get(b.dept_code) ?? b.dept_code) ||
+        a.risk_id.localeCompare(b.risk_id))
+      const rows = ordered.map((r, i) => ({
+        meeting_id: meeting.id, risk_id: r.id, seq: agenda.length + 1 + i,
+      }))
+      const { error } = await supabase.from('risk_meeting_agenda').insert(rows)
+      if (error) throw new Error(`Add all: ${error.code ?? ''} ${error.message}`)
+      await load()
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   async function removeAgendaItem(item: RiskMeetingAgenda) {
     if (item.outcome) { alert('This item already has a recorded decision and cannot be removed.'); return }
     if (!window.confirm('Remove this risk from the agenda?')) return
@@ -296,8 +325,36 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
+  // Agenda grouped by department (sorted), and the same items flattened in that
+  // order — the flat list drives the full-screen presentation stepper.
+  const groups = useMemo(() => {
+    const byDept = new Map<string, { deptCode: string; deptLabel: string; items: AgendaEntry[] }>()
+    for (const item of agenda) {
+      const risk = risksById.get(item.risk_id)
+      if (!risk) continue
+      const label = deptNames.get(risk.dept_code) ?? risk.dept_code
+      if (!byDept.has(risk.dept_code)) byDept.set(risk.dept_code, { deptCode: risk.dept_code, deptLabel: label, items: [] })
+      byDept.get(risk.dept_code)!.items.push({ item, risk, latest: latestReviewByRisk.get(item.risk_id) ?? null, deptLabel: label })
+    }
+    return Array.from(byDept.values())
+      .map((g) => ({ ...g, items: g.items.sort((a, b) => a.risk.risk_id.localeCompare(b.risk.risk_id)) }))
+      .sort((a, b) => a.deptLabel.localeCompare(b.deptLabel))
+  }, [agenda, risksById, latestReviewByRisk, deptNames])
+
+  const orderedFlat = useMemo(() => groups.flatMap((g) => g.items), [groups])
+  const decidedCount = agenda.filter((a) => a.outcome).length
+
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      {presentIndex !== null && orderedFlat.length > 0 && meeting && (
+        <PresentOverlay
+          entries={orderedFlat}
+          index={Math.min(presentIndex, orderedFlat.length - 1)}
+          meetingTitle={`${meeting.meeting_type} · ${meeting.title}`}
+          onIndex={setPresentIndex}
+          onClose={() => setPresentIndex(null)}
+        />
+      )}
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
       <aside className="sidebar">
         <div className="sb-head">
@@ -396,17 +453,26 @@ export default function RiskMeetingDetailPage() {
 
               {/* Agenda */}
               <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">Agenda — risks for discussion</div>
-                  <div className="psub">
-                    {agenda.length} item{agenda.length === 1 ? '' : 's'} · the committee records one decision per risk
+                <div className="pf" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="pt">Agenda — risks for discussion</div>
+                    <div className="psub">
+                      {agenda.length} item{agenda.length === 1 ? '' : 's'} across {groups.length} department{groups.length === 1 ? '' : 's'} · {decidedCount} decided
+                    </div>
                   </div>
-                </div></div>
+                  {agenda.length > 0 && (
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 12, padding: '6px 14px', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                      onClick={() => setPresentIndex(0)}>
+                      ▶ Present
+                    </button>
+                  )}
+                </div>
 
                 {isRC && (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
                     <select value={pickRiskId} onChange={(e) => setPickRiskId(e.target.value)}
-                      style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 280 }}>
+                      style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 260 }}>
                       <option value="">
                         {available.length ? `— add a risk tabled for ${meeting.meeting_type} —` : `No risks tabled for ${meeting.meeting_type}`}
                       </option>
@@ -417,34 +483,47 @@ export default function RiskMeetingDetailPage() {
                     <button type="button" className="signout-btn"
                       style={{ fontSize: 12, padding: '6px 12px', background: pickRiskId ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: pickRiskId ? 'var(--blue)' : '#9CA3AF' }}
                       disabled={!pickRiskId || busy} onClick={addToAgenda}>
-                      + Add to agenda
+                      + Add
                     </button>
+                    {available.length > 0 && (
+                      <button type="button" className="signout-btn"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        disabled={busy} onClick={addAllTabled}>
+                        + Add all tabled ({available.length})
+                      </button>
+                    )}
                   </div>
                 )}
 
                 {agenda.length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>No risks on the agenda yet.</div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {agenda.map((item) => {
-                      const risk = risksById.get(item.risk_id)
-                      if (!risk) return null
-                      return (
-                        <AgendaItemCard
-                          key={item.id}
-                          item={item}
-                          risk={risk}
-                          latest={latestReviewByRisk.get(item.risk_id) ?? null}
-                          deptLabel={deptLabel(risk.dept_code)}
-                          meetingType={meeting.meeting_type}
-                          isRC={isRC}
-                          busy={busy}
-                          decidedByName={nameOf(item.decided_by)}
-                          onDecide={(opts) => recordDecision(item, risk, opts)}
-                          onRemove={() => removeAgendaItem(item)}
-                        />
-                      )
-                    })}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {groups.map((g) => (
+                      <div key={g.deptCode}>
+                        <div className="agenda-dept-head">
+                          <span>{g.deptLabel}</span>
+                          <span className="agenda-dept-count">{g.items.length} risk{g.items.length === 1 ? '' : 's'}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {g.items.map(({ item, risk, latest }) => (
+                            <AgendaItemCard
+                              key={item.id}
+                              item={item}
+                              risk={risk}
+                              latest={latest}
+                              deptLabel={g.deptLabel}
+                              meetingType={meeting.meeting_type}
+                              isRC={isRC}
+                              busy={busy}
+                              decidedByName={nameOf(item.decided_by)}
+                              onDecide={(opts) => recordDecision(item, risk, opts)}
+                              onRemove={() => removeAgendaItem(item)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -509,6 +588,122 @@ export default function RiskMeetingDetailPage() {
           )}
         </main>
       </div>
+    </div>
+  )
+}
+
+/* ---------- Presentation overlay ---------- */
+
+function PresentOverlay({ entries, index, meetingTitle, onIndex, onClose }: {
+  entries: AgendaEntry[]
+  index: number
+  meetingTitle: string
+  onIndex: (i: number) => void
+  onClose: () => void
+}) {
+  const n = entries.length
+  const entry = entries[index]
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowRight' || e.key === ' ') onIndex(Math.min(index + 1, n - 1))
+      else if (e.key === 'ArrowLeft') onIndex(Math.max(index - 1, 0))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, n, onIndex, onClose])
+
+  if (!entry) return null
+  const { risk, latest } = entry
+  const outcome = entry.item.outcome
+
+  return (
+    <div className="present-overlay">
+      <div className="present-bar">
+        <div className="present-bar-title">{meetingTitle}</div>
+        <div className="present-bar-progress">Risk {index + 1} of {n}</div>
+        <button type="button" className="present-close" onClick={onClose}>✕ Exit</button>
+      </div>
+
+      <div className="present-stage">
+        <div className="present-slide">
+          <div className="present-dept">{entry.deptLabel}</div>
+          <div className="present-riskid">{risk.risk_id}</div>
+          <div className="present-meta">
+            <span><b>{risk.category}</b> — {RISK_CATEGORY_LABEL[risk.category]}</span>
+            <span>{RISK_SCOPE_LABEL[risk.scope]}</span>
+            <span className="present-status" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
+              {RISK_STATUS_LABEL[risk.status]}
+            </span>
+            {outcome && <span className="present-status" style={{ color: '#166534', background: '#DCFCE7' }}>
+              Decision: {COMMITTEE_OUTCOME_LABEL[outcome]}
+            </span>}
+          </div>
+
+          <div className="present-grid">
+            <div className="present-col">
+              <PresentBlock label="Risk description">{risk.description}</PresentBlock>
+              <PresentBlock label="Cause">{risk.cause_description}</PresentBlock>
+              <PresentBlock label="Impact">{risk.impact_description}</PresentBlock>
+            </div>
+            <div className="present-col">
+              <PresentBlock label="Existing controls">{risk.existing_controls || '—'}</PresentBlock>
+              <PresentBlock label="Additional controls proposed">{risk.additional_controls || '—'}</PresentBlock>
+              <PresentBlock label="Action owner / period">
+                {(risk.action_owner || '—')}{risk.implementation_period ? ` · ${risk.implementation_period}` : ''}
+              </PresentBlock>
+
+              {latest ? (
+                <div className="present-score">
+                  <div className="present-score-cells">
+                    <Cell k="L" v={latest.likelihood} />
+                    <Cell k="Man" v={latest.impact_manusia} />
+                    <Cell k="Rep" v={latest.impact_reputasi} />
+                    <Cell k="Kew" v={latest.impact_kewangan} />
+                    <Cell k="Ops" v={latest.impact_operasi} />
+                    <Cell k="Obj" v={latest.impact_objektif} />
+                  </div>
+                  <div className="present-score-final"
+                    style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level] }}>
+                    {RISK_LEVEL_LABEL[latest.risk_level]} · {(Math.round(latest.risk_score * 10) / 10).toFixed(1)}
+                  </div>
+                </div>
+              ) : <PresentBlock label="Scoring">Not yet scored</PresentBlock>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="present-foot">
+        <button type="button" className="present-nav" disabled={index === 0} onClick={() => onIndex(index - 1)}>◀ Previous</button>
+        <div className="present-dots">
+          {entries.map((e, i) => (
+            <span key={e.item.id}
+              className={`present-dot ${i === index ? 'on' : ''} ${e.item.outcome ? 'done' : ''}`}
+              onClick={() => onIndex(i)} />
+          ))}
+        </div>
+        <button type="button" className="present-nav" disabled={index === n - 1} onClick={() => onIndex(index + 1)}>Next ▶</button>
+      </div>
+    </div>
+  )
+}
+
+function PresentBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="present-block">
+      <div className="present-block-label">{label}</div>
+      <div className="present-block-value">{children}</div>
+    </div>
+  )
+}
+
+function Cell({ k, v }: { k: string; v: number }) {
+  return (
+    <div className="present-cell">
+      <div className="present-cell-k">{k}</div>
+      <div className="present-cell-v">{v}</div>
     </div>
   )
 }
