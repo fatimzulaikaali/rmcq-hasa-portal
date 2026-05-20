@@ -11,8 +11,9 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
-  RiskStatus, RiskLevel, RiskCategory,
+  RiskStatus, RiskLevel, RiskCategory, RiskRole,
 } from '@/lib/risk/types'
+import type { ActiveRole } from '@/lib/risk/activeRole'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
   RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
@@ -22,6 +23,26 @@ type StatusFilter   = 'all' | RiskStatus
 type LevelFilter    = 'all' | RiskLevel
 type CategoryFilter = 'all' | RiskCategory
 type DeptFilter     = 'all' | string
+
+/* Which statuses are "awaiting action" for each active role, and the prompt to show. */
+const ATTENTION_BY_ROLE: Record<RiskRole, RiskStatus[]> = {
+  RLO:        ['DRAFT', 'RETURNED'],
+  HOD:        ['PENDING_HOD'],
+  RC:         ['PENDING_RC', 'TABLED_RTC', 'TABLED_ROC', 'PENDING_CLOSURE'],
+  ROC_MEMBER: [],
+  RTC_MEMBER: [],
+  DIRECTOR:   [],
+  ADMIN:      [],
+}
+const ACTION_HINT: Partial<Record<RiskStatus, string>> = {
+  DRAFT:           'Finish & submit to HOD',
+  RETURNED:        'Revise & resubmit',
+  PENDING_HOD:     'Awaiting your endorsement',
+  PENDING_RC:      'Awaiting your validation',
+  TABLED_RTC:      'Table for an RTC meeting',
+  TABLED_ROC:      'Table for an ROC meeting',
+  PENDING_CLOSURE: 'Confirm closure',
+}
 
 export default function RiskListPage() {
   const router = useRouter()
@@ -42,6 +63,7 @@ export default function RiskListPage() {
   // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
   const [isAdminRole, setIsAdminRole]   = useState(false)
+  const [activeRole,  setActiveRole]    = useState<ActiveRole | null>(null)
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -55,6 +77,7 @@ export default function RiskListPage() {
       const access = await getModuleAccess(supabase)
       setAllowedDepts(access.deptScopes)
       setIsAdminRole(access.activeRole?.role === 'ADMIN')
+      setActiveRole(access.activeRole)
 
       const { data: deptsData, error: deptsErr } = await supabase
         .from('pscs_departments')
@@ -104,6 +127,14 @@ export default function RiskListPage() {
   const scopedRows = useMemo(() =>
     allowedDepts === null ? rows : rows.filter((r) => allowedDepts.includes(r.risk.dept_code)),
     [rows, allowedDepts])
+
+  // Risks awaiting the current active role's action (dept-scoped via scopedRows).
+  const attentionRows = useMemo(() => {
+    if (!activeRole) return []
+    const statuses = ATTENTION_BY_ROLE[activeRole.role] ?? []
+    if (statuses.length === 0) return []
+    return scopedRows.filter((r) => statuses.includes(r.risk.status))
+  }, [scopedRows, activeRole])
 
   // Archive = closed + out-of-scope (terminal). Returned-for-amendment stays
   // ACTIVE — it's a to-do for the RLO. (REJECTED is legacy; treat as archived.)
@@ -200,6 +231,32 @@ export default function RiskListPage() {
 
           {!loading && !loadError && (
             <>
+              {attentionRows.length > 0 && (
+                <div className="attention-panel">
+                  <div className="attention-head">
+                    <span className="attention-bolt">⚡</span>
+                    Needs your attention
+                    <span className="attention-count">{attentionRows.length}</span>
+                  </div>
+                  <div className="attention-list">
+                    {attentionRows.map(({ risk, dept }) => {
+                      const sb = RISK_STATUS_BADGE[risk.status]
+                      return (
+                        <Link key={risk.id} href={`/risk/${risk.id}`} className="attention-item">
+                          <span className="attention-rid">{risk.risk_id}</span>
+                          <span className="attention-dept">{dept?.name_en ?? risk.dept_code}</span>
+                          <span className="attention-status" style={{ color: sb.fg, background: sb.bg }}>
+                            {RISK_STATUS_LABEL[risk.status]}
+                          </span>
+                          <span className="attention-hint">{ACTION_HINT[risk.status] ?? 'Action needed'}</span>
+                          <span className="attention-go">→</span>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
                 <div className="tile"><div className="tl">Total risks</div><div className="tv" style={{ color: 'var(--blue)' }}>{counts.total}</div></div>
                 <div className="tile"><div className="tl">Open</div><div className="tv" style={{ color: '#0EA5E9' }}>{counts.open}</div></div>
