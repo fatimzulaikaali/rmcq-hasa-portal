@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { Risk, RiskReview, RiskDept, RiskCategory, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
 import {
@@ -235,6 +236,7 @@ export default function EditRiskPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RiskAccountChip />
             <Link href={risk ? `/risk/${risk.id}` : '/risk'} className="signout-btn">← Back to risk</Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>

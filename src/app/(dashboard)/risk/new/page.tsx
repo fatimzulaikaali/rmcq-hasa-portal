@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
+import { RiskAccountChip } from '@/components/RiskAccountChip'
 import {
   RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
@@ -264,6 +265,7 @@ export default function NewRiskPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RiskAccountChip />
             <Link href="/risk" className="signout-btn">← Back to register</Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>

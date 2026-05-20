@@ -7,6 +7,7 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
+import { RiskAccountChip } from '@/components/RiskAccountChip'
 import type { RiskRole } from '@/lib/risk/types'
 import {
   Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
@@ -293,6 +294,7 @@ export default function RiskDetailPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RiskAccountChip />
             {risk && (
               <Link href={`/risk/${risk.id}/review`} className="signout-btn"
                 style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>

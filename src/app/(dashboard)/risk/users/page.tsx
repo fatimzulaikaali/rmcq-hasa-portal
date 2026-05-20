@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { RiskRole, RiskDept, RiskUser } from '@/lib/risk/types'
 import { RISK_ROLE_LABEL } from '@/lib/risk/scoring'
 import { resolveCurrentRiskUser, isAdmin } from '@/lib/risk/auth'
+import { RiskAccountChip } from '@/components/RiskAccountChip'
 
 interface UserRow {
   user: RiskUser
@@ -234,6 +235,7 @@ export default function RiskUsersPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RiskAccountChip />
             <Link href="/risk" className="signout-btn">← Back to register</Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>

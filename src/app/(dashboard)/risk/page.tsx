@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
+import { RiskAccountChip } from '@/components/RiskAccountChip'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
   RiskStatus, RiskLevel, RiskCategory,
@@ -211,6 +212,7 @@ export default function RiskListPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RiskAccountChip />
             <div className="rec-badge">
               {loading ? 'Loading…' : `${filtered.length.toLocaleString()} risk${filtered.length === 1 ? '' : 's'}`}
             </div>
