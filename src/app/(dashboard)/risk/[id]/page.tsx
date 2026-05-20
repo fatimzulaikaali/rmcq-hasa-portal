@@ -414,9 +414,7 @@ export default function RiskDetailPage() {
                     <div className="ai">↩</div>
                     <div>
                       <div className="at">Returned for amendment — please address before resubmitting</div>
-                      <div className="as">
-                        {risk.rejection_reason && <><b>{risk.rejection_reason}</b> — </>}{risk.rejection_comment}
-                      </div>
+                      <div className="as">{risk.rejection_comment}</div>
                     </div>
                   </div>
                 )}
@@ -533,7 +531,7 @@ export default function RiskDetailPage() {
                     <>
                       {risk.rejection_comment && (
                         <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
-                          <b>Returned for amendment{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
+                          <b>Returned for amendment:</b><br />
                           {risk.rejection_comment}
                         </div>
                       )}
@@ -551,7 +549,7 @@ export default function RiskDetailPage() {
                     <>
                       {risk.rejection_comment && (
                         <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
-                          <b>Out of scope{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
+                          <b>Out of scope:</b><br />
                           {risk.rejection_comment}
                         </div>
                       )}
