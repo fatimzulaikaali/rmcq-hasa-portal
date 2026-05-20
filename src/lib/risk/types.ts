@@ -3,7 +3,7 @@
 export type RiskRole       = 'RLO' | 'HOD' | 'RC' | 'ROC_MEMBER' | 'RTC_MEMBER' | 'DIRECTOR' | 'ADMIN'
 export type RiskCategory   = 'OPS' | 'KEW' | 'REP' | 'PER' | 'STR' | 'PRJ'
 export type RiskScope      = 'INSTITUSI' | 'UNIT'
-export type RiskStatus     = 'DRAFT' | 'PENDING_HOD' | 'PENDING_RC' | 'TABLED_RTC' | 'TABLED_ROC' | 'ACTIVE' | 'MONITORING' | 'REJECTED' | 'PENDING_CLOSURE' | 'CLOSED'
+export type RiskStatus     = 'DRAFT' | 'PENDING_HOD' | 'PENDING_RC' | 'TABLED_RTC' | 'TABLED_ROC' | 'ACTIVE' | 'MONITORING' | 'REJECTED' | 'RETURNED' | 'OUT_OF_SCOPE' | 'PENDING_CLOSURE' | 'CLOSED'
 export type RiskLevel      = 'RENDAH' | 'SEDERHANA' | 'TINGGI' | 'EKSTREM'
 export type TreatmentStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'VERIFIED'
 export type MeetingType    = 'RTC' | 'ROC'
@@ -18,7 +18,7 @@ export type CommitteeOutcome =
   | 'ENDORSE_ACTIVE'   // accept -> ACTIVE
   | 'ESCALATE_ROC'     // RTC -> TABLED_ROC
   | 'SEND_BACK_RTC'    // ROC -> TABLED_RTC
-  | 'SEND_BACK_DEPT'   // bounce to dept (RLO/HOD) -> REJECTED, revise in place
+  | 'SEND_BACK_DEPT'   // bounce to dept (RLO/HOD) -> RETURNED (for amendment), revise in place
   | 'RECOMMEND_CLOSE'  // -> PENDING_CLOSURE
 
 export interface RiskUser {

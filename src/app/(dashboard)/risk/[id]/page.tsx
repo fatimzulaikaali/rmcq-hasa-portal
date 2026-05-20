@@ -181,18 +181,37 @@ export default function RiskDetailPage() {
     }
   }
 
-  async function handleReject() {
-    const text = window.prompt('Reason for rejecting this risk (this will be visible to the RLO):', '')?.trim()
+  /* HOD / committee returns the risk to the RLO to amend — NOT terminal.
+   * Stays in the Active register; the RLO revises and resubmits. */
+  async function handleReturn(role: 'HOD' | 'RC') {
+    const text = window.prompt('What needs amending? (this note will be shown to the RLO):', '')?.trim()
     if (!text) return
     await transition({
-      newStatus: 'REJECTED',
-      action: 'REJECT',
-      role: 'RC',
-      comment: `Rejected: ${text}`,
+      newStatus: 'RETURNED',
+      action: 'RETURN_FOR_AMENDMENT',
+      role,
+      comment: `Returned for amendment: ${text}`,
       extras: {
-        // rejection_reason is varchar(50), so we save a truncated version there
-        // and the full text in rejection_comment. The displayed badge uses the
-        // comment when it exists.
+        // rejection_* columns are reused as the amendment note (reason is varchar(50)).
+        rejection_reason: text.slice(0, 50),
+        rejection_comment: text,
+        rejected_by: currentUserId ?? undefined,
+        rejected_at: new Date().toISOString(),
+      },
+    })
+  }
+
+  /* RC declines the risk — it doesn't meet the criteria for the register.
+   * Terminal: lands in the Archive. The RC can reopen it later. */
+  async function handleOutOfScope() {
+    const text = window.prompt('Why is this out of scope for the risk register? (this note will be recorded):', '')?.trim()
+    if (!text) return
+    await transition({
+      newStatus: 'OUT_OF_SCOPE',
+      action: 'MARK_OUT_OF_SCOPE',
+      role: 'RC',
+      comment: `Out of scope: ${text}`,
+      extras: {
         rejection_reason: text.slice(0, 50),
         rejection_comment: text,
         rejected_by: currentUserId ?? undefined,
@@ -203,13 +222,13 @@ export default function RiskDetailPage() {
 
   async function handleReviseResubmit() {
     if (!risk) return
-    if (!window.confirm('Reopen this rejected risk for correction? It will go back to DRAFT so you can amend it and resubmit to the HOD. The HOD\'s comment stays visible to guide you.')) return
+    if (!window.confirm('Reopen this risk for amendment? It goes back to DRAFT so you can revise it and resubmit to the HOD. The reviewer\'s note stays visible to guide you.')) return
     await transition({
       newStatus: 'DRAFT',
       action: 'REVISE_REOPEN',
       role: 'RLO',
-      comment: 'Reopened for revision after HOD rejection',
-      // keep rejection_* fields so the DRAFT shows the HOD feedback notice
+      comment: 'Reopened for amendment',
+      // keep rejection_* fields so the DRAFT shows the reviewer's note
     })
   }
 
@@ -375,12 +394,12 @@ export default function RiskDetailPage() {
                     <div><div className="at">Workflow error</div><div className="as">{transitionError}</div></div>
                   </div>
                 )}
-                {/* HOD feedback after a prior rejection — shown while back in DRAFT */}
+                {/* Reviewer's amendment note — shown while back in DRAFT */}
                 {risk.status === 'DRAFT' && risk.rejection_comment && (
                   <div className="ac amber" style={{ marginBottom: 10 }}>
                     <div className="ai">↩</div>
                     <div>
-                      <div className="at">Previously rejected by HOD — please address before resubmitting</div>
+                      <div className="at">Returned for amendment — please address before resubmitting</div>
                       <div className="as">
                         {risk.rejection_reason && <><b>{risk.rejection_reason}</b> — </>}{risk.rejection_comment}
                       </div>
@@ -408,8 +427,8 @@ export default function RiskDetailPage() {
                           transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
                           ✓ Endorse (HOD)
                         </WfBtn>
-                        <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        <WfHint>Amend the risk if it needs tweaking, then Endorse → forwards to RC. Reject sends it back to the RLO with your comment.</WfHint>
+                        <WfBtn danger disabled={transitioning} onClick={() => handleReturn('HOD')}>↩ Return for Amendment</WfBtn>
+                        <WfHint>Amend the risk yourself if it needs minor tweaks, then Endorse → forwards to RC. Or Return it for the RLO to amend and resubmit.</WfHint>
                       </>
                     ) : <WfHint>Awaiting HOD endorsement. Only the department HOD can act here.</WfHint>
                   )}
@@ -420,8 +439,9 @@ export default function RiskDetailPage() {
                           transition({ newStatus: 'TABLED_RTC', action: 'VALIDATE_TABLE_RTC', role: 'RC', comment: 'Validated by RC — tabled for Risk Technical Committee' })}>
                           ✓ Validate &amp; table for RTC
                         </WfBtn>
-                        <WfBtn danger disabled={transitioning} onClick={handleReject}>✗ Reject</WfBtn>
-                        <WfHint>RC confirms this is a true risk under our jurisdiction, then tables it for the Risk Technical Committee. The committee&apos;s decision (at its meeting) is what makes it Active.</WfHint>
+                        <WfBtn disabled={transitioning} onClick={() => handleReturn('RC')}>↩ Return for Amendment</WfBtn>
+                        <WfBtn danger disabled={transitioning} onClick={handleOutOfScope}>✗ Out of Scope</WfBtn>
+                        <WfHint>RC validates a true risk and tables it for the RTC. Return it if the RLO needs to amend something. Mark Out of Scope if it doesn&apos;t meet the criteria for the register (this archives it).</WfHint>
                       </>
                     ) : <WfHint>Awaiting Risk Coordinator validation. Only RC can act here.</WfHint>
                   )}
@@ -495,11 +515,11 @@ export default function RiskDetailPage() {
                       </>
                     ) : <WfHint>Closure requested — awaiting Risk Coordinator decision.</WfHint>
                   )}
-                  {risk.status === 'REJECTED' && (
+                  {(risk.status === 'RETURNED' || risk.status === 'REJECTED') && (
                     <>
                       {risk.rejection_comment && (
                         <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
-                          <b>Rejected{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
+                          <b>Returned for amendment{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
                           {risk.rejection_comment}
                         </div>
                       )}
@@ -508,9 +528,28 @@ export default function RiskDetailPage() {
                           <WfBtn primary disabled={transitioning} onClick={handleReviseResubmit}>
                             ↻ Revise &amp; Resubmit
                           </WfBtn>
-                          <WfHint>Address the HOD&apos;s comment, then resubmit. This reopens the same risk ({risk.risk_id}) as a draft — or leave it as-is to keep it archived.</WfHint>
+                          <WfHint>Address the reviewer&apos;s note above, then resubmit. This reopens the same risk ({risk.risk_id}) as a draft so you can amend and send it back through.</WfHint>
                         </>
-                      ) : <WfHint>This risk was rejected. The originating RLO can revise &amp; resubmit it.</WfHint>}
+                      ) : <WfHint>This risk was returned to the RLO for amendment. The originating RLO can revise &amp; resubmit it.</WfHint>}
+                    </>
+                  )}
+                  {risk.status === 'OUT_OF_SCOPE' && (
+                    <>
+                      {risk.rejection_comment && (
+                        <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
+                          <b>Out of scope{risk.rejection_reason ? ` — ${risk.rejection_reason}` : ''}:</b><br />
+                          {risk.rejection_comment}
+                        </div>
+                      )}
+                      {canValidate ? (
+                        <>
+                          <WfBtn disabled={transitioning} onClick={() =>
+                            transition({ newStatus: 'PENDING_RC', action: 'REOPEN_FROM_OUT_OF_SCOPE', role: 'RC', comment: 'Reopened for re-evaluation' })}>
+                            ↻ Reopen for review
+                          </WfBtn>
+                          <WfHint>The RC judged this doesn&apos;t meet the criteria for the register, so it&apos;s archived. Reopen it for review if you reconsider.</WfHint>
+                        </>
+                      ) : <WfHint>The RC marked this out of scope for the risk register — it&apos;s archived. Only the RC can reopen it.</WfHint>}
                     </>
                   )}
                   {risk.status === 'CLOSED' && (

@@ -84,6 +84,8 @@ export const RISK_STATUS_LABEL: Record<RiskStatus, string> = {
   ACTIVE:           'Active',
   MONITORING:       'Monitoring',
   REJECTED:         'Rejected',
+  RETURNED:         'Returned for Amendment',
+  OUT_OF_SCOPE:     'Out of Scope',
   PENDING_CLOSURE:  'Pending Closure',
   CLOSED:           'Closed',
 }
@@ -97,6 +99,8 @@ export const RISK_STATUS_BADGE: Record<RiskStatus, { bg: string; fg: string }> =
   ACTIVE:          { bg: '#DCFCE7', fg: '#166534' },
   MONITORING:      { bg: '#FEF3C7', fg: '#854D0E' },
   REJECTED:        { bg: '#FEE2E2', fg: '#991B1B' },
+  RETURNED:        { bg: '#FEF3C7', fg: '#92400E' },
+  OUT_OF_SCOPE:    { bg: '#E5E7EB', fg: '#4B5563' },
   PENDING_CLOSURE: { bg: '#FED7AA', fg: '#9A3412' },
   CLOSED:          { bg: '#E5E7EB', fg: '#4B5563' },
 }
@@ -158,7 +162,7 @@ export function outcomeToStatus(outcome: CommitteeOutcome): RiskStatus {
     case 'ENDORSE_ACTIVE':  return 'ACTIVE'
     case 'ESCALATE_ROC':    return 'TABLED_ROC'
     case 'SEND_BACK_RTC':   return 'TABLED_RTC'
-    case 'SEND_BACK_DEPT':  return 'REJECTED'
+    case 'SEND_BACK_DEPT':  return 'RETURNED'
     case 'RECOMMEND_CLOSE': return 'PENDING_CLOSURE'
   }
 }

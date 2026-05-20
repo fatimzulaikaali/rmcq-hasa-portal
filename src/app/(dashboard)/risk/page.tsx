@@ -105,8 +105,9 @@ export default function RiskListPage() {
     allowedDepts === null ? rows : rows.filter((r) => allowedDepts.includes(r.risk.dept_code)),
     [rows, allowedDepts])
 
-  // Archive = closed + all rejected (terminal / dormant). Active = the rest.
-  const isArchived = (s: RiskStatus) => s === 'CLOSED' || s === 'REJECTED'
+  // Archive = closed + out-of-scope (terminal). Returned-for-amendment stays
+  // ACTIVE — it's a to-do for the RLO. (REJECTED is legacy; treat as archived.)
+  const isArchived = (s: RiskStatus) => s === 'CLOSED' || s === 'OUT_OF_SCOPE' || s === 'REJECTED'
 
   // Rows belonging to the currently-selected tab.
   const viewRows = useMemo(
@@ -147,7 +148,7 @@ export default function RiskListPage() {
     let open = 0, closed = 0
     for (const r of scopedRows) {
       if (r.latest) byLevel[r.latest.risk_level]++
-      if (r.risk.status === 'CLOSED' || r.risk.status === 'REJECTED') closed++; else open++
+      if (r.risk.status === 'CLOSED' || r.risk.status === 'OUT_OF_SCOPE' || r.risk.status === 'REJECTED') closed++; else open++
     }
     return { byLevel, open, closed, total: scopedRows.length }
   }, [scopedRows])
