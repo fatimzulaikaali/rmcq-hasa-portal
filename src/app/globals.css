@@ -672,6 +672,13 @@ body{counter-reset:rcpage;}
 .role-pill-add{background:#fff;border-style:dashed;border-color:#9CA3AF;color:#6B7280;}
 .role-pill-add:hover{background:#ECFDF5;border-color:#6EE7B7;border-style:solid;color:#065F46;}
 
+/* Risk Register — top filter bar */
+.risk-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
+.risk-filterbar .rfb-label{font-size:12px;font-weight:700;color:var(--muted);margin-right:2px;}
+.risk-filterbar select{font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);font-family:inherit;}
+.risk-filterbar .reset-btn{font-size:12px;padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:#F3F4F6;color:var(--text);cursor:pointer;font-family:inherit;margin-left:auto;}
+.risk-filterbar .reset-btn:hover{background:#E5E7EB;}
+
 /* Committee meeting — agenda department grouping */
 .agenda-dept-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:6px 10px;margin-bottom:8px;background:#1F2937;color:#fff;border-radius:6px;font-size:13px;font-weight:700;}
 .agenda-dept-count{font-size:11px;font-weight:600;color:#CBD5E1;}

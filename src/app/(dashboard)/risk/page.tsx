@@ -132,52 +132,7 @@ export default function RiskListPage() {
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <RiskSidebar onClose={() => setSidebarOpen(false)} active="risk">
-        <div className="sb-filters">
-          <div className="sf-lbl">🔎 Filters</div>
-          <div className="filter-field">
-            <label>Status</label>
-            <select value={statusF} onChange={(e) => setStatusF(e.target.value as StatusFilter)}>
-              <option value="all">All statuses</option>
-              {(Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).map((s) => (
-                <option key={s} value={s}>{RISK_STATUS_LABEL[s]}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field">
-            <label>Risk level</label>
-            <select value={levelF} onChange={(e) => setLevelF(e.target.value as LevelFilter)}>
-              <option value="all">All levels</option>
-              {(Object.keys(RISK_LEVEL_LABEL) as RiskLevel[]).map((l) => (
-                <option key={l} value={l}>{RISK_LEVEL_LABEL[l]}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field">
-            <label>Category</label>
-            <select value={categoryF} onChange={(e) => setCategoryF(e.target.value as CategoryFilter)}>
-              <option value="all">All categories</option>
-              {(Object.keys(RISK_CATEGORY_LABEL) as RiskCategory[]).map((c) => (
-                <option key={c} value={c}>{c} — {RISK_CATEGORY_LABEL[c]}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field">
-            <label>Department</label>
-            <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
-              <option value="all">All departments</option>
-              {depts.filter((d) => d.kind === 'department').map((d) => (
-                <option key={d.code} value={d.code}>{d.name_en}</option>
-              ))}
-            </select>
-          </div>
-          {activeFilters > 0 && (
-            <button type="button" className="reset-btn" onClick={resetFilters}>
-              Reset filters ({activeFilters})
-            </button>
-          )}
-        </div>
-      </RiskSidebar>
+      <RiskSidebar onClose={() => setSidebarOpen(false)} active="risk" />
 
       <div className="main">
         <header className="topbar">
@@ -231,11 +186,44 @@ export default function RiskListPage() {
                 <div className="tile"><div className="tl">Sederhana</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.SEDERHANA }}>{counts.byLevel.SEDERHANA}</div></div>
               </div>
 
+              <div className="risk-filterbar">
+                <span className="rfb-label">🔎 Filters</span>
+                <select value={statusF} onChange={(e) => setStatusF(e.target.value as StatusFilter)}>
+                  <option value="all">All statuses</option>
+                  {(Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).map((s) => (
+                    <option key={s} value={s}>{RISK_STATUS_LABEL[s]}</option>
+                  ))}
+                </select>
+                <select value={levelF} onChange={(e) => setLevelF(e.target.value as LevelFilter)}>
+                  <option value="all">All levels</option>
+                  {(Object.keys(RISK_LEVEL_LABEL) as RiskLevel[]).map((l) => (
+                    <option key={l} value={l}>{RISK_LEVEL_LABEL[l]}</option>
+                  ))}
+                </select>
+                <select value={categoryF} onChange={(e) => setCategoryF(e.target.value as CategoryFilter)}>
+                  <option value="all">All categories</option>
+                  {(Object.keys(RISK_CATEGORY_LABEL) as RiskCategory[]).map((c) => (
+                    <option key={c} value={c}>{c} — {RISK_CATEGORY_LABEL[c]}</option>
+                  ))}
+                </select>
+                <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
+                  <option value="all">All departments</option>
+                  {depts.filter((d) => d.kind === 'department').map((d) => (
+                    <option key={d.code} value={d.code}>{d.name_en}</option>
+                  ))}
+                </select>
+                {activeFilters > 0 && (
+                  <button type="button" className="reset-btn" onClick={resetFilters}>
+                    Reset ({activeFilters})
+                  </button>
+                )}
+              </div>
+
               <div className="panel" style={{ marginTop: 14 }}>
                 <div className="pf">
                   <div>
                     <div className="pt">Risk Register</div>
-                    <div className="psub">{filtered.length} of {scopedRows.length} risks · use sidebar filters to narrow down</div>
+                    <div className="psub">{filtered.length} of {scopedRows.length} risks · use the filters above to narrow down</div>
                   </div>
                 </div>
 
@@ -266,6 +254,7 @@ export default function RiskListPage() {
                           <th>Description</th>
                           <th style={{ textAlign: 'center' }}>Level</th>
                           <th style={{ textAlign: 'right' }}>Score</th>
+                          <th style={{ textAlign: 'center' }}>Cycle</th>
                           <th style={{ textAlign: 'center' }}>Status</th>
                           <th style={{ textAlign: 'right' }}>Opened</th>
                         </tr>
@@ -299,6 +288,9 @@ export default function RiskListPage() {
                               </td>
                               <td style={{ textAlign: 'right', fontWeight: 700 }}>
                                 {latest ? Math.round(latest.risk_score * 10) / 10 : <span style={{ color: 'var(--muted)' }}>—</span>}
+                              </td>
+                              <td style={{ textAlign: 'center', fontSize: 11 }}>
+                                {latest ? latest.cycle_number : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td style={{ textAlign: 'center' }}>
                                 <span style={{

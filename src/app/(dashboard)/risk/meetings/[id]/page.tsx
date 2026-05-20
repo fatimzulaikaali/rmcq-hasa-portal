@@ -118,17 +118,20 @@ export default function RiskMeetingDetailPage() {
       setActions((actionsData ?? []) as RiskActionItem[])
       setUsers((usersData ?? []) as RiskUser[])
 
-      // Risks on the agenda + risks available to be tabled (matching tabled status, not yet on agenda)
+      // Candidate risks for the agenda: freshly-tabled for this committee PLUS
+      // any active issue (ACTIVE / MONITORING) — those can be brought back for
+      // discussion at a later RTC/ROC sitting. Exclude ones already on the agenda.
       const agendaRiskIds = ag.map((a) => a.risk_id)
       const tStatus = tabledStatus(m.meeting_type)
+      const candidateStatuses = [tStatus, 'ACTIVE', 'MONITORING']
       const [{ data: agendaRisks, error: arErr }, { data: tabledRisks, error: trErr }] = await Promise.all([
         agendaRiskIds.length
           ? supabase.from('risks').select('*').in('id', agendaRiskIds)
           : Promise.resolve({ data: [], error: null } as { data: Risk[]; error: null }),
-        supabase.from('risks').select('*').eq('status', tStatus),
+        supabase.from('risks').select('*').in('status', candidateStatuses),
       ])
       if (arErr) throw new Error(`Agenda risks: ${arErr.code ?? ''} ${arErr.message}`)
-      if (trErr) throw new Error(`Tabled risks: ${trErr.code ?? ''} ${trErr.message}`)
+      if (trErr) throw new Error(`Candidate risks: ${trErr.code ?? ''} ${trErr.message}`)
 
       const rMap = new Map<number, Risk>()
       for (const r of (agendaRisks ?? []) as Risk[]) rMap.set(r.id, r)
@@ -272,12 +275,15 @@ export default function RiskMeetingDetailPage() {
   }
 
   async function addAllTabled() {
-    if (!meeting || available.length === 0) return
+    if (!meeting) return
+    // Only the freshly-tabled risks for THIS committee — active issues stay
+    // opt-in (added individually), so "add all" doesn't sweep in the whole register.
+    const tStatus = tabledStatus(meeting.meeting_type)
+    const tabledForThis = available.filter((r) => r.status === tStatus)
+    if (tabledForThis.length === 0) return
     setBusy(true); setActionError(null)
     try {
-      // Insert every currently-tabled risk in department order so the agenda
-      // (and the presentation) reads dept-by-dept.
-      const ordered = [...available].sort((a, b) =>
+      const ordered = [...tabledForThis].sort((a, b) =>
         (deptNames.get(a.dept_code) ?? a.dept_code).localeCompare(deptNames.get(b.dept_code) ?? b.dept_code) ||
         a.risk_id.localeCompare(b.risk_id))
       const rows = ordered.map((r, i) => ({
@@ -768,15 +774,20 @@ export default function RiskMeetingDetailPage() {
                   )}
                 </div>
 
-                {isRC && (
+                {isRC && (() => {
+                  const tStatus = tabledStatus(meeting.meeting_type)
+                  const tabledForThis = available.filter((r) => r.status === tStatus)
+                  return (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
                     <select value={pickRiskId} onChange={(e) => setPickRiskId(e.target.value)}
-                      style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 260 }}>
+                      style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 300 }}>
                       <option value="">
-                        {available.length ? `— add a risk tabled for ${meeting.meeting_type} —` : `No risks tabled for ${meeting.meeting_type}`}
+                        {available.length ? '— add a risk to the agenda —' : 'No risks available to add'}
                       </option>
                       {available.map((r) => (
-                        <option key={r.id} value={r.id}>{r.risk_id} · {deptLabel(r.dept_code)}</option>
+                        <option key={r.id} value={r.id}>
+                          {r.risk_id} · {deptLabel(r.dept_code)} · {RISK_STATUS_LABEL[r.status]}
+                        </option>
                       ))}
                     </select>
                     <button type="button" className="signout-btn"
@@ -784,15 +795,16 @@ export default function RiskMeetingDetailPage() {
                       disabled={!pickRiskId || busy} onClick={addToAgenda}>
                       + Add
                     </button>
-                    {available.length > 0 && (
+                    {tabledForThis.length > 0 && (
                       <button type="button" className="signout-btn"
                         style={{ fontSize: 12, padding: '6px 12px' }}
                         disabled={busy} onClick={addAllTabled}>
-                        + Add all tabled ({available.length})
+                        + Add all newly tabled ({tabledForThis.length})
                       </button>
                     )}
                   </div>
-                )}
+                  )
+                })()}
 
                 {agenda.length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>No risks on the agenda yet.</div>
