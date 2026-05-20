@@ -672,6 +672,14 @@ body{counter-reset:rcpage;}
 .role-pill-add{background:#fff;border-style:dashed;border-color:#9CA3AF;color:#6B7280;}
 .role-pill-add:hover{background:#ECFDF5;border-color:#6EE7B7;border-style:solid;color:#065F46;}
 
+/* Risk Register — Active / Archive tabs */
+.risk-tabs{display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--border);}
+.risk-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border:none;background:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;}
+.risk-tab:hover{color:var(--text);}
+.risk-tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+.risk-tab-count{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;background:#EEF2FF;color:#3730A3;}
+.risk-tab.active .risk-tab-count{background:var(--blue);color:#fff;}
+
 /* Risk Register — top filter bar */
 .risk-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
 .risk-filterbar .rfb-label{font-size:12px;font-weight:700;color:var(--muted);margin-right:2px;}

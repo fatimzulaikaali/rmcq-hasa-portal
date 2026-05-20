@@ -33,6 +33,7 @@ export default function RiskListPage() {
   const [rows, setRows]   = useState<RiskListRow[]>([])
   const [depts, setDepts] = useState<RiskDept[]>([])
 
+  const [view,      setView]      = useState<'active' | 'archive'>('active')
   const [statusF,   setStatusF]   = useState<StatusFilter>('all')
   const [levelF,    setLevelF]    = useState<LevelFilter>('all')
   const [categoryF, setCategoryF] = useState<CategoryFilter>('all')
@@ -104,13 +105,28 @@ export default function RiskListPage() {
     allowedDepts === null ? rows : rows.filter((r) => allowedDepts.includes(r.risk.dept_code)),
     [rows, allowedDepts])
 
-  const filtered = useMemo(() => scopedRows.filter((r) => {
+  // Archive = closed + all rejected (terminal / dormant). Active = the rest.
+  const isArchived = (s: RiskStatus) => s === 'CLOSED' || s === 'REJECTED'
+
+  // Rows belonging to the currently-selected tab.
+  const viewRows = useMemo(
+    () => scopedRows.filter((r) => (view === 'archive' ? isArchived(r.risk.status) : !isArchived(r.risk.status))),
+    [scopedRows, view])
+  const activeCount  = useMemo(() => scopedRows.filter((r) => !isArchived(r.risk.status)).length, [scopedRows])
+  const archiveCount = useMemo(() => scopedRows.filter((r) =>  isArchived(r.risk.status)).length, [scopedRows])
+
+  // Status options offered in the filter, scoped to the current tab.
+  const statusOptions = useMemo(
+    () => (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => view === 'archive' ? isArchived(s) : !isArchived(s)),
+    [view])
+
+  const filtered = useMemo(() => viewRows.filter((r) => {
     if (statusF   !== 'all' && r.risk.status        !== statusF)   return false
     if (categoryF !== 'all' && r.risk.category      !== categoryF) return false
     if (deptF     !== 'all' && r.risk.dept_code     !== deptF)     return false
     if (levelF    !== 'all' && r.latest?.risk_level !== levelF)    return false
     return true
-  }), [scopedRows, statusF, categoryF, deptF, levelF])
+  }), [viewRows, statusF, categoryF, deptF, levelF])
 
   const activeFilters =
     (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) +
@@ -118,6 +134,12 @@ export default function RiskListPage() {
 
   function resetFilters() {
     setStatusF('all'); setLevelF('all'); setCategoryF('all'); setDeptF('all')
+  }
+
+  // Switching tabs clears the status filter (its valid options differ per tab).
+  function switchView(v: 'active' | 'archive') {
+    setView(v)
+    setStatusF('all')
   }
 
   const counts = useMemo(() => {
@@ -186,11 +208,22 @@ export default function RiskListPage() {
                 <div className="tile"><div className="tl">Sederhana</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.SEDERHANA }}>{counts.byLevel.SEDERHANA}</div></div>
               </div>
 
+              <div className="risk-tabs">
+                <button type="button" className={`risk-tab ${view === 'active' ? 'active' : ''}`}
+                  onClick={() => switchView('active')}>
+                  Active Register <span className="risk-tab-count">{activeCount}</span>
+                </button>
+                <button type="button" className={`risk-tab ${view === 'archive' ? 'active' : ''}`}
+                  onClick={() => switchView('archive')}>
+                  Archive <span className="risk-tab-count">{archiveCount}</span>
+                </button>
+              </div>
+
               <div className="risk-filterbar">
                 <span className="rfb-label">🔎 Filters</span>
                 <select value={statusF} onChange={(e) => setStatusF(e.target.value as StatusFilter)}>
-                  <option value="all">All statuses</option>
-                  {(Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).map((s) => (
+                  <option value="all">{view === 'archive' ? 'All archived' : 'All statuses'}</option>
+                  {statusOptions.map((s) => (
                     <option key={s} value={s}>{RISK_STATUS_LABEL[s]}</option>
                   ))}
                 </select>
@@ -222,21 +255,26 @@ export default function RiskListPage() {
               <div className="panel" style={{ marginTop: 14 }}>
                 <div className="pf">
                   <div>
-                    <div className="pt">Risk Register</div>
-                    <div className="psub">{filtered.length} of {scopedRows.length} risks · use the filters above to narrow down</div>
+                    <div className="pt">{view === 'archive' ? 'Archive — Closed &amp; Rejected' : 'Active Register'}</div>
+                    <div className="psub">
+                      {filtered.length} of {viewRows.length} {view === 'archive' ? 'archived risks' : 'active risks'}
+                      {view === 'archive' ? ' · revising a rejected risk moves it back to the Active Register' : ' · use the filters above to narrow down'}
+                    </div>
                   </div>
                 </div>
 
                 {filtered.length === 0 ? (
                   <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--muted)' }}>
-                    {scopedRows.length === 0 ? (
+                    {viewRows.length === 0 ? (
                       <>
-                        <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
+                        <div style={{ fontSize: 28, marginBottom: 8 }}>{view === 'archive' ? '🗄️' : '📭'}</div>
                         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-                          No risks registered yet
+                          {view === 'archive' ? 'Nothing archived yet' : 'No active risks'}
                         </div>
                         <div style={{ fontSize: 12 }}>
-                          The risk register is empty. Phase 3.2 will ship the New Risk form, and submissions will appear here.
+                          {view === 'archive'
+                            ? 'Closed and rejected risks will appear here.'
+                            : 'Risks move here as they progress through the workflow.'}
                         </div>
                       </>
                     ) : (
