@@ -66,6 +66,7 @@ export interface Risk {
   rejection_comment: string | null
   rejected_by: number | null
   rejected_at: string | null
+  pending_ack: boolean
   resubmission_of: number | null
   created_at: string
   updated_at: string

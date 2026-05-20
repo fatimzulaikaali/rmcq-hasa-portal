@@ -26,7 +26,7 @@ type DeptFilter     = 'all' | string
 
 /* Which statuses are "awaiting action" for each active role, and the prompt to show. */
 const ATTENTION_BY_ROLE: Record<RiskRole, RiskStatus[]> = {
-  RLO:        ['DRAFT', 'RETURNED'],
+  RLO:        ['DRAFT', 'RETURNED', 'OUT_OF_SCOPE'],
   HOD:        ['PENDING_HOD'],
   RC:         ['PENDING_RC', 'TABLED_RTC', 'TABLED_ROC', 'PENDING_CLOSURE'],
   ROC_MEMBER: [],
@@ -121,30 +121,46 @@ export default function RiskListPage() {
     [rows, allowedDepts])
 
   // Risks awaiting the current active role's action (dept-scoped via scopedRows).
+  // Out-of-scope only counts while it's still awaiting the RLO's acknowledgment.
   const attentionRows = useMemo(() => {
     if (!activeRole) return []
     const statuses = ATTENTION_BY_ROLE[activeRole.role] ?? []
     if (statuses.length === 0) return []
-    return scopedRows.filter((r) => statuses.includes(r.risk.status))
+    return scopedRows.filter((r) =>
+      statuses.includes(r.risk.status) &&
+      (r.risk.status !== 'OUT_OF_SCOPE' || r.risk.pending_ack))
   }, [scopedRows, activeRole])
 
-  // Archive = closed + out-of-scope (terminal). Returned-for-amendment stays
-  // ACTIVE — it's a to-do for the RLO. (REJECTED is legacy; treat as archived.)
-  const isArchived = (s: RiskStatus) => s === 'CLOSED' || s === 'OUT_OF_SCOPE' || s === 'REJECTED'
+  // Terminal statuses. Out-of-scope is terminal only ONCE the RLO has acknowledged
+  // it; until then it lives solely in the attention tab (not active, not archive).
+  const isArchiveRow = (r: RiskListRow) => {
+    const s = r.risk.status
+    if (s === 'CLOSED' || s === 'REJECTED') return true
+    if (s === 'OUT_OF_SCOPE') return !r.risk.pending_ack
+    return false
+  }
+  // Active register = the live workflow; never closed/out-of-scope/rejected.
+  const isActiveRow = (r: RiskListRow) => {
+    const s = r.risk.status
+    return s !== 'CLOSED' && s !== 'REJECTED' && s !== 'OUT_OF_SCOPE'
+  }
 
   // Rows belonging to the currently-selected tab.
   const viewRows = useMemo(() => {
     if (view === 'attention') return attentionRows
-    return scopedRows.filter((r) => (view === 'archive' ? isArchived(r.risk.status) : !isArchived(r.risk.status)))
+    if (view === 'archive')   return scopedRows.filter(isArchiveRow)
+    return scopedRows.filter(isActiveRow)
   }, [scopedRows, attentionRows, view])
-  const activeCount  = useMemo(() => scopedRows.filter((r) => !isArchived(r.risk.status)).length, [scopedRows])
-  const archiveCount = useMemo(() => scopedRows.filter((r) =>  isArchived(r.risk.status)).length, [scopedRows])
+  const activeCount  = useMemo(() => scopedRows.filter(isActiveRow).length,  [scopedRows])
+  const archiveCount = useMemo(() => scopedRows.filter(isArchiveRow).length, [scopedRows])
 
   // Status options offered in the filter, scoped to the current tab.
+  const ARCHIVE_STATUSES: RiskStatus[] = ['CLOSED', 'OUT_OF_SCOPE', 'REJECTED']
   const statusOptions = useMemo(() => {
     if (view === 'attention') return activeRole ? (ATTENTION_BY_ROLE[activeRole.role] ?? []) : []
-    return (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => view === 'archive' ? isArchived(s) : !isArchived(s))
-  }, [view, activeRole])
+    if (view === 'archive') return ARCHIVE_STATUSES
+    return (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => !ARCHIVE_STATUSES.includes(s))
+  }, [view, activeRole]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Land on the attention tab on first load when the user has items waiting.
   useEffect(() => {

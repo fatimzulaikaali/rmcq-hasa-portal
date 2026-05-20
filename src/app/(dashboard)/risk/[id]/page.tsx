@@ -216,7 +216,21 @@ export default function RiskDetailPage() {
         rejection_comment: text,
         rejected_by: currentUserId ?? undefined,
         rejected_at: new Date().toISOString(),
+        // Waits in the RLO's attention queue until they acknowledge it.
+        pending_ack: true,
       },
+    })
+  }
+
+  /* RLO acknowledges the RC's out-of-scope decision — it then moves to the Archive. */
+  async function handleAcknowledgeOutOfScope() {
+    if (!risk) return
+    await transition({
+      newStatus: 'OUT_OF_SCOPE',
+      action: 'ACK_OUT_OF_SCOPE',
+      role: 'RLO',
+      comment: 'Acknowledged out-of-scope decision',
+      extras: { pending_ack: false },
     })
   }
 
@@ -541,15 +555,26 @@ export default function RiskDetailPage() {
                           {risk.rejection_comment}
                         </div>
                       )}
-                      {canValidate ? (
+                      {risk.pending_ack && canSubmit && (
                         <>
-                          <WfBtn disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'PENDING_RC', action: 'REOPEN_FROM_OUT_OF_SCOPE', role: 'RC', comment: 'Reopened for re-evaluation' })}>
-                            ↻ Reopen for review
-                          </WfBtn>
-                          <WfHint>The RC judged this doesn&apos;t meet the criteria for the register, so it&apos;s archived. Reopen it for review if you reconsider.</WfHint>
+                          <WfBtn primary disabled={transitioning} onClick={handleAcknowledgeOutOfScope}>✓ Acknowledge</WfBtn>
+                          <WfHint>The RC has marked this risk out of scope for the register. Please acknowledge that you&apos;ve seen the decision and the reason above — it then moves to the Archive.</WfHint>
                         </>
-                      ) : <WfHint>The RC marked this out of scope for the risk register — it&apos;s archived. Only the RC can reopen it.</WfHint>}
+                      )}
+                      {risk.pending_ack && !canSubmit && (
+                        <WfHint>Marked out of scope by the RC — awaiting the RLO&apos;s acknowledgment before it&apos;s archived.</WfHint>
+                      )}
+                      {!risk.pending_ack && (
+                        canValidate ? (
+                          <>
+                            <WfBtn disabled={transitioning} onClick={() =>
+                              transition({ newStatus: 'PENDING_RC', action: 'REOPEN_FROM_OUT_OF_SCOPE', role: 'RC', comment: 'Reopened for re-evaluation', extras: { pending_ack: false } })}>
+                              ↻ Reopen for review
+                            </WfBtn>
+                            <WfHint>Acknowledged and archived. Reopen it for review if you reconsider.</WfHint>
+                          </>
+                        ) : <WfHint>The RC marked this out of scope for the register — acknowledged and archived. Only the RC can reopen it.</WfHint>
+                      )}
                     </>
                   )}
                   {risk.status === 'CLOSED' && (
