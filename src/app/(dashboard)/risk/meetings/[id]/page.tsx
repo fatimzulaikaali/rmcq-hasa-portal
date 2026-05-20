@@ -73,6 +73,8 @@ export default function RiskMeetingDetailPage() {
   const [minutesText, setMinutesText] = useState('')
   // Presentation mode — index into the department-ordered agenda, or null
   const [presentIndex, setPresentIndex] = useState<number | null>(null)
+  // ROC presentation deck open?
+  const [rocPresentOpen, setRocPresentOpen] = useState(false)
 
   useEffect(() => { void load() }, [meetingId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -491,6 +493,19 @@ export default function RiskMeetingDetailPage() {
           onClose={() => setPresentIndex(null)}
         />
       )}
+      {rocPresentOpen && meeting && rocSummary && (
+        <RocPresentOverlay
+          meetingTitle={`${meeting.meeting_type} · ${meeting.title}`}
+          linkedRtc={linkedRtc}
+          counts={rocSummary.counts}
+          total={rocSummary.total}
+          escalated={rocSummary.escalated}
+          byTheme={rocSummary.byTheme}
+          latestByRisk={latestReviewByRisk}
+          deptLabel={deptLabel}
+          onClose={() => setRocPresentOpen(false)}
+        />
+      )}
       <RiskSidebar onClose={() => setSidebarOpen(false)} active="committees" />
 
       <div className="main">
@@ -577,10 +592,19 @@ export default function RiskMeetingDetailPage() {
               {meeting.meeting_type === 'ROC' && rocSummary && (
                 <>
                   <div className="panel">
-                    <div className="pf"><div>
-                      <div className="pt">RTC Summary</div>
-                      <div className="psub">Roll-up of the RTC sitting(s) this ROC reviews — agenda item 1</div>
-                    </div></div>
+                    <div className="pf" style={{ alignItems: 'flex-start' }}>
+                      <div>
+                        <div className="pt">RTC Summary</div>
+                        <div className="psub">Roll-up of the RTC sitting(s) this ROC reviews — agenda item 1</div>
+                      </div>
+                      {linkedRtc.length > 0 && (
+                        <button type="button" className="signout-btn"
+                          style={{ fontSize: 12, padding: '6px 14px', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                          onClick={() => setRocPresentOpen(true)}>
+                          ▶ Present to ROC
+                        </button>
+                      )}
+                    </div>
 
                     <div style={{ marginBottom: 14 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Reviewing these RTC meetings:</div>
@@ -865,52 +889,7 @@ function PresentOverlay({ entries, index, meetingTitle, onIndex, onClose }: {
       </div>
 
       <div className="present-stage">
-        <div className="present-slide">
-          <div className="present-dept">{entry.deptLabel}</div>
-          <div className="present-riskid">{risk.risk_id}</div>
-          <div className="present-meta">
-            <span><b>{risk.category}</b> — {RISK_CATEGORY_LABEL[risk.category]}</span>
-            <span>{RISK_SCOPE_LABEL[risk.scope]}</span>
-            <span className="present-status" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
-              {RISK_STATUS_LABEL[risk.status]}
-            </span>
-            {outcome && <span className="present-status" style={{ color: '#166534', background: '#DCFCE7' }}>
-              Decision: {COMMITTEE_OUTCOME_LABEL[outcome]}
-            </span>}
-          </div>
-
-          <div className="present-grid">
-            <div className="present-col">
-              <PresentBlock label="Risk description">{risk.description}</PresentBlock>
-              <PresentBlock label="Cause">{risk.cause_description}</PresentBlock>
-              <PresentBlock label="Impact">{risk.impact_description}</PresentBlock>
-            </div>
-            <div className="present-col">
-              <PresentBlock label="Existing controls">{risk.existing_controls || '—'}</PresentBlock>
-              <PresentBlock label="Additional controls proposed">{risk.additional_controls || '—'}</PresentBlock>
-              <PresentBlock label="Action owner / period">
-                {(risk.action_owner || '—')}{risk.implementation_period ? ` · ${risk.implementation_period}` : ''}
-              </PresentBlock>
-
-              {latest ? (
-                <div className="present-score">
-                  <div className="present-score-cells">
-                    <Cell k="L" v={latest.likelihood} />
-                    <Cell k="Man" v={latest.impact_manusia} />
-                    <Cell k="Rep" v={latest.impact_reputasi} />
-                    <Cell k="Kew" v={latest.impact_kewangan} />
-                    <Cell k="Ops" v={latest.impact_operasi} />
-                    <Cell k="Obj" v={latest.impact_objektif} />
-                  </div>
-                  <div className="present-score-final"
-                    style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level] }}>
-                    {RISK_LEVEL_LABEL[latest.risk_level]} · {(Math.round(latest.risk_score * 10) / 10).toFixed(1)}
-                  </div>
-                </div>
-              ) : <PresentBlock label="Scoring">Not yet scored</PresentBlock>}
-            </div>
-          </div>
-        </div>
+        <RiskSlideContent risk={risk} latest={latest} deptLabel={entry.deptLabel} outcome={outcome} />
       </div>
 
       <div className="present-foot">
@@ -924,6 +903,186 @@ function PresentOverlay({ entries, index, meetingTitle, onIndex, onClose }: {
         </div>
         <button type="button" className="present-nav" disabled={index === n - 1} onClick={() => onIndex(index + 1)}>Next ▶</button>
       </div>
+    </div>
+  )
+}
+
+/* One risk rendered as a full-screen presentation slide (shared by the RTC
+ * agenda stepper and the ROC deck). */
+function RiskSlideContent({ risk, latest, deptLabel, outcome }: {
+  risk: Risk
+  latest: RiskReview | null
+  deptLabel: string
+  outcome?: CommitteeOutcome | null
+}) {
+  return (
+    <div className="present-slide">
+      <div className="present-dept">{deptLabel}</div>
+      <div className="present-riskid">{risk.risk_id}</div>
+      <div className="present-meta">
+        <span><b>{risk.category}</b> — {RISK_CATEGORY_LABEL[risk.category]}</span>
+        <span>{RISK_SCOPE_LABEL[risk.scope]}</span>
+        <span className="present-status" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
+          {RISK_STATUS_LABEL[risk.status]}
+        </span>
+        {outcome && <span className="present-status" style={{ color: '#166534', background: '#DCFCE7' }}>
+          Decision: {COMMITTEE_OUTCOME_LABEL[outcome]}
+        </span>}
+      </div>
+
+      <div className="present-grid">
+        <div className="present-col">
+          <PresentBlock label="Risk description">{risk.description}</PresentBlock>
+          <PresentBlock label="Cause">{risk.cause_description}</PresentBlock>
+          <PresentBlock label="Impact">{risk.impact_description}</PresentBlock>
+        </div>
+        <div className="present-col">
+          <PresentBlock label="Existing controls">{risk.existing_controls || '—'}</PresentBlock>
+          <PresentBlock label="Additional controls proposed">{risk.additional_controls || '—'}</PresentBlock>
+          <PresentBlock label="Action owner / period">
+            {(risk.action_owner || '—')}{risk.implementation_period ? ` · ${risk.implementation_period}` : ''}
+          </PresentBlock>
+
+          {latest ? (
+            <div className="present-score">
+              <div className="present-score-cells">
+                <Cell k="L" v={latest.likelihood} />
+                <Cell k="Man" v={latest.impact_manusia} />
+                <Cell k="Rep" v={latest.impact_reputasi} />
+                <Cell k="Kew" v={latest.impact_kewangan} />
+                <Cell k="Ops" v={latest.impact_operasi} />
+                <Cell k="Obj" v={latest.impact_objektif} />
+              </div>
+              <div className="present-score-final"
+                style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level] }}>
+                {RISK_LEVEL_LABEL[latest.risk_level]} · {(Math.round(latest.risk_score * 10) / 10).toFixed(1)}
+              </div>
+            </div>
+          ) : <PresentBlock label="Scoring">Not yet scored</PresentBlock>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* Full-screen ROC presentation deck: overview → each escalated risk → cross-cutting. */
+type RocSlide =
+  | { kind: 'overview' }
+  | { kind: 'risk'; item: RiskMeetingAgenda; risk: Risk }
+  | { kind: 'theme'; theme: CrossCuttingTheme; risks: Risk[] }
+
+function RocPresentOverlay({
+  meetingTitle, linkedRtc, counts, total, escalated, byTheme, latestByRisk, deptLabel, onClose,
+}: {
+  meetingTitle: string
+  linkedRtc: RiskMeeting[]
+  counts: Partial<Record<CommitteeOutcome | 'UNDECIDED', number>>
+  total: number
+  escalated: { item: RiskMeetingAgenda; risk: Risk }[]
+  byTheme: { theme: CrossCuttingTheme; risks: Risk[] }[]
+  latestByRisk: Map<number, RiskReview>
+  deptLabel: (code: string) => string
+  onClose: () => void
+}) {
+  const slides: RocSlide[] = [
+    { kind: 'overview' },
+    ...escalated.map((e) => ({ kind: 'risk' as const, item: e.item, risk: e.risk })),
+    ...byTheme.map((t) => ({ kind: 'theme' as const, theme: t.theme, risks: t.risks })),
+  ]
+  const n = slides.length
+  const [index, setIndex] = useState(0)
+  const i = Math.min(index, n - 1)
+  const slide = slides[i]
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowRight' || e.key === ' ') setIndex((x) => Math.min(x + 1, n - 1))
+      else if (e.key === 'ArrowLeft') setIndex((x) => Math.max(x - 1, 0))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [n, onClose])
+
+  const outcomeOrder: CommitteeOutcome[] = ['ENDORSE_ACTIVE', 'ESCALATE_ROC', 'SEND_BACK_DEPT', 'RECOMMEND_CLOSE']
+
+  return (
+    <div className="present-overlay">
+      <div className="present-bar">
+        <div className="present-bar-title">{meetingTitle} — ROC Presentation</div>
+        <div className="present-bar-progress">Slide {i + 1} of {n}</div>
+        <button type="button" className="present-close" onClick={onClose}>✕ Exit</button>
+      </div>
+
+      <div className="present-stage">
+        {slide.kind === 'overview' && (
+          <div className="present-slide">
+            <div className="present-dept">RTC Summary</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 30 }}>Risks presented at the RTC</div>
+            <div className="present-meta">
+              {linkedRtc.map((rt) => <span key={rt.id}><b>{rt.title}</b> · {rt.meeting_date}</span>)}
+            </div>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 20 }}>
+              <RocStat label="Total presented" n={total} accent />
+              {outcomeOrder.map((o) => <RocStat key={o} label={COMMITTEE_OUTCOME_LABEL[o]} n={counts[o] ?? 0} />)}
+              {counts.UNDECIDED ? <RocStat label="Not yet decided" n={counts.UNDECIDED} /> : null}
+            </div>
+            <div style={{ marginTop: 24, fontSize: 15, color: '#93A4C0' }}>
+              {escalated.length} risk{escalated.length === 1 ? '' : 's'} escalated to ROC ·{' '}
+              {byTheme.length} cross-cutting theme{byTheme.length === 1 ? '' : 's'} — next slides walk through each.
+            </div>
+          </div>
+        )}
+
+        {slide.kind === 'risk' && (
+          <RiskSlideContent
+            risk={slide.risk}
+            latest={latestByRisk.get(slide.risk.id) ?? null}
+            deptLabel={deptLabel(slide.risk.dept_code)}
+            outcome={slide.item.outcome}
+          />
+        )}
+
+        {slide.kind === 'theme' && (
+          <div className="present-slide">
+            <div className="present-dept">Cross-cutting Issue · Isu Melintang</div>
+            <div className="present-riskid" style={{ fontFamily: 'inherit', fontSize: 34 }}>{slide.theme.name}</div>
+            {slide.theme.description && (
+              <div style={{ fontSize: 16, color: '#CBD5E1', marginBottom: 16 }}>{slide.theme.description}</div>
+            )}
+            <div className="present-block-label">Affected risks ({slide.risks.length})</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {slide.risks.map((r) => (
+                <div key={r.id} style={{ fontSize: 17, color: '#F1F5F9' }}>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#7DD3FC' }}>{r.risk_id}</span>
+                  <span style={{ color: '#93A4C0' }}> · {deptLabel(r.dept_code)}</span> — {r.description}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="present-foot">
+        <button type="button" className="present-nav" disabled={i === 0} onClick={() => setIndex(i - 1)}>◀ Previous</button>
+        <div className="present-dots">
+          {slides.map((s, idx) => (
+            <span key={idx} className={`present-dot ${idx === i ? 'on' : ''}`} onClick={() => setIndex(idx)} />
+          ))}
+        </div>
+        <button type="button" className="present-nav" disabled={i === n - 1} onClick={() => setIndex(i + 1)}>Next ▶</button>
+      </div>
+    </div>
+  )
+}
+
+function RocStat({ label, n, accent }: { label: string; n: number; accent?: boolean }) {
+  return (
+    <div style={{
+      background: accent ? '#1D4ED8' : '#16213C', borderRadius: 12, padding: '16px 22px', minWidth: 120,
+    }}>
+      <div style={{ fontSize: 38, fontWeight: 800, color: '#fff' }}>{n}</div>
+      <div style={{ fontSize: 13, color: accent ? '#DBEAFE' : '#8DA2C0' }}>{label}</div>
     </div>
   )
 }
