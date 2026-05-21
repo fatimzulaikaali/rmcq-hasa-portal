@@ -32,13 +32,12 @@ export function RiskSidebar({ onClose, active, children }: {
         setShowGlobal(access.allModules)
 
         // Count committee action items awaiting a response that the user can see
-        // (their dept for dept-scoped roles, all for hospital-wide roles).
+        // (assigned to their dept for dept-scoped roles, all for hospital-wide).
         let q = supabase.from('risk_action_items')
-          .select('id, risks!inner(dept_code)', { count: 'exact', head: false })
-          .in('status', ['PENDING', 'OVERDUE'])
+          .select('id').in('status', ['PENDING', 'OVERDUE'])
         if (access.deptScopes !== null) {
           q = access.deptScopes.length
-            ? q.in('risks.dept_code', access.deptScopes)
+            ? q.overlaps('assigned_depts', access.deptScopes)
             : q.eq('id', -1) // no dept scope -> nothing
         }
         const { data } = await q

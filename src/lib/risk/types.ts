@@ -182,6 +182,7 @@ export interface RiskActionItem {
   description: string
   assigned_to: number | null
   assigned_dept: string | null
+  assigned_depts: string[]
   due_date: string | null
   status: ActionStatus
   response: string | null

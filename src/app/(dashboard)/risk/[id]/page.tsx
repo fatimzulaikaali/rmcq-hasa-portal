@@ -60,6 +60,7 @@ export default function RiskDetailPage() {
   const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
   const [committeeReviews, setCommitteeReviews] = useState<CommitteeReview[]>([])
   const [actionItems, setActionItems] = useState<RiskActionItem[]>([])
+  const [actionDeptNames, setActionDeptNames] = useState<Map<string, string>>(new Map())
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [activeRole, setActiveRole] = useState<ActiveRole | null>(null)
   const [transitioning, setTransitioning] = useState(false)
@@ -146,7 +147,17 @@ export default function RiskDetailPage() {
       // committee decisions (only those that have actually been decided) + action items
       const reviews = ((agendaData ?? []) as CommitteeReview[]).filter((a) => a.outcome)
       setCommitteeReviews(reviews)
-      setActionItems((actionData ?? []) as RiskActionItem[])
+      const actions = (actionData ?? []) as RiskActionItem[]
+      setActionItems(actions)
+
+      // Names for the departments these action items are assigned to.
+      const actionDeptCodes = Array.from(new Set(actions.flatMap((a) => a.assigned_depts ?? [])))
+      if (actionDeptCodes.length) {
+        const { data: adepts } = await supabase.from('pscs_departments').select('code,name_en').in('code', actionDeptCodes)
+        const adm = new Map<string, string>()
+        for (const d of (adepts ?? []) as { code: string; name_en: string }[]) adm.set(d.code, d.name_en)
+        setActionDeptNames(adm)
+      }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -679,15 +690,20 @@ export default function RiskDetailPage() {
                     <div className="psub">Directives &amp; clarifications from the committee — the department&apos;s feedback is reviewed at the next meeting</div>
                   </div></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {actionItems.map((a) => (
-                      <ActionItemBlock
-                        key={a.id}
-                        item={a}
-                        ownerName={nameOf(a.assigned_to)}
-                        canRespond={canRespond}
-                        onRespond={(text) => respondToAction(a, text)}
-                      />
-                    ))}
+                    {actionItems.map((a) => {
+                      const assignedLabel = (a.assigned_depts ?? []).map((c) => actionDeptNames.get(c) ?? c).join(', ') || '—'
+                      // Only the assigned department's RLO/HOD responds.
+                      const itemCanRespond = canRespond && !!activeRole?.dept_code && (a.assigned_depts ?? []).includes(activeRole.dept_code)
+                      return (
+                        <ActionItemBlock
+                          key={a.id}
+                          item={a}
+                          assignedLabel={assignedLabel}
+                          canRespond={itemCanRespond}
+                          onRespond={(text) => respondToAction(a, text)}
+                        />
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -916,9 +932,9 @@ const ACTION_STATUS_BADGE: Record<ActionStatus, { bg: string; fg: string }> = {
   ESCALATED: { bg: '#EDE9FE', fg: '#5B21B6' },
 }
 
-function ActionItemBlock({ item, ownerName, canRespond, onRespond }: {
+function ActionItemBlock({ item, assignedLabel, canRespond, onRespond }: {
   item: RiskActionItem
-  ownerName: string
+  assignedLabel: string
   canRespond: boolean
   onRespond: (text: string) => void
 }) {
@@ -931,7 +947,7 @@ function ActionItemBlock({ item, ownerName, canRespond, onRespond }: {
         <div style={{ fontSize: 13, fontWeight: 600 }}>
           {ACTION_TYPE_LABEL[item.action_type]}
           <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
-            {' '}· owner {ownerName}{item.due_date ? ` · due ${item.due_date}` : ''}
+            {' '}· assigned to {assignedLabel}{item.due_date ? ` · due ${item.due_date}` : ''}
           </span>
         </div>
         <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sb.fg, background: sb.bg }}>

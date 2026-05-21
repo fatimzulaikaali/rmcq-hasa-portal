@@ -41,7 +41,6 @@ export default function RiskActionsPage() {
 
   const [rows, setRows] = useState<ActionRow[]>([])
   const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map())
-  const [userNames, setUserNames] = useState<Map<number, string>>(new Map())
   const [isRC, setIsRC] = useState(false)
   const [canRespond, setCanRespond] = useState(false)
   const [tab, setTab] = useState<Tab>('open')
@@ -68,25 +67,25 @@ export default function RiskActionsPage() {
       if (error) throw new Error(`Action items: ${error.code ?? ''} ${error.message}`)
 
       let items = (data ?? []) as ActionRow[]
-      // Dept-scoped roles only see items tied to a risk in their department.
+      // Dept-scoped roles only see items ASSIGNED to their department (not by the
+      // risk's own dept — a risk can task another department).
       if (access.deptScopes !== null) {
         const scopes = new Set(access.deptScopes)
-        items = items.filter((a) => a.risks && scopes.has(a.risks.dept_code))
+        items = items.filter((a) => (a.assigned_depts ?? []).some((c) => scopes.has(c)))
       }
       setRows(items)
 
-      // dept + user names
-      const deptCodes = Array.from(new Set(items.map((a) => a.risks?.dept_code).filter((d): d is string => !!d)))
+      // dept names for everything referenced (assigned depts + risk depts)
+      const deptCodes = Array.from(new Set([
+        ...items.flatMap((a) => a.assigned_depts ?? []),
+        ...items.map((a) => a.risks?.dept_code).filter((d): d is string => !!d),
+      ]))
       if (deptCodes.length) {
         const { data: depts } = await supabase.from('pscs_departments').select('code,name_en').in('code', deptCodes)
         const dm = new Map<string, string>()
         for (const d of (depts ?? []) as { code: string; name_en: string }[]) dm.set(d.code, d.name_en)
         setDeptNames(dm)
       }
-      const { data: usersData } = await supabase.from('risk_users').select('id,name')
-      const um = new Map<number, string>()
-      for (const u of (usersData ?? []) as { id: number; name: string }[]) um.set(u.id, u.name)
-      setUserNames(um)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -202,7 +201,7 @@ export default function RiskActionsPage() {
                         key={a.id}
                         item={a}
                         deptLabel={a.risks ? (deptNames.get(a.risks.dept_code) ?? a.risks.dept_code) : '—'}
-                        ownerName={a.assigned_to ? (userNames.get(a.assigned_to) ?? `user #${a.assigned_to}`) : '—'}
+                        assignedLabel={(a.assigned_depts ?? []).map((c) => deptNames.get(c) ?? c).join(', ') || '—'}
                         isRC={isRC}
                         canRespond={canRespond}
                         busy={busy}
@@ -221,10 +220,10 @@ export default function RiskActionsPage() {
   )
 }
 
-function ActionCard({ item, deptLabel, ownerName, isRC, canRespond, busy, onRespond, onStatus }: {
+function ActionCard({ item, deptLabel, assignedLabel, isRC, canRespond, busy, onRespond, onStatus }: {
   item: ActionRow
   deptLabel: string
-  ownerName: string
+  assignedLabel: string
   isRC: boolean
   canRespond: boolean
   busy: boolean
@@ -258,7 +257,7 @@ function ActionCard({ item, deptLabel, ownerName, isRC, canRespond, busy, onResp
 
       <div style={{ fontSize: 13, marginTop: 6 }}>{item.description}</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-        Owner {ownerName}{item.due_date ? ` · due ${item.due_date}` : ''}
+        Assigned to {assignedLabel}{item.due_date ? ` · due ${item.due_date}` : ''}
       </div>
 
       {item.response && !editing && (

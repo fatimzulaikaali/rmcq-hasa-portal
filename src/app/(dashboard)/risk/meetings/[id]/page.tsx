@@ -50,6 +50,7 @@ export default function RiskMeetingDetailPage() {
   const [actions, setActions] = useState<RiskActionItem[]>([])
   const [users, setUsers] = useState<RiskUser[]>([])
   const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map())
+  const [allDepts, setAllDepts] = useState<{ code: string; name_en: string }[]>([])
   const [isRC, setIsRC] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
@@ -219,6 +220,11 @@ export default function RiskMeetingDetailPage() {
         for (const d of (depts ?? []) as { code: string; name_en: string }[]) dm.set(d.code, d.name_en)
         setDeptNames(dm)
       }
+
+      // Full department list — for assigning action items to one or more depts.
+      const { data: deptsAll } = await supabase.from('pscs_departments')
+        .select('code,name_en').eq('kind', 'department').not('risk_code', 'is', null).order('name_en')
+      setAllDepts((deptsAll ?? []) as { code: string; name_en: string }[])
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -389,9 +395,9 @@ export default function RiskMeetingDetailPage() {
    * that risk's department), with a named assignee. */
   async function addActionItem(
     agendaId: number, riskId: number,
-    a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null },
+    a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null },
   ) {
-    if (!meeting || !a.description.trim()) return
+    if (!meeting || !a.description.trim() || a.assigned_depts.length === 0) return
     setBusy(true); setActionError(null)
     try {
       const { error } = await supabase.from('risk_action_items').insert({
@@ -400,7 +406,7 @@ export default function RiskMeetingDetailPage() {
         risk_id: riskId,
         action_type: a.action_type,
         description: a.description.trim(),
-        assigned_to: a.assigned_to,
+        assigned_depts: a.assigned_depts,
         due_date: a.due_date || null,
         status: 'PENDING',
         created_by: currentUserId,
@@ -839,8 +845,8 @@ export default function RiskMeetingDetailPage() {
                               taggedThemeIds={tagsByRisk.get(risk.id) ?? []}
                               onToggleTheme={(themeId) => toggleTheme(risk.id, themeId)}
                               actionItems={actions.filter((a) => a.risk_id === risk.id)}
-                              users={users}
-                              nameOf={nameOf}
+                              allDepts={allDepts}
+                              deptNameOf={(c) => deptNames.get(c) ?? allDepts.find((d) => d.code === c)?.name_en ?? c}
                               onAddAction={(payload) => addActionItem(item.id, risk.id, payload)}
                               onDecide={(opts) => recordDecision(item, risk, opts)}
                               onRemove={() => removeAgendaItem(item)}
@@ -1207,7 +1213,7 @@ interface ScoreInputs {
 
 function AgendaItemCard({
   item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
-  themes, taggedThemeIds, onToggleTheme, actionItems, users, nameOf, onAddAction, onDecide, onRemove,
+  themes, taggedThemeIds, onToggleTheme, actionItems, allDepts, deptNameOf, onAddAction, onDecide, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -1221,9 +1227,9 @@ function AgendaItemCard({
   taggedThemeIds: number[]
   onToggleTheme: (themeId: number) => void
   actionItems: RiskActionItem[]
-  users: RiskUser[]
-  nameOf: (uid: number | null | undefined) => string
-  onAddAction: (a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null }) => void
+  allDepts: { code: string; name_en: string }[]
+  deptNameOf: (code: string) => string
+  onAddAction: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
   onDecide: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
 }) {
@@ -1388,13 +1394,13 @@ function AgendaItemCard({
                 <div key={a.id} style={{ fontSize: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontWeight: 600 }}>{ACTION_TYPE_LABEL[a.action_type]}:</span>
                   <span>{a.description}</span>
-                  <span style={{ color: 'var(--muted)' }}>→ {nameOf(a.assigned_to)}{a.due_date ? ` · due ${a.due_date}` : ''}</span>
+                  <span style={{ color: 'var(--muted)' }}>→ {(a.assigned_depts ?? []).map(deptNameOf).join(', ') || '—'}{a.due_date ? ` · due ${a.due_date}` : ''}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>[{ACTION_STATUS_LABEL[a.status]}]</span>
                 </div>
               ))}
             </div>
           )}
-          {isRC && <AddActionForm users={users} busy={busy} onAdd={onAddAction} />}
+          {isRC && <AddActionForm depts={allDepts} busy={busy} onAdd={onAddAction} />}
         </div>
       )}
     </div>
@@ -1416,45 +1422,58 @@ function ScorePicker({ label, value, onChange }: { label: string; value: number;
 
 /* ---------- Add action item form ---------- */
 
-function AddActionForm({ users, busy, onAdd }: {
-  users: RiskUser[]
+function AddActionForm({ depts, busy, onAdd }: {
+  depts: { code: string; name_en: string }[]
   busy: boolean
-  onAdd: (a: { action_type: ActionType; description: string; assigned_to: number | null; due_date: string | null }) => void
+  onAdd: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
 }) {
   const [type, setType] = useState<ActionType>('DIRECTIVE')
   const [desc, setDesc] = useState('')
-  const [assignee, setAssignee] = useState<string>('')
+  const [assigned, setAssigned] = useState<string[]>([])
   const [due, setDue] = useState('')
 
+  const ready = desc.trim() && assigned.length > 0
+  const addDept = (code: string) => { if (code && !assigned.includes(code)) setAssigned([...assigned, code]) }
+  const removeDept = (code: string) => setAssigned(assigned.filter((c) => c !== code))
+  const nameOfDept = (c: string) => depts.find((d) => d.code === c)?.name_en ?? c
+
   const submit = () => {
-    if (!desc.trim()) return
-    onAdd({ action_type: type, description: desc, assigned_to: assignee ? parseInt(assignee, 10) : null, due_date: due || null })
-    setDesc(''); setAssignee(''); setDue(''); setType('DIRECTIVE')
+    if (!ready) return
+    onAdd({ action_type: type, description: desc, assigned_depts: assigned, due_date: due || null })
+    setDesc(''); setAssigned([]); setDue(''); setType('DIRECTIVE')
   }
 
   return (
     <div style={{ borderTop: '1px dashed var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 600 }}>+ Add action item</div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={type} onChange={(e) => setType(e.target.value as ActionType)}
           style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
           <option value="DIRECTIVE">{ACTION_TYPE_LABEL.DIRECTIVE}</option>
           <option value="CLARIFICATION">{ACTION_TYPE_LABEL.CLARIFICATION}</option>
         </select>
-        <select value={assignee} onChange={(e) => setAssignee(e.target.value)}
-          style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
-          <option value="">— assign to —</option>
-          {users.filter((u) => u.is_active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        <select value="" onChange={(e) => { addDept(e.target.value); e.currentTarget.selectedIndex = 0 }}
+          style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 200 }}>
+          <option value="">+ assign to department…</option>
+          {depts.filter((d) => !assigned.includes(d.code)).map((d) => <option key={d.code} value={d.code}>{d.name_en}</option>)}
         </select>
         <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
           style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }} />
       </div>
+      {assigned.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {assigned.map((c) => (
+            <button key={c} type="button" className="theme-pill active" onClick={() => removeDept(c)}
+              title="Click to remove">{nameOfDept(c)} ×</button>
+          ))}
+        </div>
+      )}
       <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What needs to be done…"
         style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button type="button" className="signout-btn"
-          style={{ fontSize: 12, padding: '6px 14px', background: desc.trim() ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: desc.trim() ? 'var(--blue)' : '#9CA3AF' }}
-          disabled={!desc.trim() || busy} onClick={submit}>Add action</button>
+          style={{ fontSize: 12, padding: '6px 14px', background: ready ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: ready ? 'var(--blue)' : '#9CA3AF' }}
+          disabled={!ready || busy} onClick={submit}>Add action</button>
       </div>
     </div>
   )
