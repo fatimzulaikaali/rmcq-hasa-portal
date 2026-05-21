@@ -687,6 +687,23 @@ body{counter-reset:rcpage;}
 .risk-tab-attention.active{color:#B45309;border-bottom-color:#F59E0B;}
 .risk-tab-attention.active .risk-tab-count{background:#B45309;}
 
+/* ===== Risk module visual refresh (scoped to .risk-skin) ===== */
+.risk-skin .panel{border-radius:14px;border-color:#ECEAE3;box-shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.05);padding:16px 18px;}
+.risk-skin .tile{border-radius:14px;border-color:#ECEAE3;box-shadow:0 1px 2px rgba(16,24,40,.04);transition:transform .12s ease,box-shadow .12s ease;}
+.risk-skin .tile:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(16,24,40,.08);}
+.risk-skin .tile .tv{font-size:28px;}
+.risk-skin .risk-table tbody td:first-child{border-left:3px solid transparent;}
+
+.risk-chip{display:inline-flex;align-items:center;padding:3px 11px;border-radius:99px;font-size:11px;font-weight:700;}
+
+.risk-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;border-radius:16px;padding:18px 22px;margin-bottom:14px;background:var(--hero-bg,#fff);border:1px solid var(--border);border-left:7px solid var(--hero-accent,#9CA3AF);box-shadow:0 1px 3px rgba(16,24,40,.05);}
+.risk-hero-id{font-family:'Segoe UI Mono',ui-monospace,monospace;font-size:26px;font-weight:800;color:var(--text);letter-spacing:.01em;}
+.risk-hero-meta{font-size:13px;color:var(--muted);margin-top:5px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.risk-hero-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
+.risk-hero-score{text-align:center;flex-shrink:0;min-width:92px;}
+.risk-hero-score-num{font-size:38px;font-weight:800;line-height:1;}
+.risk-hero-score-lvl{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:700;border:1px solid currentColor;}
+
 /* Risk Register — top filter bar */
 .risk-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
 .risk-filterbar .rfb-label{font-size:12px;font-weight:700;color:var(--muted);margin-right:2px;}

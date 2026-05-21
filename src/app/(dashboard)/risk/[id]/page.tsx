@@ -390,7 +390,7 @@ export default function RiskDetailPage() {
           </div>
         </header>
 
-        <main className="tab-pane">
+        <main className="tab-pane risk-skin">
           {loadError && (
             <div className="ac red"><div className="ai">⚠️</div>
               <div><div className="at">Load error</div><div className="as">{loadError}</div></div>
@@ -417,47 +417,41 @@ export default function RiskDetailPage() {
 
           {!loading && !loadError && !notFound && risk && (
             <>
-              {/* Top summary tiles */}
-              <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-                <div className="tile">
-                  <div className="tl">Status</div>
-                  <div className="tv" style={{ fontSize: 18 }}>
-                    <span style={{
-                      display: 'inline-block', padding: '4px 10px', borderRadius: 4,
-                      fontSize: 12, fontWeight: 700,
-                      color: RISK_STATUS_BADGE[risk.status].fg,
-                      background: RISK_STATUS_BADGE[risk.status].bg,
-                    }}>{RISK_STATUS_LABEL[risk.status]}</span>
+              {/* Hero header — anchored by severity */}
+              <div className="risk-hero" style={{
+                ['--hero-accent' as string]: latest ? RISK_LEVEL_COLOR[latest.risk_level] : '#9CA3AF',
+                ['--hero-bg' as string]: latest ? RISK_LEVEL_BG[latest.risk_level] : '#F8FAFC',
+              } as React.CSSProperties}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="risk-hero-id">{risk.risk_id}</div>
+                  <div className="risk-hero-meta">
+                    <span>{dept?.name_en ?? risk.dept_code}</span>
+                    <span>· <b>{risk.category}</b> {RISK_CATEGORY_LABEL[risk.category]}</span>
+                    <span>· {RISK_SCOPE_LABEL[risk.scope]}</span>
+                  </div>
+                  <div className="risk-hero-chips">
+                    <span className="risk-chip" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
+                      {RISK_STATUS_LABEL[risk.status]}
+                    </span>
+                    <span className="risk-chip" style={{ color: 'var(--muted)', background: '#fff', border: '1px solid var(--border)' }}>
+                      Cycle {latest?.cycle_number ?? '—'}
+                    </span>
+                    <span className="risk-chip" style={{ color: 'var(--muted)', background: '#fff', border: '1px solid var(--border)' }}>
+                      {daysOpen(risk.date_opened, risk.date_closed)} days open
+                    </span>
                   </div>
                 </div>
-                <div className="tile">
-                  <div className="tl">Risk Level</div>
-                  <div className="tv" style={{ fontSize: 18 }}>
-                    {latest ? (
-                      <span style={{
-                        display: 'inline-block', padding: '4px 10px', borderRadius: 4,
-                        fontSize: 12, fontWeight: 700,
-                        color: RISK_LEVEL_COLOR[latest.risk_level],
-                        background: RISK_LEVEL_BG[latest.risk_level],
-                      }}>{RISK_LEVEL_LABEL[latest.risk_level]}</span>
-                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                  </div>
-                </div>
-                <div className="tile">
-                  <div className="tl">Risk Score</div>
-                  <div className="tv" style={{ color: latest ? RISK_LEVEL_COLOR[latest.risk_level] : 'var(--muted)' }}>
-                    {latest ? (Math.round(latest.risk_score * 10) / 10).toFixed(1) : '—'}
-                  </div>
-                </div>
-                <div className="tile">
-                  <div className="tl">Review Cycles</div>
-                  <div className="tv" style={{ color: 'var(--blue)' }}>{reviews.length}</div>
-                </div>
-                <div className="tile">
-                  <div className="tl">Days Open</div>
-                  <div className="tv" style={{ color: 'var(--teal)' }}>
-                    {daysOpen(risk.date_opened, risk.date_closed)}
-                  </div>
+                <div className="risk-hero-score">
+                  {latest ? (
+                    <>
+                      <div className="risk-hero-score-num" style={{ color: RISK_LEVEL_COLOR[latest.risk_level] }}>
+                        {(Math.round(latest.risk_score * 10) / 10).toFixed(1)}
+                      </div>
+                      <div className="risk-hero-score-lvl" style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: '#fff' }}>
+                        {RISK_LEVEL_LABEL[latest.risk_level]}
+                      </div>
+                    </>
+                  ) : <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Not yet scored</div>}
                 </div>
               </div>
 

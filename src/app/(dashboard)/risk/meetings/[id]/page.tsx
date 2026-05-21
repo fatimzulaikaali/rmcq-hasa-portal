@@ -592,7 +592,7 @@ export default function RiskMeetingDetailPage() {
           </div>
         </header>
 
-        <main className="tab-pane">
+        <main className="tab-pane risk-skin">
           {loadError && (
             <div className="ac red"><div className="ai">⚠️</div>
               <div><div className="at">Load error</div><div className="as">{loadError}</div></div></div>

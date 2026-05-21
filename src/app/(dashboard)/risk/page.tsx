@@ -253,7 +253,7 @@ export default function RiskListPage() {
           </div>
         </header>
 
-        <main className="tab-pane">
+        <main className="tab-pane risk-skin">
           {loadError && (
             <div className="ac red"><div className="ai">⚠️</div>
               <div><div className="at">Load error</div><div className="as">{loadError}</div></div>
@@ -382,7 +382,7 @@ export default function RiskListPage() {
                           const sb = RISK_STATUS_BADGE[risk.status]
                           return (
                             <tr key={risk.id}>
-                              <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11 }}>
+                              <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11, borderLeftColor: latest ? RISK_LEVEL_COLOR[latest.risk_level] : 'transparent' }}>
                                 <Link href={`/risk/${risk.id}`} style={{ color: 'var(--blue)' }}>{risk.risk_id}</Link>
                                 {escalatedRiskIds.has(risk.id) && (
                                   <span title="Escalated directive — bring back to committee"

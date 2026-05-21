@@ -164,7 +164,7 @@ export default function RiskActionsPage() {
           </div>
         </header>
 
-        <main className="tab-pane">
+        <main className="tab-pane risk-skin">
           {loadError && (
             <div className="ac red"><div className="ai">⚠️</div>
               <div><div className="at">Error</div><div className="as">{loadError}</div></div></div>
