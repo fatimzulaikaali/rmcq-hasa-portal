@@ -384,6 +384,10 @@ export default function RiskListPage() {
                             <tr key={risk.id}>
                               <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11 }}>
                                 <Link href={`/risk/${risk.id}`} style={{ color: 'var(--blue)' }}>{risk.risk_id}</Link>
+                                {escalatedRiskIds.has(risk.id) && (
+                                  <span title="Escalated directive — bring back to committee"
+                                    style={{ marginLeft: 5, color: '#DC2626' }}>⚑</span>
+                                )}
                               </td>
                               <td style={{ fontSize: 11 }}>{dept?.name_en ?? risk.dept_code}</td>
                               <td style={{ fontSize: 11 }}>
