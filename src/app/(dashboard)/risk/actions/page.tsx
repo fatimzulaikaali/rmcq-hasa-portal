@@ -43,6 +43,8 @@ export default function RiskActionsPage() {
   const [deptNames, setDeptNames] = useState<Map<string, string>>(new Map())
   const [isRC, setIsRC] = useState(false)
   const [canRespond, setCanRespond] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [roleName, setRoleName] = useState<string>('RLO')
   const [tab, setTab] = useState<Tab>('open')
   const [busy, setBusy] = useState(false)
 
@@ -59,6 +61,8 @@ export default function RiskActionsPage() {
       const role = access.activeRole?.role
       setIsRC(role === 'RC')
       setCanRespond(role === 'RLO' || role === 'HOD')
+      setCurrentUserId(access.riskUser.riskUserId)
+      if (role) setRoleName(role)
 
       const { data, error } = await supabase
         .from('risk_action_items')
@@ -95,6 +99,14 @@ export default function RiskActionsPage() {
 
   async function signOut() { await supabase.auth.signOut(); router.push('/login') }
 
+  async function audit(item: ActionRow, action_type: string, role: string, comment: string) {
+    if (!item.risk_id) return
+    await supabase.from('risk_audit_logs').insert({
+      risk_id: item.risk_id, entity_type: 'action_item', entity_id: item.id,
+      action_type, performed_by: currentUserId, user_role: role, comment,
+    })
+  }
+
   async function respond(item: ActionRow, text: string) {
     if (!text.trim()) return
     setBusy(true); setLoadError(null)
@@ -103,6 +115,7 @@ export default function RiskActionsPage() {
         .update({ response: text.trim(), status: 'RESPONDED', updated_at: new Date().toISOString() })
         .eq('id', item.id)
       if (error) throw new Error(`${error.code ?? ''} ${error.message}`)
+      await audit(item, 'ACTION_RESPONDED', roleName, `Feedback on directive: ${text.trim()}`)
       await load()
     } catch (e) { setLoadError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
@@ -114,6 +127,8 @@ export default function RiskActionsPage() {
       const { error } = await supabase.from('risk_action_items')
         .update({ status, updated_at: new Date().toISOString() }).eq('id', item.id)
       if (error) throw new Error(`${error.code ?? ''} ${error.message}`)
+      if (status === 'ACCEPTED') await audit(item, 'ACTION_ACCEPTED', 'RC', 'RC accepted the department feedback')
+      else if (status === 'ESCALATED') await audit(item, 'ACTION_ESCALATED', 'RC', 'RC escalated this directive for committee review')
       await load()
     } catch (e) { setLoadError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }

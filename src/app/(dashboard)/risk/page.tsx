@@ -57,6 +57,7 @@ export default function RiskListPage() {
   const [isAdminRole, setIsAdminRole]   = useState(false)
   const [activeRole,  setActiveRole]    = useState<ActiveRole | null>(null)
   const [openDirectives, setOpenDirectives] = useState<{ risk_id: number; depts: string[] }[]>([])
+  const [escalatedRiskIds, setEscalatedRiskIds] = useState<Set<number>>(new Set())
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -83,15 +84,19 @@ export default function RiskListPage() {
       const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }, { data: openActions }] = await Promise.all([
         supabase.from('risks').select('*').order('created_at', { ascending: false }),
         supabase.from('risk_reviews').select('*').order('cycle_number', { ascending: false }),
-        supabase.from('risk_action_items').select('risk_id, assigned_depts').in('status', ['PENDING', 'OVERDUE']),
+        supabase.from('risk_action_items').select('risk_id, assigned_depts, status').in('status', ['PENDING', 'OVERDUE', 'ESCALATED']),
       ])
       if (risksErr) throw new Error(`Loading risks: ${risksErr.code ?? ''} ${risksErr.message}`)
       if (reviewsErr) throw new Error(`Loading reviews: ${reviewsErr.code ?? ''} ${reviewsErr.message}`)
 
-      // Open committee directives (risk + the departments they're assigned to).
-      setOpenDirectives(((openActions ?? []) as { risk_id: number | null; assigned_depts: string[] | null }[])
+      const actionRows = ((openActions ?? []) as { risk_id: number | null; assigned_depts: string[] | null; status: string }[])
         .filter((a) => a.risk_id !== null)
+      // Directives awaiting the dept's feedback (PENDING/OVERDUE).
+      setOpenDirectives(actionRows
+        .filter((a) => a.status === 'PENDING' || a.status === 'OVERDUE')
         .map((a) => ({ risk_id: a.risk_id as number, depts: a.assigned_depts ?? [] })))
+      // Directives the RC escalated — flagged for the RC to bring back to committee.
+      setEscalatedRiskIds(new Set(actionRows.filter((a) => a.status === 'ESCALATED').map((a) => a.risk_id as number)))
 
       const latestByRisk = new Map<number, RiskReview>()
       for (const r of (reviewsData ?? []) as RiskReview[]) {
@@ -137,11 +142,14 @@ export default function RiskListPage() {
     const risksWithMyDirective = myDept
       ? new Set(openDirectives.filter((o) => o.depts.includes(myDept)).map((o) => o.risk_id))
       : new Set<number>()
-    if (statuses.length === 0 && risksWithMyDirective.size === 0) return []
+    // RC: risks with an escalated directive flagged to bring back to committee.
+    const isRC = activeRole.role === 'RC'
+    if (statuses.length === 0 && risksWithMyDirective.size === 0 && !(isRC && escalatedRiskIds.size > 0)) return []
     return scopedRows.filter((r) =>
       (statuses.includes(r.risk.status) && (r.risk.status !== 'OUT_OF_SCOPE' || r.risk.pending_ack)) ||
-      risksWithMyDirective.has(r.risk.id))
-  }, [scopedRows, activeRole, openDirectives])
+      risksWithMyDirective.has(r.risk.id) ||
+      (isRC && escalatedRiskIds.has(r.risk.id)))
+  }, [scopedRows, activeRole, openDirectives, escalatedRiskIds])
 
   // Terminal statuses. Out-of-scope is terminal only ONCE the RLO has acknowledged
   // it; until then it lives solely in the attention tab (not active, not archive).

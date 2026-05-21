@@ -400,7 +400,7 @@ export default function RiskMeetingDetailPage() {
     if (!meeting || !a.description.trim() || a.assigned_depts.length === 0) return
     setBusy(true); setActionError(null)
     try {
-      const { error } = await supabase.from('risk_action_items').insert({
+      const { data: ins, error } = await supabase.from('risk_action_items').insert({
         meeting_id: meeting.id,
         agenda_id: agendaId,
         risk_id: riskId,
@@ -410,8 +410,17 @@ export default function RiskMeetingDetailPage() {
         due_date: a.due_date || null,
         status: 'PENDING',
         created_by: currentUserId,
-      })
+      }).select('id').single()
       if (error) throw new Error(`Action item: ${error.code ?? ''} ${error.message}`)
+
+      // Record the directive in the risk's audit trail.
+      const deptLabel = a.assigned_depts.map((c) => allDepts.find((d) => d.code === c)?.name_en ?? c).join(', ')
+      await supabase.from('risk_audit_logs').insert({
+        risk_id: riskId, entity_type: 'action_item', entity_id: ins?.id ?? null,
+        action_type: `ACTION_ASSIGNED_${a.action_type}`,
+        performed_by: currentUserId, user_role: 'RC',
+        comment: `${ACTION_TYPE_LABEL[a.action_type]} → ${deptLabel}: ${a.description.trim()}`,
+      })
       await load()
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }

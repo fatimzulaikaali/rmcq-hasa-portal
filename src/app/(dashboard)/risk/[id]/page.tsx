@@ -303,9 +303,23 @@ export default function RiskDetailPage() {
         .update({ response: text.trim(), status: 'RESPONDED', updated_at: new Date().toISOString() })
         .eq('id', item.id)
       if (error) throw new Error(`Respond: ${error.code ?? ''} ${error.message}`)
+
+      // Record the department's feedback in the audit trail.
+      if (item.risk_id) {
+        await supabase.from('risk_audit_logs').insert({
+          risk_id: item.risk_id, entity_type: 'action_item', entity_id: item.id,
+          action_type: 'ACTION_RESPONDED',
+          performed_by: currentUserId, user_role: activeRole?.role ?? 'RLO',
+          comment: `Feedback on directive: ${text.trim()}`,
+        })
+      }
       const { data } = await supabase.from('risk_action_items')
         .select('*').eq('risk_id', riskRowId).order('id', { ascending: false })
       setActionItems((data ?? []) as RiskActionItem[])
+      // refresh the audit log too
+      const { data: logsData } = await supabase.from('risk_audit_logs')
+        .select('*').eq('risk_id', riskRowId).order('performed_at', { ascending: false })
+      setLogs((logsData ?? []) as AuditLog[])
     } catch (e) {
       setTransitionError(e instanceof Error ? e.message : String(e))
     }
