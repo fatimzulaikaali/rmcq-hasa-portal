@@ -140,9 +140,10 @@ export interface ModuleAccess {
 export async function getModuleAccess(supabase: SupabaseClient): Promise<ModuleAccess> {
   const res = await resolveCurrentRiskUser(supabase)
   if (!res.ok) {
-    // User isn't tracked in risk_users — treat as legacy (no Risk module access,
-    // but unrestricted on the other modules they were already using).
-    return { allModules: true, deptScopes: null, riskUser: null, activeRole: null }
+    // Logged in but not provisioned in risk_users → no access until the RMCQ
+    // admin registers them. (Pages show a "pending access" screen; not_logged_in
+    // is handled separately by each page redirecting to /login.)
+    return { allModules: false, deptScopes: [], riskUser: null, activeRole: null }
   }
   const u = res.user
   const active = resolveActiveRole(u.roles)

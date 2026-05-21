@@ -56,6 +56,7 @@ export default function RiskListPage() {
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
   const [isAdminRole, setIsAdminRole]   = useState(false)
   const [activeRole,  setActiveRole]    = useState<ActiveRole | null>(null)
+  const [notProvisioned, setNotProvisioned] = useState(false)
   const [openDirectives, setOpenDirectives] = useState<{ risk_id: number; depts: string[] }[]>([])
   const [escalatedRiskIds, setEscalatedRiskIds] = useState<Set<number>>(new Set())
 
@@ -69,6 +70,7 @@ export default function RiskListPage() {
 
       // Resolve the user's module access (admin-style vs dept-scoped)
       const access = await getModuleAccess(supabase)
+      if (!access.riskUser) { setNotProvisioned(true); setLoading(false); return }
       setAllowedDepts(access.deptScopes)
       setIsAdminRole(access.activeRole?.role === 'ADMIN')
       setActiveRole(access.activeRole)
@@ -265,7 +267,21 @@ export default function RiskListPage() {
             </div>
           )}
 
-          {!loading && !loadError && (
+          {!loading && notProvisioned && (
+            <div className="panel" style={{ textAlign: 'center', padding: 36 }}>
+              <div style={{ fontSize: 34, marginBottom: 10 }}>⏳</div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Your account isn&apos;t set up yet</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 460, margin: '0 auto' }}>
+                You&apos;re signed in, but you haven&apos;t been registered in the Risk module yet.
+                Please ask the RMCQ administrator to add you and assign your role — then sign in again.
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
+              </div>
+            </div>
+          )}
+
+          {!loading && !loadError && !notProvisioned && (
             <>
               <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
                 <div className="tile"><div className="tl">Total risks</div><div className="tv" style={{ color: 'var(--blue)' }}>{counts.total}</div></div>

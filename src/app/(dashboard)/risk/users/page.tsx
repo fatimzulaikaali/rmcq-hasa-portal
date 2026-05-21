@@ -44,6 +44,12 @@ export default function RiskUsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
+  // Bulk add
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResult, setBulkResult] = useState<string[]>([])
+
   // Inline edit state — only one row at a time
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName,  setEditName]  = useState('')
@@ -140,6 +146,51 @@ export default function RiskUsersPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  /* Bulk add: one user per line — "email, name, role, department".
+   * Department may be a code, a full name, or blank/"all" for hospital-wide. */
+  async function handleBulkAdd() {
+    const lines = bulkText.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (lines.length === 0) return
+    setBulkBusy(true); setBulkResult([])
+    const out: string[] = []
+    for (const line of lines) {
+      const parts = line.split(/[\t,;]/).map((p) => p.trim())
+      const [email, name, roleRaw, deptRaw] = parts
+      if (!email || !name || !roleRaw) { out.push(`✗ "${line}" — needs email, name, role`); continue }
+      const role = roleRaw.toUpperCase() as RiskRole
+      if (!(role in RISK_ROLE_LABEL)) { out.push(`✗ ${email} — unknown role "${roleRaw}" (use RLO/HOD/RC/ROC_MEMBER/RTC_MEMBER/DIRECTOR/ADMIN)`); continue }
+      let deptScope = 'all'
+      const dr = (deptRaw ?? '').toLowerCase()
+      if (dr && !['all', 'hospital-wide', 'hospitalwide'].includes(dr)) {
+        const d = depts.find((x) => x.code.toLowerCase() === dr || x.name_en.toLowerCase() === dr)
+        if (!d) { out.push(`✗ ${email} — department not found: "${deptRaw}"`); continue }
+        deptScope = d.code
+      }
+      try {
+        const em = email.toLowerCase()
+        const { data: existing } = await supabase.from('risk_users').select('id').eq('email', em).maybeSingle()
+        let userId: number
+        if (existing) {
+          userId = existing.id
+          await supabase.from('risk_users').update({ name, is_active: true }).eq('id', userId)
+        } else {
+          const { data: ins, error: insErr } = await supabase.from('risk_users')
+            .insert({ name, email: em, is_active: true }).select('id').single()
+          if (insErr) throw new Error(`${insErr.code ?? ''} ${insErr.message}`)
+          userId = ins.id as number
+        }
+        await assignRole(userId, role, deptScope)
+        out.push(`✓ ${email} — ${role}${deptScope !== 'all' ? ` · ${deptScope}` : ' · hospital-wide'}`)
+      } catch (e) {
+        out.push(`✗ ${email} — ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    setBulkResult(out)
+    setBulkText('')
+    setBulkBusy(false)
+    await load()
   }
 
   /* Assign a role to a user. Handles the UNIQUE(user_id, dept_code, role)
@@ -343,6 +394,45 @@ export default function RiskUsersPage() {
                     {submitting ? 'Saving…' : '+ Add User'}
                   </button>
                 </div>
+              </div>
+
+              {/* Bulk add */}
+              <div className="panel">
+                <div className="pf" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="pt">⬆ Bulk Add</div>
+                    <div className="psub">Paste one person per line to add many at once.</div>
+                  </div>
+                  <button type="button" className="signout-btn" style={{ fontSize: 12, padding: '5px 12px' }}
+                    onClick={() => setBulkOpen((v) => !v)}>{bulkOpen ? 'Hide' : 'Open'}</button>
+                </div>
+                {bulkOpen && (
+                  <>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                      Format per line: <code>email, name, role, department</code> — role is one of
+                      RLO / HOD / RC / ROC_MEMBER / RTC_MEMBER / DIRECTOR / ADMIN. Department can be a name,
+                      a code, or blank/&quot;all&quot; for hospital-wide. Commas, tabs or semicolons all work
+                      (so you can paste straight from Excel).
+                    </div>
+                    <textarea rows={6} value={bulkText} onChange={(e) => setBulkText(e.target.value)}
+                      placeholder={'ali@hasa.uitm.edu.my, Dr Ali, RLO, Department of Medicine\nahmad@hasa.uitm.edu.my, Dr Ahmad, HOD, Department of Medicine\nsiti@hasa.uitm.edu.my, Dr Siti, RC, all'}
+                      style={{ width: '100%', padding: 9, border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'monospace', fontSize: 12 }} />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <button type="button" className="signout-btn"
+                        style={{ background: bulkBusy ? '#9CA3AF' : 'var(--blue)', color: '#fff', borderColor: bulkBusy ? '#9CA3AF' : 'var(--blue)' }}
+                        disabled={bulkBusy || !bulkText.trim()} onClick={handleBulkAdd}>
+                        {bulkBusy ? 'Adding…' : 'Add all'}
+                      </button>
+                    </div>
+                    {bulkResult.length > 0 && (
+                      <div style={{ marginTop: 10, fontSize: 12, fontFamily: 'monospace', background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', maxHeight: 200, overflow: 'auto' }}>
+                        {bulkResult.map((r, i) => (
+                          <div key={i} style={{ color: r.startsWith('✓') ? '#166534' : '#991B1B' }}>{r}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Users + roles table */}
