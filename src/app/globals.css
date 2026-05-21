@@ -704,6 +704,15 @@ body{counter-reset:rcpage;}
 .risk-hero-score-num{font-size:38px;font-weight:800;line-height:1;}
 .risk-hero-score-lvl{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:700;border:1px solid currentColor;}
 
+/* section headers, fields & description blocks on the detail page */
+.risk-skin .panel > .pf{border-bottom:1px solid #EFEDE7;padding-bottom:11px;margin-bottom:14px;}
+.risk-skin .pt{font-size:14px;display:flex;align-items:center;gap:8px;}
+.risk-skin .risk-detail-grid{gap:16px 24px;}
+.risk-skin .risk-def-label{font-size:9px;letter-spacing:.06em;color:#9A988F;}
+.risk-skin .risk-def-value{font-size:14px;font-weight:500;color:var(--text);}
+.risk-skin .risk-def-block{margin-bottom:12px;}
+.risk-skin .risk-def-block-value{background:#fff;border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:8px;padding:11px 14px;}
+
 /* Risk Register — top filter bar */
 .risk-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
 .risk-filterbar .rfb-label{font-size:12px;font-weight:700;color:var(--muted);margin-right:2px;}

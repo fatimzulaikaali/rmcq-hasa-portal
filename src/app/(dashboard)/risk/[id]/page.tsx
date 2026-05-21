@@ -458,7 +458,7 @@ export default function RiskDetailPage() {
               {/* Status & Workflow Actions */}
               <div className="panel" style={{ marginTop: 14 }}>
                 <div className="pf"><div>
-                  <div className="pt">Status &amp; Workflow</div>
+                  <div className="pt">🔄 Status &amp; Workflow</div>
                   <div className="psub">Current: <b>{RISK_STATUS_LABEL[risk.status]}</b>. Pick the next action below.</div>
                 </div></div>
                 {transitionError && (
@@ -653,7 +653,7 @@ export default function RiskDetailPage() {
               {committeeReviews.length > 0 && (
                 <div className="panel" style={{ marginTop: 14 }}>
                   <div className="pf"><div>
-                    <div className="pt">Committee Reviews</div>
+                    <div className="pt">🏛️ Committee Reviews</div>
                     <div className="psub">Decisions recorded for this risk at RTC / ROC meetings</div>
                   </div></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -694,7 +694,7 @@ export default function RiskDetailPage() {
               {actionItems.length > 0 && (
                 <div className="panel">
                   <div className="pf"><div>
-                    <div className="pt">Committee Action Items</div>
+                    <div className="pt">📌 Committee Action Items</div>
                     <div className="psub">Directives &amp; clarifications from the committee — the department&apos;s feedback is reviewed at the next meeting</div>
                   </div></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -718,7 +718,7 @@ export default function RiskDetailPage() {
 
               {/* Section 1 — Identification */}
               <div className="panel" style={{ marginTop: 14 }}>
-                <div className="pf"><div><div className="pt">1. Risk Identification</div></div></div>
+                <div className="pf"><div><div className="pt">🪪 1. Risk Identification</div></div></div>
                 <div className="risk-detail-grid">
                   <DefLine label="Risk ID" mono>{risk.risk_id}</DefLine>
                   <DefLine label="Department">{dept ? `${dept.name_en}` : risk.dept_code} <span style={{ color: 'var(--muted)' }}>({risk.dept_code})</span></DefLine>
@@ -747,7 +747,7 @@ export default function RiskDetailPage() {
 
               {/* Section 2 — Description */}
               <div className="panel">
-                <div className="pf"><div><div className="pt">2. Risk Description</div></div></div>
+                <div className="pf"><div><div className="pt">📝 2. Risk Description</div></div></div>
                 <DefBlock label="Risk description">{risk.description}</DefBlock>
                 <DefBlock label="Cause">{risk.cause_description}</DefBlock>
                 <DefBlock label="Impact">{risk.impact_description}</DefBlock>
@@ -755,7 +755,7 @@ export default function RiskDetailPage() {
 
               {/* Section 3 — Controls */}
               <div className="panel">
-                <div className="pf"><div><div className="pt">3. Controls &amp; Treatment</div></div></div>
+                <div className="pf"><div><div className="pt">🛡️ 3. Controls &amp; Treatment</div></div></div>
                 <DefBlock label="Existing controls">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <DefBlock label="Additional controls proposed">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <div className="risk-detail-grid">
@@ -769,7 +769,7 @@ export default function RiskDetailPage() {
               {latest && (
                 <div className="panel">
                   <div className="pf"><div>
-                    <div className="pt">4. Latest Review — Cycle {latest.cycle_number}</div>
+                    <div className="pt">📊 4. Latest Review — Cycle {latest.cycle_number}</div>
                     <div className="psub">Reviewed by {nameOf(latest.reviewed_by)} on {fmtDate(latest.review_date)}</div>
                   </div></div>
                   <div className="risk-score-preview" style={{ marginTop: 0 }}>
@@ -822,7 +822,7 @@ export default function RiskDetailPage() {
               {/* Section 5 — Review History */}
               {reviews.length > 1 && (
                 <div className="panel">
-                  <div className="pf"><div><div className="pt">5. Review History</div><div className="psub">{reviews.length} cycles total</div></div></div>
+                  <div className="pf"><div><div className="pt">🕘 5. Review History</div><div className="psub">{reviews.length} cycles total</div></div></div>
                   <div style={{ overflowX: 'auto' }}>
                     <table className="risk-table">
                       <thead>
@@ -869,7 +869,7 @@ export default function RiskDetailPage() {
 
               {/* Section 6 — Audit log */}
               <div className="panel">
-                <div className="pf"><div><div className="pt">6. Audit Log</div><div className="psub">{logs.length} event{logs.length === 1 ? '' : 's'}</div></div></div>
+                <div className="pf"><div><div className="pt">🧾 6. Audit Log</div><div className="psub">{logs.length} event{logs.length === 1 ? '' : 's'}</div></div></div>
                 {logs.length === 0 ? (
                   <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No audit events yet.</div>
                 ) : (
