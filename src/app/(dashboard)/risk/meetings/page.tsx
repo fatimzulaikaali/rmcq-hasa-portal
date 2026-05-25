@@ -102,7 +102,7 @@ export default function RiskMeetingsPage() {
         location: form.location.trim() || null,
         status: 'PLANNED',
         created_by: riskUserId,
-        chaired_by: riskUserId,
+        chaired_by: null,
       }).select('id').single()
       if (error) throw new Error(`Create meeting: ${error.code ?? ''} ${error.message}`)
       router.push(`/risk/meetings/${ins.id}`)

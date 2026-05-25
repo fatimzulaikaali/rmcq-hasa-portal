@@ -696,6 +696,10 @@ body{counter-reset:rcpage;}
 
 .risk-chip{display:inline-flex;align-items:center;padding:3px 11px;border-radius:99px;font-size:11px;font-weight:700;}
 
+/* Detail-page flow — flex column so panels can be re-ordered (info sections
+   first; committee history, workflow buttons, then audit log) via `order`. */
+.risk-detail-flow{display:flex;flex-direction:column;}
+
 .risk-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;border-radius:16px;padding:18px 22px;margin-bottom:14px;background:var(--hero-bg,#fff);border:1px solid var(--border);border-left:7px solid var(--hero-accent,#9CA3AF);box-shadow:0 1px 3px rgba(16,24,40,.05);}
 .risk-hero-id{font-family:'Segoe UI Mono',ui-monospace,monospace;font-size:26px;font-weight:800;color:var(--text);letter-spacing:.01em;}
 .risk-hero-meta{font-size:13px;color:var(--muted);margin-top:5px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}

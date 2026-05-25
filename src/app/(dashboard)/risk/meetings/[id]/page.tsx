@@ -81,9 +81,13 @@ export default function RiskMeetingDetailPage() {
 
   const tabledStatus = (mt: RiskMeeting['meeting_type']) => (mt === 'RTC' ? 'TABLED_RTC' : 'TABLED_ROC')
 
-  async function load() {
+  // `silent` reloads skip the loading spinner so the agenda cards stay mounted —
+  // otherwise flipping `loading` true unmounts them and wipes any half-typed
+  // decision notes / action text the RC hasn't saved yet.
+  async function load(opts?: { silent?: boolean }) {
     if (!Number.isFinite(meetingId)) { setNotFound(true); setLoading(false); return }
-    setLoading(true); setLoadError(null); setAccessDenied(false); setNotFound(false)
+    if (!opts?.silent) setLoading(true)
+    setLoadError(null); setAccessDenied(false); setNotFound(false)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
@@ -247,7 +251,7 @@ export default function RiskMeetingDetailPage() {
       const { error } = await supabase.from('risk_meetings')
         .update({ status, updated_at: new Date().toISOString() }).eq('id', meeting.id)
       if (error) throw new Error(`${error.code ?? ''} ${error.message}`)
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -259,7 +263,7 @@ export default function RiskMeetingDetailPage() {
       const { error } = await supabase.from('risk_meetings')
         .update({ minutes: minutesText.trim() || null, updated_at: new Date().toISOString() }).eq('id', meeting.id)
       if (error) throw new Error(`${error.code ?? ''} ${error.message}`)
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -275,7 +279,7 @@ export default function RiskMeetingDetailPage() {
       })
       if (error) throw new Error(`Add to agenda: ${error.code ?? ''} ${error.message}`)
       setPickRiskId('')
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -297,7 +301,7 @@ export default function RiskMeetingDetailPage() {
       }))
       const { error } = await supabase.from('risk_meeting_agenda').insert(rows)
       if (error) throw new Error(`Add all: ${error.code ?? ''} ${error.message}`)
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -309,7 +313,7 @@ export default function RiskMeetingDetailPage() {
     try {
       const { error } = await supabase.from('risk_meeting_agenda').delete().eq('id', item.id)
       if (error) throw new Error(`${error.code ?? ''} ${error.message}`)
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -386,7 +390,7 @@ export default function RiskMeetingDetailPage() {
         comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} — ${COMMITTEE_OUTCOME_LABEL[opts.outcome]}${opts.notes.trim() ? `: ${opts.notes.trim()}` : ''}`,
       })
 
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -421,7 +425,7 @@ export default function RiskMeetingDetailPage() {
         performed_by: currentUserId, user_role: 'RC',
         comment: `${ACTION_TYPE_LABEL[a.action_type]} → ${deptLabel}: ${a.description.trim()}`,
       })
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -442,7 +446,7 @@ export default function RiskMeetingDetailPage() {
           .insert({ risk_id: riskId, theme_id: themeId, tagged_by: currentUserId })
         if (error && error.code !== '23505') throw new Error(`Tag: ${error.code ?? ''} ${error.message}`)
       }
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -457,7 +461,7 @@ export default function RiskMeetingDetailPage() {
       })
       if (error && error.code !== '23505') throw new Error(`Link RTC: ${error.code ?? ''} ${error.message}`)
       setPickRtcId('')
-      await load()
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -468,7 +472,81 @@ export default function RiskMeetingDetailPage() {
       const { error } = await supabase.from('risk_roc_rtc_links')
         .delete().eq('roc_meeting_id', meeting.id).eq('rtc_meeting_id', rtcMeetingId)
       if (error) throw new Error(`Unlink: ${error.code ?? ''} ${error.message}`)
-      await load()
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Set / clear who chaired this meeting (RC). Not auto-filled on create. */
+  async function setChair(uid: number | null) {
+    if (!meeting) return
+    setBusy(true); setActionError(null)
+    try {
+      const { error } = await supabase.from('risk_meetings')
+        .update({ chaired_by: uid, updated_at: new Date().toISOString() }).eq('id', meeting.id)
+      if (error) throw new Error(`Set chair: ${error.code ?? ''} ${error.message}`)
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Delete a meeting (e.g. one created by mistake). Removes its agenda,
+   * decisions and action items; does NOT revert risk statuses already changed
+   * by past decisions. */
+  async function deleteMeeting() {
+    if (!meeting) return
+    if (!window.confirm(
+      `Delete this ${meeting.meeting_type} meeting "${meeting.title}"?\n\n` +
+      'This removes its agenda, recorded decisions and action items. ' +
+      'Any risk statuses already changed by past decisions will NOT be reverted. ' +
+      'This cannot be undone.'
+    )) return
+    setBusy(true); setActionError(null)
+    try {
+      await supabase.from('risk_action_items').delete().eq('meeting_id', meeting.id)
+      await supabase.from('risk_meeting_agenda').delete().eq('meeting_id', meeting.id)
+      await supabase.from('risk_roc_rtc_links').delete().eq('roc_meeting_id', meeting.id)
+      await supabase.from('risk_roc_rtc_links').delete().eq('rtc_meeting_id', meeting.id)
+      const { error } = await supabase.from('risk_meetings').delete().eq('id', meeting.id)
+      if (error) throw new Error(`Delete meeting: ${error.code ?? ''} ${error.message}`)
+      router.push('/risk/meetings')
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)); setBusy(false) }
+  }
+
+  /* Create a brand-new cross-cutting theme on the fly and tag this risk with it
+   * (RC, during the RTC). The theme joins the shared master list for reuse. */
+  async function addCustomTheme(riskId: number, name: string) {
+    if (!currentUserId || !name.trim()) return
+    setBusy(true); setActionError(null)
+    try {
+      const { data: created, error } = await supabase.from('cross_cutting_themes')
+        .insert({ name: name.trim(), is_active: true }).select('id').single()
+      if (error) throw new Error(`New theme: ${error.code ?? ''} ${error.message}`)
+      const { error: tagErr } = await supabase.from('risk_theme_tags')
+        .insert({ risk_id: riskId, theme_id: created.id as number, tagged_by: currentUserId })
+      if (tagErr && tagErr.code !== '23505') throw new Error(`Tag: ${tagErr.code ?? ''} ${tagErr.message}`)
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Edit the discussion notes after a decision has been recorded (RC). */
+  async function editDiscussionNotes(item: RiskMeetingAgenda, text: string) {
+    if (!meeting) return
+    setBusy(true); setActionError(null)
+    try {
+      const { error } = await supabase.from('risk_meeting_agenda')
+        .update({ discussion_notes: text.trim() || null }).eq('id', item.id)
+      if (error) throw new Error(`Edit notes: ${error.code ?? ''} ${error.message}`)
+      if (currentUserId && item.risk_id) {
+        await supabase.from('risk_audit_logs').insert({
+          risk_id: item.risk_id, entity_type: 'risk', entity_id: item.risk_id,
+          action_type: `${meeting.meeting_type}_NOTE_EDIT`,
+          performed_by: currentUserId, user_role: 'RC',
+          comment: `Discussion notes updated: ${text.trim() || '(cleared)'}`,
+        })
+      }
+      await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -633,7 +711,8 @@ export default function RiskMeetingDetailPage() {
                   <div className="pt">{meeting.title}</div>
                   <div className="psub">
                     {MEETING_TYPE_LABEL[meeting.meeting_type]} · {meeting.meeting_date}
-                    {meeting.location ? ` · ${meeting.location}` : ''} · chaired by {nameOf(meeting.chaired_by)}
+                    {meeting.location ? ` · ${meeting.location}` : ''}
+                    {meeting.chaired_by ? ` · chaired by ${nameOf(meeting.chaired_by)}` : ''}
                   </div>
                 </div></div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -654,6 +733,23 @@ export default function RiskMeetingDetailPage() {
                     </button>
                   ))}
                 </div>
+                {isRC && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>Chair:</span>
+                    <select value={meeting.chaired_by ?? ''} disabled={busy}
+                      onChange={(e) => setChair(e.target.value ? parseInt(e.target.value, 10) : null)}
+                      style={{ fontSize: 12, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
+                      <option value="">— not set —</option>
+                      {users.filter((u) => u.is_active).map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                    <div style={{ flex: 1 }} />
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 11, padding: '4px 10px', color: 'var(--red)', borderColor: 'var(--red)' }}
+                      disabled={busy} onClick={deleteMeeting}>🗑 Delete meeting</button>
+                  </div>
+                )}
               </div>
 
               {/* ROC: RTC roll-up + cross-cutting summary */}
@@ -853,6 +949,8 @@ export default function RiskMeetingDetailPage() {
                               themes={themes}
                               taggedThemeIds={tagsByRisk.get(risk.id) ?? []}
                               onToggleTheme={(themeId) => toggleTheme(risk.id, themeId)}
+                              onAddCustomTheme={(name) => addCustomTheme(risk.id, name)}
+                              onEditNotes={(text) => editDiscussionNotes(item, text)}
                               actionItems={actions.filter((a) => a.risk_id === risk.id)}
                               allDepts={allDepts}
                               deptNameOf={(c) => deptNames.get(c) ?? allDepts.find((d) => d.code === c)?.name_en ?? c}
@@ -1222,7 +1320,8 @@ interface ScoreInputs {
 
 function AgendaItemCard({
   item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
-  themes, taggedThemeIds, onToggleTheme, actionItems, allDepts, deptNameOf, onAddAction, onDecide, onRemove,
+  themes, taggedThemeIds, onToggleTheme, onAddCustomTheme, onEditNotes,
+  actionItems, allDepts, deptNameOf, onAddAction, onDecide, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -1235,6 +1334,8 @@ function AgendaItemCard({
   themes: CrossCuttingTheme[]
   taggedThemeIds: number[]
   onToggleTheme: (themeId: number) => void
+  onAddCustomTheme: (name: string) => void
+  onEditNotes: (text: string) => void
   actionItems: RiskActionItem[]
   allDepts: { code: string; name_en: string }[]
   deptNameOf: (code: string) => string
@@ -1243,6 +1344,9 @@ function AgendaItemCard({
   onRemove: () => void
 }) {
   const [themesOpen, setThemesOpen] = useState(false)
+  const [newTheme, setNewTheme] = useState('')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [notesEdit, setNotesEdit] = useState(item.discussion_notes ?? '')
   const [outcome, setOutcome] = useState<CommitteeOutcome | ''>('')
   const [notes, setNotes] = useState('')
   const [rescoreOpen, setRescoreOpen] = useState(false)
@@ -1314,6 +1418,15 @@ function AgendaItemCard({
                       </button>
                     )
                   })}
+                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 6, display: 'flex', gap: 6 }}>
+                    <input type="text" value={newTheme} onChange={(e) => setNewTheme(e.target.value)}
+                      placeholder="New theme…" disabled={busy}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && newTheme.trim()) { onAddCustomTheme(newTheme.trim()); setNewTheme('') } }}
+                      style={{ flex: 1, fontSize: 12, padding: '4px 6px', border: '1px solid var(--border)', borderRadius: 6 }} />
+                    <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 8px' }}
+                      disabled={busy || !newTheme.trim()}
+                      onClick={() => { onAddCustomTheme(newTheme.trim()); setNewTheme('') }}>Add</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1322,16 +1435,37 @@ function AgendaItemCard({
       )}
 
       {decided ? (
-        <div className="ac" style={{ marginTop: 10, background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-          <div className="ai">✓</div>
-          <div>
-            <div className="at">Decision: {COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome]}</div>
-            <div className="as">
-              Recorded by {decidedByName}{item.decided_at ? ` on ${item.decided_at.slice(0, 10)}` : ''}
-              {item.review_id ? ' · re-scored' : ''}
-              {item.discussion_notes ? ` — ${item.discussion_notes}` : ''}
+        <div style={{ marginTop: 10 }}>
+          <div className="ac" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+            <div className="ai">✓</div>
+            <div>
+              <div className="at">Decision: {COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome]}</div>
+              <div className="as">
+                Recorded by {decidedByName}{item.decided_at ? ` on ${item.decided_at.slice(0, 10)}` : ''}
+                {item.review_id ? ' · re-scored' : ''}
+                {item.discussion_notes ? ` — ${item.discussion_notes}` : ''}
+              </div>
             </div>
           </div>
+          {isRC && (editingNotes ? (
+            <div style={{ marginTop: 8 }}>
+              <textarea rows={2} value={notesEdit} onChange={(e) => setNotesEdit(e.target.value)}
+                placeholder="Discussion notes…"
+                style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+                <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+                  onClick={() => { setNotesEdit(item.discussion_notes ?? ''); setEditingNotes(false) }}>Cancel</button>
+                <button type="button" className="signout-btn"
+                  style={{ fontSize: 11, padding: '4px 12px', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                  disabled={busy} onClick={() => { onEditNotes(notesEdit); setEditingNotes(false) }}>Save notes</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+                onClick={() => { setNotesEdit(item.discussion_notes ?? ''); setEditingNotes(true) }}>✎ Edit discussion notes</button>
+            </div>
+          ))}
         </div>
       ) : !isRC ? (
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>

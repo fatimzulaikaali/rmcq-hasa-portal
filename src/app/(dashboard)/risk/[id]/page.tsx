@@ -150,8 +150,13 @@ export default function RiskDetailPage() {
       const actions = (actionData ?? []) as RiskActionItem[]
       setActionItems(actions)
 
-      // Names for the departments these action items are assigned to.
-      const actionDeptCodes = Array.from(new Set(actions.flatMap((a) => a.assigned_depts ?? [])))
+      // Names for the departments these action items are assigned to, plus the
+      // risk's own action-owner department(s).
+      const ownerDepts = (riskData as Risk).action_owner_depts ?? []
+      const actionDeptCodes = Array.from(new Set([
+        ...actions.flatMap((a) => a.assigned_depts ?? []),
+        ...ownerDepts,
+      ]))
       if (actionDeptCodes.length) {
         const { data: adepts } = await supabase.from('pscs_departments').select('code,name_en').in('code', actionDeptCodes)
         const adm = new Map<string, string>()
@@ -332,8 +337,17 @@ export default function RiskDetailPage() {
 
   function fmtDate(s: string | null | undefined): string {
     if (!s) return '—'
-    // ISO date / timestamp — slice to YYYY-MM-DD HH:MM
-    return s.length > 10 ? `${s.slice(0, 10)} ${s.slice(11, 16)}` : s.slice(0, 10)
+    // Date-only values (YYYY-MM-DD) have no time/zone — show as-is.
+    if (s.length <= 10) return s
+    // Timestamps are stored in UTC; render them in Malaysia time (MYT, UTC+8)
+    // so the audit log matches the wall clock people actually saw.
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return s.slice(0, 10)
+    return new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: 'Asia/Kuala_Lumpur',
+    }).format(d).replace(',', '')
   }
 
   const latest = reviews[0] ?? null
@@ -417,6 +431,7 @@ export default function RiskDetailPage() {
 
           {!loading && !loadError && !notFound && risk && (
             <>
+              <div className="risk-detail-flow">
               {/* Hero header — anchored by severity */}
               <div className="risk-hero" style={{
                 ['--hero-accent' as string]: latest ? RISK_LEVEL_COLOR[latest.risk_level] : '#9CA3AF',
@@ -455,8 +470,8 @@ export default function RiskDetailPage() {
                 </div>
               </div>
 
-              {/* Status & Workflow Actions */}
-              <div className="panel" style={{ marginTop: 14 }}>
+              {/* Status & Workflow Actions — pushed near the bottom (read first, act last) */}
+              <div className="panel" style={{ marginTop: 14, order: 3 }}>
                 <div className="pf"><div>
                   <div className="pt">🔄 Status &amp; Workflow</div>
                   <div className="psub">Current: <b>{RISK_STATUS_LABEL[risk.status]}</b>. Pick the next action below.</div>
@@ -649,9 +664,9 @@ export default function RiskDetailPage() {
                 </div>
               </div>
 
-              {/* Committee Reviews — decisions from RTC/ROC meetings */}
+              {/* Committee Reviews — decisions from RTC/ROC meetings (below the info sections) */}
               {committeeReviews.length > 0 && (
-                <div className="panel" style={{ marginTop: 14 }}>
+                <div className="panel" style={{ marginTop: 14, order: 2 }}>
                   <div className="pf"><div>
                     <div className="pt">🏛️ Committee Reviews</div>
                     <div className="psub">Decisions recorded for this risk at RTC / ROC meetings</div>
@@ -690,9 +705,9 @@ export default function RiskDetailPage() {
                 </div>
               )}
 
-              {/* Committee Action Items — directives & clarifications, with RLO feedback */}
+              {/* Committee Action Items — directives & clarifications, with RLO feedback (below the info sections) */}
               {actionItems.length > 0 && (
-                <div className="panel">
+                <div className="panel" style={{ marginTop: 14, order: 2 }}>
                   <div className="pf"><div>
                     <div className="pt">📌 Committee Action Items</div>
                     <div className="psub">Directives &amp; clarifications from the committee — the department&apos;s feedback is reviewed at the next meeting</div>
@@ -759,7 +774,11 @@ export default function RiskDetailPage() {
                 <DefBlock label="Existing controls">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <DefBlock label="Additional controls proposed">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <div className="risk-detail-grid">
-                  <DefLine label="Action owner">{risk.action_owner || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
+                  <DefLine label="Action owner">
+                    {(risk.action_owner_depts && risk.action_owner_depts.length)
+                      ? risk.action_owner_depts.map((c) => actionDeptNames.get(c) ?? c).join(', ')
+                      : (risk.action_owner || <em style={{ color: 'var(--muted)' }}>—</em>)}
+                  </DefLine>
                   <DefLine label="Implementation period">{risk.implementation_period || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
                 </div>
                 {risk.notes && <DefBlock label="Notes">{risk.notes}</DefBlock>}
@@ -867,8 +886,8 @@ export default function RiskDetailPage() {
                 </div>
               )}
 
-              {/* Section 6 — Audit log */}
-              <div className="panel">
+              {/* Section 6 — Audit log (always last) */}
+              <div className="panel" style={{ order: 4 }}>
                 <div className="pf"><div><div className="pt">🧾 6. Audit Log</div><div className="psub">{logs.length} event{logs.length === 1 ? '' : 's'}</div></div></div>
                 {logs.length === 0 ? (
                   <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No audit events yet.</div>
@@ -889,9 +908,6 @@ export default function RiskDetailPage() {
                 )}
               </div>
 
-              {/* Status workflow next-step hint */}
-              <div style={{ marginTop: 10, fontSize: 10, color: 'var(--muted)' }}>
-                Phase 3.3 — read-only detail page. Add Review Cycle (3.4) and Approval Workflow buttons (3.5) coming next.
               </div>
             </>
           )}

@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
 import {
   RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
@@ -28,7 +29,7 @@ interface FormState {
   existing_controls: string
   additional_controls: string
   control_classification: string
-  action_owner: string
+  action_owner_depts: string[]
   implementation_period: string
   notes: string
   likelihood: number
@@ -43,7 +44,7 @@ const EMPTY: FormState = {
   dept_code: '', category: '', scope: '',
   description: '', cause_description: '', impact_description: '',
   existing_controls: '', additional_controls: '',
-  control_classification: '', action_owner: '', implementation_period: '',
+  control_classification: '', action_owner_depts: [], implementation_period: '',
   notes: '',
   likelihood: 0,
   impact_manusia: 0, impact_reputasi: 0, impact_kewangan: 0,
@@ -61,6 +62,7 @@ export default function NewRiskPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const [depts, setDepts]   = useState<RiskDept[]>([])
+  const [allDepts, setAllDepts] = useState<{ code: string; name_en: string }[]>([])
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
   const [riskUserName, setRiskUserName] = useState<string>('')
 
@@ -97,6 +99,12 @@ export default function NewRiskPage() {
         .order('sort_order')
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       let deptList = (deptsData ?? []) as RiskDept[]
+
+      // Full department list (unscoped) — the action owner can be any department,
+      // including one other than the risk's own.
+      setAllDepts(
+        ((deptsData ?? []) as RiskDept[]).map((d) => ({ code: d.code, name_en: d.name_en })),
+      )
 
       // Restrict the department picker to the user's own department(s).
       // Admins (deptScopes === null) keep the full list.
@@ -174,7 +182,8 @@ export default function NewRiskPage() {
           existing_controls: form.existing_controls.trim() || null,
           additional_controls: form.additional_controls.trim() || null,
           control_classification: form.control_classification.trim() || null,
-          action_owner: form.action_owner.trim() || null,
+          action_owner: null,
+          action_owner_depts: form.action_owner_depts.length ? form.action_owner_depts : null,
           implementation_period: form.implementation_period.trim() || null,
           notes: form.notes.trim() || null,
           status: targetStatus,
@@ -336,13 +345,13 @@ export default function NewRiskPage() {
                     <textarea rows={2} value={form.additional_controls} onChange={(e) => set('additional_controls', e.target.value)}
                       placeholder="What new controls are you planning?" />
                   </Field>
-                  <Field label="Action owner">
-                    <input type="text" value={form.action_owner} onChange={(e) => set('action_owner', e.target.value)}
-                      placeholder="Person responsible for implementing the controls" />
+                  <Field label="Action owner (department)" hint="Department(s) responsible for the action — add more than one if it's shared or sits with another department.">
+                    <DeptOwnerPicker depts={allDepts} value={form.action_owner_depts}
+                      onChange={(codes) => set('action_owner_depts', codes)} />
                   </Field>
-                  <Field label="Implementation period">
+                  <Field label="Implementation period" hint="Optional. A date, quarter, or free text like “Ongoing” or “Pending external party”.">
                     <input type="text" value={form.implementation_period} onChange={(e) => set('implementation_period', e.target.value)}
-                      placeholder="e.g. Q3 2026, by 31 Dec 2026" />
+                      placeholder="e.g. Q3 2026, by 31 Dec 2026, Ongoing, Pending external party" />
                   </Field>
                   <Field label="Notes" full>
                     <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)}

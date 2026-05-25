@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
 import { Risk, RiskReview, RiskDept, RiskCategory, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { resolveActiveRole } from '@/lib/risk/activeRole'
@@ -25,7 +26,7 @@ interface FormState {
   impact_description: string
   existing_controls: string
   additional_controls: string
-  action_owner: string
+  action_owner_depts: string[]
   implementation_period: string
   notes: string
   likelihood: number
@@ -34,6 +35,39 @@ interface FormState {
   impact_kewangan: number
   impact_operasi: number
   impact_objektif: number
+}
+
+/* Human labels for the editable fields, used to describe an amendment in the
+ * audit log (so it reads "updated risk description, controls" rather than the
+ * old hard-coded "scoring updated"). */
+const FIELD_LABEL: Partial<Record<keyof FormState, string>> = {
+  category: 'category',
+  scope: 'scope',
+  description: 'risk description',
+  cause_description: 'cause',
+  impact_description: 'impact',
+  existing_controls: 'existing controls',
+  additional_controls: 'additional controls',
+  action_owner_depts: 'action owner',
+  implementation_period: 'implementation period',
+  notes: 'notes',
+}
+const SCORE_KEYS: (keyof FormState)[] = [
+  'likelihood', 'impact_manusia', 'impact_reputasi', 'impact_kewangan', 'impact_operasi', 'impact_objektif',
+]
+
+function sameVal(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => x === b[i])
+  return (a ?? '') === (b ?? '')
+}
+function changedFields(orig: FormState | null, form: FormState): string[] {
+  if (!orig) return []
+  const out: string[] = []
+  for (const k of Object.keys(FIELD_LABEL) as (keyof FormState)[]) {
+    if (!sameVal(form[k], orig[k])) out.push(FIELD_LABEL[k]!)
+  }
+  if (SCORE_KEYS.some((k) => form[k] !== orig[k])) out.push('scoring')
+  return out
 }
 
 export default function EditRiskPage() {
@@ -55,12 +89,14 @@ export default function EditRiskPage() {
   const [latestCycle, setLatestCycle] = useState<number>(1)
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
   const [actorRole, setActorRole] = useState<RiskRole>('RLO')
+  const [allDepts, setAllDepts] = useState<{ code: string; name_en: string }[]>([])
+  const [orig, setOrig] = useState<FormState | null>(null)
 
   const [form, setForm] = useState<FormState>({
     category: '', scope: '',
     description: '', cause_description: '', impact_description: '',
     existing_controls: '', additional_controls: '',
-    action_owner: '', implementation_period: '', notes: '',
+    action_owner_depts: [], implementation_period: '', notes: '',
     likelihood: 0, impact_manusia: 0, impact_reputasi: 0,
     impact_kewangan: 0, impact_operasi: 0, impact_objektif: 0,
   })
@@ -99,21 +135,24 @@ export default function EditRiskPage() {
       else if (r.status === 'PENDING_RC' && has(['RC']))   { allowed = true; setActorRole('RC') }
       if (!allowed) { setDenied(true); return }
 
-      const [{ data: deptData }, { data: reviewsData, error: rvErr }] = await Promise.all([
+      const [{ data: deptData }, { data: reviewsData, error: rvErr }, { data: allDeptsData }] = await Promise.all([
         supabase.from('pscs_departments')
           .select('code,risk_code,name_en,name_ms,kind,parent_code,sort_order')
           .eq('code', r.dept_code).maybeSingle(),
         supabase.from('risk_reviews').select('*')
           .eq('risk_id', riskRowId).order('cycle_number', { ascending: false }),
+        supabase.from('pscs_departments').select('code,name_en')
+          .eq('kind', 'department').not('risk_code', 'is', null).order('name_en'),
       ])
       if (rvErr) throw new Error(`Reviews: ${rvErr.code ?? ''} ${rvErr.message}`)
       setDept(deptData as RiskDept | null)
+      setAllDepts((allDeptsData ?? []) as { code: string; name_en: string }[])
 
       const latest = ((reviewsData ?? []) as RiskReview[])[0] ?? null
       setLatestReviewId(latest?.id ?? null)
       setLatestCycle(latest?.cycle_number ?? 1)
 
-      setForm({
+      const initial: FormState = {
         category: r.category,
         scope: r.scope,
         description: r.description,
@@ -121,7 +160,7 @@ export default function EditRiskPage() {
         impact_description: r.impact_description,
         existing_controls: r.existing_controls ?? '',
         additional_controls: r.additional_controls ?? '',
-        action_owner: r.action_owner ?? '',
+        action_owner_depts: r.action_owner_depts ?? [],
         implementation_period: r.implementation_period ?? '',
         notes: r.notes ?? '',
         likelihood:      latest?.likelihood ?? 0,
@@ -130,7 +169,9 @@ export default function EditRiskPage() {
         impact_kewangan: latest?.impact_kewangan ?? 0,
         impact_operasi:  latest?.impact_operasi ?? 0,
         impact_objektif: latest?.impact_objektif ?? 0,
-      })
+      }
+      setForm(initial)
+      setOrig(initial)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -162,6 +203,11 @@ export default function EditRiskPage() {
     if (!canSave || !computed || !risk || !riskUserId) return
     setSubmitting(true); setSubmitError(null)
     try {
+      // Work out what actually changed, so the audit entry is honest (the old
+      // code always claimed "scoring updated" even on a description-only edit).
+      const changed = changedFields(orig, form)
+      const scoringChanged = !orig || SCORE_KEYS.some((k) => form[k] !== orig[k])
+
       const { error: upErr } = await supabase.from('risks').update({
         category: form.category,
         scope: form.scope,
@@ -170,14 +216,16 @@ export default function EditRiskPage() {
         impact_description: form.impact_description.trim(),
         existing_controls: form.existing_controls.trim() || null,
         additional_controls: form.additional_controls.trim() || null,
-        action_owner: form.action_owner.trim() || null,
+        action_owner: null,
+        action_owner_depts: form.action_owner_depts.length ? form.action_owner_depts : null,
         implementation_period: form.implementation_period.trim() || null,
         notes: form.notes.trim() || null,
       }).eq('id', risk.id)
       if (upErr) throw new Error(`Update risk: ${upErr.code ?? ''} ${upErr.message}`)
 
-      // Overwrite the latest review's scores (or create cycle 1 if somehow none exists)
-      if (latestReviewId) {
+      // Only touch the review row when the scoring actually changed — otherwise a
+      // text-only amendment would needlessly re-stamp the reviewer + date.
+      if (latestReviewId && scoringChanged) {
         const { error: rvErr } = await supabase.from('risk_reviews').update({
           likelihood: form.likelihood,
           impact_manusia: form.impact_manusia,
@@ -194,6 +242,7 @@ export default function EditRiskPage() {
         if (rvErr) throw new Error(`Update review: ${rvErr.code ?? ''} ${rvErr.message}`)
       }
 
+      const summary = changed.length ? `updated ${changed.join(', ')}` : 'no field changes'
       await supabase.from('risk_audit_logs').insert({
         risk_id: risk.id,
         entity_type: 'risk',
@@ -201,8 +250,8 @@ export default function EditRiskPage() {
         action_type: 'AMEND',
         performed_by: riskUserId,
         user_role: actorRole,
-        new_value: { risk_score: computed.riskScore, risk_level: computed.riskLevel, status: risk.status },
-        comment: `Amended by ${actorRole} (cycle ${latestCycle} scoring updated)`,
+        new_value: { changed, risk_score: computed.riskScore, risk_level: computed.riskLevel, status: risk.status },
+        comment: `Amended by ${actorRole} — ${summary}`,
       })
 
       router.push(`/risk/${risk.id}`)
@@ -301,11 +350,13 @@ export default function EditRiskPage() {
                   <Field label="Additional controls proposed" full>
                     <textarea rows={2} value={form.additional_controls} onChange={(e) => set('additional_controls', e.target.value)} />
                   </Field>
-                  <Field label="Action owner">
-                    <input type="text" value={form.action_owner} onChange={(e) => set('action_owner', e.target.value)} />
+                  <Field label="Action owner (department)" hint="Department(s) responsible for the action — add more than one if it's shared or sits with another department.">
+                    <DeptOwnerPicker depts={allDepts} value={form.action_owner_depts}
+                      onChange={(codes) => set('action_owner_depts', codes)} />
                   </Field>
-                  <Field label="Implementation period">
-                    <input type="text" value={form.implementation_period} onChange={(e) => set('implementation_period', e.target.value)} />
+                  <Field label="Implementation period" hint="Optional. A date, quarter, or free text like “Ongoing” or “Pending external party”.">
+                    <input type="text" value={form.implementation_period} onChange={(e) => set('implementation_period', e.target.value)}
+                      placeholder="e.g. Q3 2026, by 31 Dec 2026, Ongoing, Pending external party" />
                   </Field>
                   <Field label="Notes" full>
                     <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
@@ -369,13 +420,14 @@ export default function EditRiskPage() {
   )
 }
 
-function Field({ label, required, full, children }: {
-  label: string; required?: boolean; full?: boolean; children: React.ReactNode
+function Field({ label, required, full, hint, children }: {
+  label: string; required?: boolean; full?: boolean; hint?: string; children: React.ReactNode
 }) {
   return (
     <div className={`risk-field ${full ? 'full' : ''}`}>
       <label>{label}{required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
       {children}
+      {hint && <div className="risk-field-hint">{hint}</div>}
     </div>
   )
 }

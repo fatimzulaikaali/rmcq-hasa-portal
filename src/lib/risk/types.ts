@@ -55,6 +55,7 @@ export interface Risk {
   additional_controls: string | null
   control_classification: string | null
   action_owner: string | null
+  action_owner_depts: string[] | null
   implementation_period: string | null
   notes: string | null
   status: RiskStatus
