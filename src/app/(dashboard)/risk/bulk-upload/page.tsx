@@ -379,7 +379,7 @@ export default function BulkUploadPage() {
             <button type="button" className="hamburger" onClick={() => setSidebarOpen((v) => !v)}>☰</button>
             <div>
               <div className="tb-title">Bulk Upload (Paper Register)</div>
-              <div className="tb-meta">Upload a scanned PDF or Excel; the parser extracts each risk for review</div>
+              <div className="tb-meta">Upload an Excel register; the parser matches columns to risk fields for review</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -453,10 +453,10 @@ export default function BulkUploadPage() {
               <div className="panel">
                 <div className="pf"><div>
                   <div className="pt">2. Upload &amp; parse</div>
-                  <div className="psub">PDF (incl. scanned) or Excel (.xlsx). The parser returns a draft list you can review and edit before saving.</div>
+                  <div className="psub">Excel (.xlsx) — the parser matches columns by header name (English or Malay). Headers it recognises: <i>Description / Huraian Risiko · Cause / Punca · Impact / Kesan · Category · Scope · Existing/Additional Controls · Action Owner · Implementation Period · Likelihood · Manusia · Reputasi · Kewangan · Operasi · Objektif</i>.</div>
                 </div></div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input type="file" accept=".pdf,.xlsx,.xls,application/pdf"
+                  <input type="file" accept=".xlsx,.xls"
                     onChange={(e) => { setFile(e.target.files?.[0] ?? null); setParseError(null) }}
                     style={{ fontSize: 12 }} />
                   {file && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>}

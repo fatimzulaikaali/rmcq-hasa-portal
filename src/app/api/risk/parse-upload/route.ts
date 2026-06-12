@@ -1,74 +1,20 @@
-/* /api/risk/parse-upload — extract a list of risks from an uploaded paper
- * register (scanned PDF or Excel). Sends the file to Anthropic's Messages API
- * with a structured-extraction prompt; returns a JSON array of risk drafts the
- * page can render as an editable review table.
+/* /api/risk/parse-upload — free flexible Excel parser.
  *
- * Required env: ANTHROPIC_API_KEY (server-side; never expose to the browser).
+ * No external API, no API key. Reads any .xlsx the user uploads with SheetJS,
+ * detects the header row, fuzzy-matches header names (English + Malay) to the
+ * known risk fields, and builds the same risks JSON the bulk-upload page
+ * already consumes.
  *
- * Why this lives server-side: keeps the API key off the client, and lets us
- * send the raw PDF bytes as base64 in a single hop. Excel files are parsed
- * with SheetJS server-side (already a dep) into a markdown table before being
- * sent as text. */
+ * Trade-offs vs. an AI-based parser:
+ *   - Excel only (PDF returns a clean "not supported" message).
+ *   - Best-effort: ambiguous headers get skipped. RC reviews everything before
+ *     saving anyway, so anything we miss they fill in by hand.
+ *   - Deterministic: no token budget, no rate limits, runs instantly. */
 
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
 export const runtime = 'nodejs'
-// Allow up to 60s for larger PDFs to be OCR'd by the model.
-export const maxDuration = 60
-
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const MODEL = 'claude-sonnet-4-6'
-
-const SYSTEM_PROMPT = `You extract risks from a Malaysian hospital risk register
-(Borang Risiko / Risk Management Form). The user will supply either a PDF
-(which may be a scanned form) or a markdown table from an Excel spreadsheet.
-Read every distinct risk and return them as a JSON object — and nothing else.
-
-Use this exact shape:
-
-{
-  "risks": [
-    {
-      "description": "the risk description, as one paragraph",
-      "cause": "what could trigger it (may be empty string)",
-      "impact": "the consequence if it occurs (may be empty string)",
-      "category": "OPS | KEW | REP | PER | STR | PRJ",
-      "scope": "INSTITUSI | UNIT",
-      "existing_controls": "controls already in place (may be empty)",
-      "additional_controls": "controls proposed (may be empty)",
-      "action_owner_dept_names": ["department names mentioned"],
-      "implementation_period": "deadline or 'Ongoing' etc. (may be empty)",
-      "likelihood": null,
-      "impact_manusia": null,
-      "impact_reputasi": null,
-      "impact_kewangan": null,
-      "impact_operasi": null,
-      "impact_objektif": null,
-      "_source_note": "optional short note if this row was hard to parse"
-    }
-  ],
-  "general_notes": "any cross-cutting observation about the document quality"
-}
-
-Category codes:
-- OPS = Operational (process, system, day-to-day operations)
-- KEW = Kewangan (financial / budget)
-- REP = Reputational (PR, public trust, communication)
-- PER = Personnel (staffing, HR, occupational safety)
-- STR = Strategic (long-term direction, planning)
-- PRJ = Project (initiative-specific risks)
-
-Scope:
-- INSTITUSI = hospital-wide
-- UNIT = department or unit-only
-
-Scoring is a 1–5 scale across likelihood and five impact dimensions
-(manusia / reputasi / kewangan / operasi / objektif). If a score is missing,
-unreadable, or you are not confident, return null for that field — do not
-guess. The RC will fill it in by hand on review.
-
-Return ONLY the JSON object. No prose, no markdown fences, no apology lines.`
 
 interface RiskDraft {
   description: string
@@ -89,15 +35,129 @@ interface RiskDraft {
   _source_note?: string
 }
 
-export async function POST(req: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'Server is missing ANTHROPIC_API_KEY env var. Add the key in your deploy environment and redeploy.' },
-      { status: 500 },
-    )
-  }
+type FieldKey =
+  | 'description' | 'cause' | 'impact'
+  | 'category' | 'scope'
+  | 'existing_controls' | 'additional_controls'
+  | 'action_owner' | 'implementation_period'
+  | 'likelihood'
+  | 'impact_manusia' | 'impact_reputasi' | 'impact_kewangan' | 'impact_operasi' | 'impact_objektif'
+  | 'dept'
 
+/* Each entry is a list of substring keywords the header must contain — order
+ * matters within a list (first listed = strongest match) but not across lists.
+ * All comparisons are lowercase + space-collapsed. Both English and Malay
+ * terms (the form fields are bilingual in MOH paperwork) are included. */
+const HEADER_PATTERNS: { field: FieldKey; patterns: string[] }[] = [
+  { field: 'description',         patterns: ['risk description', 'description of risk', 'huraian risiko', 'penerangan risiko', 'risk statement', 'description'] },
+  { field: 'cause',               patterns: ['root cause', 'cause', 'punca', 'sebab'] },
+  { field: 'impact',              patterns: ['consequence', 'impact description', 'impact', 'kesan'] },
+  { field: 'category',            patterns: ['category', 'kategori'] },
+  { field: 'scope',               patterns: ['scope', 'skop'] },
+  { field: 'existing_controls',   patterns: ['existing control', 'current control', 'kawalan sedia ada', 'control in place'] },
+  { field: 'additional_controls', patterns: ['additional control', 'proposed control', 'kawalan tambahan', 'kawalan cadangan', 'new control', 'treatment'] },
+  { field: 'action_owner',        patterns: ['action owner', 'owner', 'tindakan oleh', 'pemilik tindakan', 'responsible', 'risk owner'] },
+  { field: 'implementation_period', patterns: ['implementation period', 'tempoh pelaksanaan', 'due date', 'deadline', 'target date', 'tempoh', 'period'] },
+  { field: 'dept',                patterns: ['department', 'jabatan', 'unit'] },
+  // Scoring — order matters: longer/more specific patterns first so we don't
+  // accidentally match "L" or "K" inside a longer word.
+  { field: 'impact_manusia',      patterns: ['impact: manusia', 'impact manusia', 'manusia', 'human impact', 'human'] },
+  { field: 'impact_reputasi',     patterns: ['impact: reputasi', 'impact reputasi', 'reputasi', 'reputation'] },
+  { field: 'impact_kewangan',     patterns: ['impact: kewangan', 'impact kewangan', 'kewangan', 'financial impact', 'financial'] },
+  { field: 'impact_operasi',      patterns: ['impact: operasi', 'impact operasi', 'operasi', 'operational impact', 'operations'] },
+  { field: 'impact_objektif',     patterns: ['impact: objektif', 'impact objektif', 'objektif', 'objective impact', 'objective'] },
+  { field: 'likelihood',          patterns: ['likelihood', 'kebarangkalian', 'probability'] },
+]
+
+/* Category labels can appear in various forms in dept Excels. Map best-effort. */
+const CATEGORY_KEYWORDS: { code: string; words: string[] }[] = [
+  { code: 'OPS', words: ['operational', 'operasi', 'process', 'operations', 'ops'] },
+  { code: 'KEW', words: ['financial', 'kewangan', 'budget', 'finance', 'kew'] },
+  { code: 'REP', words: ['reputational', 'reputasi', 'reputation', 'public', 'media', 'rep'] },
+  { code: 'PER', words: ['personnel', 'staffing', 'human resource', 'hr', 'people', 'staff', 'per'] },
+  { code: 'STR', words: ['strategic', 'strategy', 'strategik', 'str'] },
+  { code: 'PRJ', words: ['project', 'projek', 'initiative', 'prj'] },
+]
+
+const SCOPE_KEYWORDS: { code: string; words: string[] }[] = [
+  { code: 'INSTITUSI', words: ['institusi', 'institutional', 'hospital-wide', 'hospital wide', 'institution', 'enterprise'] },
+  { code: 'UNIT',      words: ['unit', 'department', 'jabatan', 'local', 'dept'] },
+]
+
+function normHeader(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').replace(/[():*\-_]/g, ' ').trim()
+}
+
+function matchField(rawHeader: string): FieldKey | null {
+  const h = normHeader(rawHeader)
+  if (!h) return null
+  // Walk patterns in declared order so more specific ones win.
+  for (const { field, patterns } of HEADER_PATTERNS) {
+    for (const p of patterns) {
+      if (h.includes(p)) return field
+    }
+  }
+  return null
+}
+
+function parseScore(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const n = Math.round(v)
+    return n >= 1 && n <= 5 ? n : null
+  }
+  const s = String(v).trim()
+  if (!s) return null
+  const m = s.match(/[1-5]/)
+  if (!m) return null
+  return parseInt(m[0], 10)
+}
+
+function pickCategory(v: unknown): string {
+  if (!v) return ''
+  const s = String(v).toLowerCase()
+  // Direct code match
+  for (const c of ['OPS', 'KEW', 'REP', 'PER', 'STR', 'PRJ']) {
+    if (s === c.toLowerCase()) return c
+  }
+  for (const { code, words } of CATEGORY_KEYWORDS) {
+    if (words.some((w) => s.includes(w))) return code
+  }
+  return ''
+}
+
+function pickScope(v: unknown): string {
+  if (!v) return ''
+  const s = String(v).toLowerCase()
+  for (const c of ['INSTITUSI', 'UNIT']) {
+    if (s === c.toLowerCase()) return c
+  }
+  for (const { code, words } of SCOPE_KEYWORDS) {
+    if (words.some((w) => s.includes(w))) return code
+  }
+  return ''
+}
+
+/* Detect the header row in a 2D grid: the first row whose cells, when mapped
+ * via matchField, cover at least three distinct fields. This skips title /
+ * preamble rows that dept Excels often have above the real table. */
+function detectHeader(rows: unknown[][]): { headerIdx: number; headerMap: Record<number, FieldKey> } | null {
+  const maxLook = Math.min(rows.length, 20)
+  for (let i = 0; i < maxLook; i++) {
+    const map: Record<number, FieldKey> = {}
+    const seen = new Set<FieldKey>()
+    rows[i].forEach((cell, col) => {
+      const f = matchField(String(cell ?? ''))
+      if (f && !(col in map)) { map[col] = f; seen.add(f) }
+    })
+    if (seen.size >= 3 && (seen.has('description') || seen.has('cause') || seen.has('impact'))) {
+      return { headerIdx: i, headerMap: map }
+    }
+  }
+  return null
+}
+
+export async function POST(req: NextRequest) {
   let formData: FormData
   try {
     formData = await req.formData()
@@ -112,145 +172,108 @@ export async function POST(req: NextRequest) {
   const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf'
   const isXlsx = name.endsWith('.xlsx') || name.endsWith('.xls')
 
-  if (!isPdf && !isXlsx) {
-    return NextResponse.json(
-      { error: 'Only PDF and Excel (.xlsx) files are supported right now.' },
-      { status: 400 },
-    )
+  if (isPdf) {
+    return NextResponse.json({
+      error: 'PDF parsing is not enabled in this mode. Please upload the register as an Excel file (.xlsx). If you only have a PDF, copy the table into Excel first.',
+    }, { status: 400 })
+  }
+  if (!isXlsx) {
+    return NextResponse.json({ error: 'Only Excel (.xlsx) files are supported.' }, { status: 400 })
   }
 
   const buf = Buffer.from(await file.arrayBuffer())
-
-  // Build the user content block — either a PDF document attachment or an
-  // Excel-derived markdown table.
-  type ContentBlock =
-    | { type: 'text'; text: string }
-    | { type: 'document'; source: { type: 'base64'; media_type: string; data: string } }
-  let userContent: ContentBlock[]
-  if (isPdf) {
-    userContent = [
-      {
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') },
-      },
-      {
-        type: 'text',
-        text: 'Extract every risk listed in this register and return the JSON described.',
-      },
-    ]
-  } else {
-    let md: string
-    try {
-      const wb = XLSX.read(buf, { type: 'buffer' })
-      md = workbookToMarkdown(wb)
-    } catch (e) {
-      return NextResponse.json(
-        { error: `Could not parse Excel file: ${e instanceof Error ? e.message : String(e)}` },
-        { status: 400 },
-      )
-    }
-    if (!md.trim()) {
-      return NextResponse.json({ error: 'Excel file appears to be empty.' }, { status: 400 })
-    }
-    userContent = [
-      {
-        type: 'text',
-        text:
-          'Below is a Malaysian hospital risk register extracted from an Excel ' +
-          'spreadsheet as a markdown table. Extract every risk listed in it and ' +
-          'return the JSON described.\n\n' + md,
-      },
-    ]
-  }
-
-  let aResp: Response
+  let wb: XLSX.WorkBook
   try {
-    aResp = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 8192,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userContent }],
-      }),
-    })
+    wb = XLSX.read(buf, { type: 'buffer' })
   } catch (e) {
-    return NextResponse.json(
-      { error: `Could not reach Anthropic API: ${e instanceof Error ? e.message : String(e)}` },
-      { status: 502 },
-    )
+    return NextResponse.json({
+      error: `Could not parse Excel file: ${e instanceof Error ? e.message : String(e)}`,
+    }, { status: 400 })
+  }
+  if (!wb.SheetNames.length) {
+    return NextResponse.json({ error: 'Workbook is empty.' }, { status: 400 })
   }
 
-  if (!aResp.ok) {
-    const errText = await aResp.text().catch(() => '')
-    return NextResponse.json(
-      { error: `Anthropic API error (HTTP ${aResp.status})`, detail: errText.slice(0, 500) },
-      { status: 502 },
-    )
-  }
+  const allRisks: RiskDraft[] = []
+  const noteLines: string[] = []
 
-  let aJson: { content?: { type: string; text?: string }[]; usage?: unknown } = {}
-  try {
-    aJson = await aResp.json()
-  } catch {
-    return NextResponse.json({ error: 'Anthropic API returned non-JSON.' }, { status: 502 })
-  }
-
-  const textBlock = (aJson.content ?? []).find((b) => b.type === 'text')
-  const raw = textBlock?.text ?? ''
-  if (!raw.trim()) {
-    return NextResponse.json({ error: 'Parser returned an empty response.' }, { status: 502 })
-  }
-
-  // Extract the JSON object — be tolerant of leading prose / markdown fences.
-  const m = raw.match(/\{[\s\S]*\}/)
-  if (!m) {
-    return NextResponse.json(
-      { error: 'Parser response did not contain JSON.', raw: raw.slice(0, 1000) },
-      { status: 502 },
-    )
-  }
-
-  let parsed: { risks?: RiskDraft[]; general_notes?: string }
-  try {
-    parsed = JSON.parse(m[0])
-  } catch {
-    return NextResponse.json(
-      { error: 'Parser JSON was malformed.', raw: raw.slice(0, 1000) },
-      { status: 502 },
-    )
-  }
-
-  const risks = Array.isArray(parsed.risks) ? parsed.risks : []
-  return NextResponse.json({
-    risks,
-    general_notes: parsed.general_notes ?? '',
-    model: MODEL,
-    usage: aJson.usage ?? null,
-  })
-}
-
-/* Convert every sheet in the workbook into a chained markdown table so the
- * model gets headers + rows in a recognizable structure. */
-function workbookToMarkdown(wb: XLSX.WorkBook): string {
-  const out: string[] = []
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     if (!sheet) continue
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
     if (!rows.length) continue
-    out.push(`## Sheet: ${sheetName}`)
-    out.push('')
-    for (const r of rows) {
-      const cells = (r as unknown[]).map((c) => String(c ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' '))
-      out.push('| ' + cells.join(' | ') + ' |')
+
+    const detected = detectHeader(rows as unknown[][])
+    if (!detected) {
+      noteLines.push(`Sheet "${sheetName}": couldn't find a recognisable header row, skipped.`)
+      continue
     }
-    out.push('')
+    const { headerIdx, headerMap } = detected
+    const foundFields = Array.from(new Set(Object.values(headerMap)))
+    noteLines.push(`Sheet "${sheetName}": header detected on row ${headerIdx + 1}; mapped fields: ${foundFields.join(', ')}.`)
+
+    // Iterate data rows
+    for (let r = headerIdx + 1; r < rows.length; r++) {
+      const row = rows[r] as unknown[]
+      // Skip blank rows
+      if (row.every((c) => c === '' || c === null || c === undefined)) continue
+
+      const get = (field: FieldKey): unknown => {
+        for (const [colStr, f] of Object.entries(headerMap)) {
+          if (f === field) {
+            const col = parseInt(colStr, 10)
+            return row[col]
+          }
+        }
+        return undefined
+      }
+      const text = (v: unknown): string => (v === null || v === undefined) ? '' : String(v).trim()
+
+      const description = text(get('description'))
+      const cause = text(get('cause'))
+      const impact = text(get('impact'))
+      // Skip rows that have nothing useful (often blank spacer rows).
+      if (!description && !cause && !impact) continue
+
+      // Action owner: text → array of dept-name guesses split by , or ;
+      const ownerRaw = text(get('action_owner'))
+      const action_owner_dept_names = ownerRaw
+        ? ownerRaw.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean)
+        : []
+
+      allRisks.push({
+        description,
+        cause,
+        impact,
+        category: pickCategory(get('category')),
+        scope: pickScope(get('scope')),
+        existing_controls: text(get('existing_controls')),
+        additional_controls: text(get('additional_controls')),
+        action_owner_dept_names,
+        implementation_period: text(get('implementation_period')),
+        likelihood: parseScore(get('likelihood')),
+        impact_manusia: parseScore(get('impact_manusia')),
+        impact_reputasi: parseScore(get('impact_reputasi')),
+        impact_kewangan: parseScore(get('impact_kewangan')),
+        impact_operasi: parseScore(get('impact_operasi')),
+        impact_objektif: parseScore(get('impact_objektif')),
+      })
+    }
   }
-  return out.join('\n')
+
+  if (allRisks.length === 0) {
+    return NextResponse.json({
+      risks: [],
+      general_notes:
+        'No risks were extracted. Make sure your Excel has a header row with recognisable column names like ' +
+        '"Description / Huraian Risiko", "Cause / Punca", "Impact / Kesan", "Likelihood", and the 5 impact dimensions. ' +
+        noteLines.join(' '),
+    })
+  }
+
+  return NextResponse.json({
+    risks: allRisks,
+    general_notes: noteLines.join(' '),
+    model: 'free-xlsx-parser',
+  })
 }
