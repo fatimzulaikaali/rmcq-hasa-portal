@@ -132,6 +132,8 @@ export default function BulkUploadPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [depts, setDepts] = useState<RiskDept[]>([])
+  const [rlos, setRlos] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
+  const [hods, setHods] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
 
   const [paper, setPaper] = useState<PaperSource>(blankSource())
@@ -166,6 +168,26 @@ export default function BulkUploadPage() {
         .order('sort_order')
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
+
+      // RLO + HOD lists for the paper-source dropdowns. Each user can hold
+      // multiple role rows; we collapse to one entry per user per role.
+      const [{ data: users }, { data: roles }] = await Promise.all([
+        supabase.from('risk_users').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('risk_user_roles')
+          .select('user_id, role, dept_code').eq('is_active', true)
+          .in('role', ['RLO', 'HOD']),
+      ])
+      const rloIds = new Set<number>()
+      const hodIds = new Set<number>()
+      const deptByUser = new Map<number, string>()
+      for (const r of ((roles ?? []) as { user_id: number; role: string; dept_code: string | null }[])) {
+        if (r.role === 'RLO') rloIds.add(r.user_id)
+        if (r.role === 'HOD') hodIds.add(r.user_id)
+        if (r.dept_code && !deptByUser.has(r.user_id)) deptByUser.set(r.user_id, r.dept_code)
+      }
+      const userRows = (users ?? []) as { id: number; name: string }[]
+      setRlos(userRows.filter((u) => rloIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
+      setHods(userRows.filter((u) => hodIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -420,9 +442,12 @@ export default function BulkUploadPage() {
                 <div className="risk-form-grid">
                   <div className="risk-field">
                     <label>Submitted by (RLO)<span style={{ color: 'var(--red)' }}> *</span></label>
-                    <input type="text" value={paper.submitted_by}
+                    <input type="text" list="bulk-rlos-list" value={paper.submitted_by}
                       onChange={(e) => setPaper({ ...paper, submitted_by: e.target.value })}
-                      placeholder="e.g. Dr Suk Hui" />
+                      placeholder="Pick from list or type a name" />
+                    <datalist id="bulk-rlos-list">
+                      {rlos.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
+                    </datalist>
                   </div>
                   <div className="risk-field">
                     <label>Submission date<span style={{ color: 'var(--red)' }}> *</span></label>
@@ -431,9 +456,12 @@ export default function BulkUploadPage() {
                   </div>
                   <div className="risk-field">
                     <label>HOD endorser</label>
-                    <input type="text" value={paper.endorsed_by}
+                    <input type="text" list="bulk-hods-list" value={paper.endorsed_by}
                       onChange={(e) => setPaper({ ...paper, endorsed_by: e.target.value })}
-                      placeholder="e.g. Dr Rosnida" />
+                      placeholder="Pick from list or type a name" />
+                    <datalist id="bulk-hods-list">
+                      {hods.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
+                    </datalist>
                   </div>
                   <div className="risk-field">
                     <label>HOD endorsement date</label>

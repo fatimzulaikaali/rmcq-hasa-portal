@@ -97,6 +97,8 @@ export default function QuickAddPage() {
 
   const [depts, setDepts]   = useState<RiskDept[]>([])
   const [allDepts, setAllDepts] = useState<{ code: string; name_en: string }[]>([])
+  const [rlos, setRlos] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
+  const [hods, setHods] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
   const [riskUserName, setRiskUserName] = useState<string>('')
 
@@ -128,6 +130,25 @@ export default function QuickAddPage() {
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
       setAllDepts(((deptsData ?? []) as RiskDept[]).map((d) => ({ code: d.code, name_en: d.name_en })))
+
+      // RLO + HOD lists for the paper-source dropdowns.
+      const [{ data: users }, { data: roles }] = await Promise.all([
+        supabase.from('risk_users').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('risk_user_roles')
+          .select('user_id, role, dept_code').eq('is_active', true)
+          .in('role', ['RLO', 'HOD']),
+      ])
+      const rloIds = new Set<number>()
+      const hodIds = new Set<number>()
+      const deptByUser = new Map<number, string>()
+      for (const r of ((roles ?? []) as { user_id: number; role: string; dept_code: string | null }[])) {
+        if (r.role === 'RLO') rloIds.add(r.user_id)
+        if (r.role === 'HOD') hodIds.add(r.user_id)
+        if (r.dept_code && !deptByUser.has(r.user_id)) deptByUser.set(r.user_id, r.dept_code)
+      }
+      const userRows = (users ?? []) as { id: number; name: string }[]
+      setRlos(userRows.filter((u) => rloIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
+      setHods(userRows.filter((u) => hodIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -571,18 +592,24 @@ export default function QuickAddPage() {
                 </div></div>
                 <div className="risk-form-grid">
                   <Field label="Submitted by (RLO name)" required>
-                    <input type="text" value={form.paper_submitted_by}
+                    <input type="text" list="qa-rlos-list" value={form.paper_submitted_by}
                       onChange={(e) => set('paper_submitted_by', e.target.value)}
-                      placeholder="e.g. Dr Suk Hui" />
+                      placeholder="Pick from list or type a name" />
+                    <datalist id="qa-rlos-list">
+                      {rlos.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
+                    </datalist>
                   </Field>
                   <Field label="Submission date" required>
                     <input type="date" value={form.paper_submission_date}
                       onChange={(e) => set('paper_submission_date', e.target.value)} />
                   </Field>
                   <Field label="HOD endorser" required={form.triage === 'valid'}>
-                    <input type="text" value={form.paper_endorsed_by}
+                    <input type="text" list="qa-hods-list" value={form.paper_endorsed_by}
                       onChange={(e) => set('paper_endorsed_by', e.target.value)}
-                      placeholder="e.g. Dr Rosnida" />
+                      placeholder="Pick from list or type a name" />
+                    <datalist id="qa-hods-list">
+                      {hods.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
+                    </datalist>
                   </Field>
                   <Field label="HOD endorsement date" required={form.triage === 'valid'}>
                     <input type="date" value={form.paper_endorsement_date}

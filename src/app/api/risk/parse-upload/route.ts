@@ -1,15 +1,21 @@
 /* /api/risk/parse-upload — free flexible Excel parser.
  *
- * No external API, no API key. Reads any .xlsx the user uploads with SheetJS,
- * detects the header row, fuzzy-matches header names (English + Malay) to the
- * known risk fields, and builds the same risks JSON the bulk-upload page
- * already consumes.
+ * Handles the MOH Borang Risiko layout where:
+ *   - Headers span TWO rows (parent label in row 1, sub-label in row 2)
+ *   - Parent labels are merged across multiple columns (only the leftmost
+ *     cell holds the value; SheetJS returns empty for the others)
+ *   - Headers are in Malay (with some English mixed in)
  *
- * Trade-offs vs. an AI-based parser:
- *   - Excel only (PDF returns a clean "not supported" message).
- *   - Best-effort: ambiguous headers get skipped. RC reviews everything before
- *     saving anyway, so anything we miss they fill in by hand.
- *   - Deterministic: no token budget, no rate limits, runs instantly. */
+ * Approach:
+ *   1. Read every sheet with SheetJS.
+ *   2. For each candidate row, propagate non-empty values rightward (treats
+ *      empty cells as merged continuations of the most recent label).
+ *   3. Try single-row matching, then row+next combined matching. Pick the
+ *      candidate that maps the most distinct fields.
+ *   4. Walk data rows; for fields mapped to multiple columns, concat text
+ *      values (a row with one column blank and the other filled still works).
+ *
+ * No external API, no API key. */
 
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
@@ -44,37 +50,63 @@ type FieldKey =
   | 'impact_manusia' | 'impact_reputasi' | 'impact_kewangan' | 'impact_operasi' | 'impact_objektif'
   | 'dept'
 
-/* Each entry is a list of substring keywords the header must contain — order
- * matters within a list (first listed = strongest match) but not across lists.
- * All comparisons are lowercase + space-collapsed. Both English and Malay
- * terms (the form fields are bilingual in MOH paperwork) are included. */
+/* Pattern order matters: the FIRST match wins for any given header string. So
+ * the more specific patterns (per-dimension scoring) must come BEFORE the
+ * general "impact" pattern, otherwise "Penilaian Impak (a) Manusia" would
+ * match `impact` instead of `impact_manusia`. */
 const HEADER_PATTERNS: { field: FieldKey; patterns: string[] }[] = [
-  { field: 'description',         patterns: ['risk description', 'description of risk', 'huraian risiko', 'penerangan risiko', 'risk statement', 'description'] },
-  { field: 'cause',               patterns: ['root cause', 'cause', 'punca', 'sebab'] },
-  { field: 'impact',              patterns: ['consequence', 'impact description', 'impact', 'kesan'] },
-  { field: 'category',            patterns: ['category', 'kategori'] },
-  { field: 'scope',               patterns: ['scope', 'skop'] },
-  { field: 'existing_controls',   patterns: ['existing control', 'current control', 'kawalan sedia ada', 'control in place'] },
-  { field: 'additional_controls', patterns: ['additional control', 'proposed control', 'kawalan tambahan', 'kawalan cadangan', 'new control', 'treatment'] },
-  { field: 'action_owner',        patterns: ['action owner', 'owner', 'tindakan oleh', 'pemilik tindakan', 'responsible', 'risk owner'] },
-  { field: 'implementation_period', patterns: ['implementation period', 'tempoh pelaksanaan', 'due date', 'deadline', 'target date', 'tempoh', 'period'] },
-  { field: 'dept',                patterns: ['department', 'jabatan', 'unit'] },
-  // Scoring — order matters: longer/more specific patterns first so we don't
-  // accidentally match "L" or "K" inside a longer word.
-  { field: 'impact_manusia',      patterns: ['impact: manusia', 'impact manusia', 'manusia', 'human impact', 'human'] },
-  { field: 'impact_reputasi',     patterns: ['impact: reputasi', 'impact reputasi', 'reputasi', 'reputation'] },
-  { field: 'impact_kewangan',     patterns: ['impact: kewangan', 'impact kewangan', 'kewangan', 'financial impact', 'financial'] },
-  { field: 'impact_operasi',      patterns: ['impact: operasi', 'impact operasi', 'operasi', 'operational impact', 'operations'] },
-  { field: 'impact_objektif',     patterns: ['impact: objektif', 'impact objektif', 'objektif', 'objective impact', 'objective'] },
-  { field: 'likelihood',          patterns: ['likelihood', 'kebarangkalian', 'probability'] },
+  // Specific scoring dimensions (must come before general 'impact')
+  { field: 'impact_manusia',  patterns: ['manusia', 'human impact', 'human'] },
+  { field: 'impact_reputasi', patterns: ['reputasi', 'reputation', 'imej', 'image'] },
+  { field: 'impact_kewangan', patterns: ['kewangan', 'financial impact', 'financial', 'finance'] },
+  { field: 'impact_operasi',  patterns: ['operasi', 'operational impact', 'operations', 'operasional'] },
+  { field: 'impact_objektif', patterns: ['objektif', 'objective impact', 'objective'] },
+
+  // Likelihood
+  { field: 'likelihood', patterns: ['likelihood', 'kebarangkalian', 'probability'] },
+
+  // Risk text fields
+  { field: 'description', patterns: [
+    'risk description', 'description of risk', 'risk statement',
+    'huraian risiko', 'penerangan risiko',
+    'keterangan risiko', 'keterangan',
+    'apakah risiko', 'risiko yang berlaku',
+    'description',
+  ] },
+  { field: 'cause', patterns: ['punca', 'sebab', 'penyebab', 'root cause', 'cause'] },
+  { field: 'impact', patterns: ['impak risiko', 'risk impact', 'impak', 'impact'] },
+
+  { field: 'category', patterns: ['kategori risiko', 'risk category', 'kategori', 'category'] },
+  { field: 'scope', patterns: [
+    'risiko institusi atau unit', 'institusi atau unit',
+    'risiko institusi', 'risiko unit',
+    'scope', 'skop',
+  ] },
+
+  { field: 'existing_controls', patterns: [
+    'kawalan sedia ada', 'existing control', 'current control', 'control in place',
+  ] },
+  { field: 'additional_controls', patterns: [
+    'kawalan tambahan yang dicadangkan', 'kawalan tambahan',
+    'additional control', 'proposed control', 'new control', 'treatment',
+  ] },
+  { field: 'action_owner', patterns: [
+    'pemunya tindakan', 'action owner', 'tindakan oleh',
+    'pemilik tindakan', 'risk owner', 'responsible',
+  ] },
+  { field: 'implementation_period', patterns: [
+    'tempoh pelaksanaan', 'implementation period',
+    'due date', 'deadline', 'target date',
+    'tempoh', 'period',
+  ] },
+  { field: 'dept', patterns: ['department', 'jabatan'] },
 ]
 
-/* Category labels can appear in various forms in dept Excels. Map best-effort. */
 const CATEGORY_KEYWORDS: { code: string; words: string[] }[] = [
   { code: 'OPS', words: ['operational', 'operasi', 'process', 'operations', 'ops'] },
   { code: 'KEW', words: ['financial', 'kewangan', 'budget', 'finance', 'kew'] },
   { code: 'REP', words: ['reputational', 'reputasi', 'reputation', 'public', 'media', 'rep'] },
-  { code: 'PER', words: ['personnel', 'staffing', 'human resource', 'hr', 'people', 'staff', 'per'] },
+  { code: 'PER', words: ['personnel', 'staffing', 'human resource', 'peraturan', 'kualiti', 'quality', 'people', 'staff', 'per'] },
   { code: 'STR', words: ['strategic', 'strategy', 'strategik', 'str'] },
   { code: 'PRJ', words: ['project', 'projek', 'initiative', 'prj'] },
 ]
@@ -85,13 +117,31 @@ const SCOPE_KEYWORDS: { code: string; words: string[] }[] = [
 ]
 
 function normHeader(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, ' ').replace(/[():*\-_]/g, ' ').trim()
+  return s.toLowerCase().replace(/\s+/g, ' ').replace(/[()*\-_:.\/]/g, ' ').trim()
 }
+
+/* Headers that look like derived / log columns rather than data inputs — these
+ * should NOT be mapped to any field. Catching them up front avoids spurious
+ * matches like "8. Tahap Impak Risiko (Automatik)" hitting the general
+ * `impact` pattern. */
+const NEGATIVE_PATTERNS = [
+  'tahap risiko', 'tahap impak',
+  'automatik', 'purata',
+  'tarikh dikemaskini', 'kemaskini pertama', 'kemaskini kedua',
+  'status kawalan risiko', 'perubahan tahap risiko',
+  'klasifikasi punca', 'klasifikasi kawalan',
+  'pemilik isu',          // sub-unit identifier in MOH Borang, not action owner
+  'tarikh didaftarkan',
+  'catatan',
+]
 
 function matchField(rawHeader: string): FieldKey | null {
   const h = normHeader(rawHeader)
   if (!h) return null
-  // Walk patterns in declared order so more specific ones win.
+  // Skip derived / log / metadata columns before considering positive patterns.
+  for (const neg of NEGATIVE_PATTERNS) {
+    if (h.includes(neg)) return null
+  }
   for (const { field, patterns } of HEADER_PATTERNS) {
     for (const p of patterns) {
       if (h.includes(p)) return field
@@ -116,7 +166,6 @@ function parseScore(v: unknown): number | null {
 function pickCategory(v: unknown): string {
   if (!v) return ''
   const s = String(v).toLowerCase()
-  // Direct code match
   for (const c of ['OPS', 'KEW', 'REP', 'PER', 'STR', 'PRJ']) {
     if (s === c.toLowerCase()) return c
   }
@@ -138,23 +187,115 @@ function pickScope(v: unknown): string {
   return ''
 }
 
-/* Detect the header row in a 2D grid: the first row whose cells, when mapped
- * via matchField, cover at least three distinct fields. This skips title /
- * preamble rows that dept Excels often have above the real table. */
-function detectHeader(rows: unknown[][]): { headerIdx: number; headerMap: Record<number, FieldKey> } | null {
+/* Treat empty cells as merged continuations of the previous non-empty cell.
+ * This recovers the merged "parent" header label that SheetJS leaves as ""
+ * in every cell except the leftmost of the merge. */
+function propagateMerged(row: unknown[]): string[] {
+  let last = ''
+  return row.map((c) => {
+    const s = String(c ?? '').trim()
+    if (s) { last = s; return s }
+    return last
+  })
+}
+
+/* Combine two header rows into one — the parent label plus the sub-label. */
+function combineHeaders(parent: string[], child: string[]): string[] {
+  const n = Math.max(parent.length, child.length)
+  const out: string[] = []
+  for (let i = 0; i < n; i++) {
+    const p = parent[i] ?? ''
+    const c = child[i] ?? ''
+    out.push((p + ' ' + c).trim())
+  }
+  return out
+}
+
+function buildHeaderMap(headerCells: string[]): { map: Record<number, FieldKey>; fields: Set<FieldKey> } {
+  const map: Record<number, FieldKey> = {}
+  const fields = new Set<FieldKey>()
+  headerCells.forEach((cell, col) => {
+    const f = matchField(cell)
+    if (f && !(col in map)) {
+      map[col] = f
+      fields.add(f)
+    }
+  })
+  return { map, fields }
+}
+
+function passesHeaderTest(fields: Set<FieldKey>): boolean {
+  // Require at least 3 distinct fields, and at least one of the primary risk
+  // text fields so we don't mistake a stray block of metadata for a header.
+  return fields.size >= 3 && (
+    fields.has('description') || fields.has('cause') || fields.has('impact') ||
+    fields.has('likelihood') || fields.has('impact_manusia')
+  )
+}
+
+interface DetectedHeader {
+  headerIdx: number
+  headerMap: Record<number, FieldKey>
+  fields: Set<FieldKey>
+  spansRows: number
+}
+
+function detectHeader(rows: unknown[][]): DetectedHeader | null {
   const maxLook = Math.min(rows.length, 20)
+  let best: DetectedHeader | null = null
+
   for (let i = 0; i < maxLook; i++) {
-    const map: Record<number, FieldKey> = {}
-    const seen = new Set<FieldKey>()
-    rows[i].forEach((cell, col) => {
-      const f = matchField(String(cell ?? ''))
-      if (f && !(col in map)) { map[col] = f; seen.add(f) }
-    })
-    if (seen.size >= 3 && (seen.has('description') || seen.has('cause') || seen.has('impact'))) {
-      return { headerIdx: i, headerMap: map }
+    const r1 = propagateMerged(rows[i] ?? [])
+    // Try single-row header
+    const { map: m1, fields: f1 } = buildHeaderMap(r1)
+    if (passesHeaderTest(f1) && (!best || f1.size > best.fields.size)) {
+      best = { headerIdx: i, headerMap: m1, fields: f1, spansRows: 1 }
+    }
+    // Try combined two-row header (parent + child). Only the PARENT row gets
+    // merged-cell propagation — sub-labels in row 2 are per-column and would
+    // otherwise smear across unrelated parent groups.
+    if (i + 1 < rows.length) {
+      const r2 = (rows[i + 1] ?? []).map((c) => String(c ?? '').trim())
+      const combined = combineHeaders(r1, r2)
+      const { map: m2, fields: f2 } = buildHeaderMap(combined)
+      if (passesHeaderTest(f2) && (!best || f2.size > best.fields.size)) {
+        best = { headerIdx: i, headerMap: m2, fields: f2, spansRows: 2 }
+      }
     }
   }
-  return null
+
+  return best
+}
+
+function colsForField(map: Record<number, FieldKey>, field: FieldKey): number[] {
+  const out: number[] = []
+  for (const [colStr, f] of Object.entries(map)) {
+    if (f === field) out.push(parseInt(colStr, 10))
+  }
+  return out
+}
+
+function concatColumns(row: unknown[], cols: number[]): string {
+  const parts: string[] = []
+  for (const c of cols) {
+    const v = row[c]
+    if (v === '' || v === null || v === undefined) continue
+    const s = String(v).trim()
+    if (s) parts.push(s)
+  }
+  // Dedup while preserving order — sometimes the parent and child columns
+  // hold the same value.
+  const seen = new Set<string>()
+  const dedup = parts.filter((p) => (seen.has(p) ? false : (seen.add(p), true)))
+  return dedup.join(' · ')
+}
+
+function firstColumn(row: unknown[], cols: number[]): unknown {
+  for (const c of cols) {
+    const v = row[c]
+    if (v !== '' && v !== null && v !== undefined) return v
+  }
+  return undefined
 }
 
 export async function POST(req: NextRequest) {
@@ -200,80 +341,74 @@ export async function POST(req: NextRequest) {
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     if (!sheet) continue
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' }) as unknown[][]
     if (!rows.length) continue
 
-    const detected = detectHeader(rows as unknown[][])
+    const detected = detectHeader(rows)
     if (!detected) {
-      noteLines.push(`Sheet "${sheetName}": couldn't find a recognisable header row, skipped.`)
+      noteLines.push(`Sheet "${sheetName}": no recognisable header row found, skipped.`)
       continue
     }
-    const { headerIdx, headerMap } = detected
-    const foundFields = Array.from(new Set(Object.values(headerMap)))
-    noteLines.push(`Sheet "${sheetName}": header detected on row ${headerIdx + 1}; mapped fields: ${foundFields.join(', ')}.`)
+    const { headerIdx, headerMap, fields, spansRows } = detected
+    noteLines.push(
+      `Sheet "${sheetName}": header on row ${headerIdx + 1}` +
+      (spansRows === 2 ? ` + ${headerIdx + 2}` : '') +
+      `; ${fields.size} fields mapped (${Array.from(fields).join(', ')}).`,
+    )
 
-    // Iterate data rows
-    for (let r = headerIdx + 1; r < rows.length; r++) {
-      const row = rows[r] as unknown[]
-      // Skip blank rows
+    const dataStart = headerIdx + spansRows
+    let extracted = 0
+
+    for (let r = dataStart; r < rows.length; r++) {
+      const row = rows[r]
       if (row.every((c) => c === '' || c === null || c === undefined)) continue
 
-      const get = (field: FieldKey): unknown => {
-        for (const [colStr, f] of Object.entries(headerMap)) {
-          if (f === field) {
-            const col = parseInt(colStr, 10)
-            return row[col]
-          }
-        }
-        return undefined
-      }
-      const text = (v: unknown): string => (v === null || v === undefined) ? '' : String(v).trim()
-
-      const description = text(get('description'))
-      const cause = text(get('cause'))
-      const impact = text(get('impact'))
-      // Skip rows that have nothing useful (often blank spacer rows).
+      const description = concatColumns(row, colsForField(headerMap, 'description'))
+      const cause = concatColumns(row, colsForField(headerMap, 'cause'))
+      const impact = concatColumns(row, colsForField(headerMap, 'impact'))
+      // Need at least one of these to be a real row of data.
       if (!description && !cause && !impact) continue
 
-      // Action owner: text → array of dept-name guesses split by , or ;
-      const ownerRaw = text(get('action_owner'))
+      const ownerRaw = concatColumns(row, colsForField(headerMap, 'action_owner'))
       const action_owner_dept_names = ownerRaw
-        ? ownerRaw.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean)
+        ? ownerRaw.split(/[,;·\n]/).map((s) => s.trim()).filter(Boolean)
         : []
 
       allRisks.push({
         description,
         cause,
         impact,
-        category: pickCategory(get('category')),
-        scope: pickScope(get('scope')),
-        existing_controls: text(get('existing_controls')),
-        additional_controls: text(get('additional_controls')),
+        category: pickCategory(firstColumn(row, colsForField(headerMap, 'category'))),
+        scope: pickScope(firstColumn(row, colsForField(headerMap, 'scope'))),
+        existing_controls: concatColumns(row, colsForField(headerMap, 'existing_controls')),
+        additional_controls: concatColumns(row, colsForField(headerMap, 'additional_controls')),
         action_owner_dept_names,
-        implementation_period: text(get('implementation_period')),
-        likelihood: parseScore(get('likelihood')),
-        impact_manusia: parseScore(get('impact_manusia')),
-        impact_reputasi: parseScore(get('impact_reputasi')),
-        impact_kewangan: parseScore(get('impact_kewangan')),
-        impact_operasi: parseScore(get('impact_operasi')),
-        impact_objektif: parseScore(get('impact_objektif')),
+        implementation_period: concatColumns(row, colsForField(headerMap, 'implementation_period')),
+        likelihood: parseScore(firstColumn(row, colsForField(headerMap, 'likelihood'))),
+        impact_manusia: parseScore(firstColumn(row, colsForField(headerMap, 'impact_manusia'))),
+        impact_reputasi: parseScore(firstColumn(row, colsForField(headerMap, 'impact_reputasi'))),
+        impact_kewangan: parseScore(firstColumn(row, colsForField(headerMap, 'impact_kewangan'))),
+        impact_operasi: parseScore(firstColumn(row, colsForField(headerMap, 'impact_operasi'))),
+        impact_objektif: parseScore(firstColumn(row, colsForField(headerMap, 'impact_objektif'))),
       })
+      extracted++
     }
+    noteLines.push(`Sheet "${sheetName}": extracted ${extracted} risk${extracted === 1 ? '' : 's'}.`)
   }
 
   if (allRisks.length === 0) {
     return NextResponse.json({
       risks: [],
       general_notes:
-        'No risks were extracted. Make sure your Excel has a header row with recognisable column names like ' +
-        '"Description / Huraian Risiko", "Cause / Punca", "Impact / Kesan", "Likelihood", and the 5 impact dimensions. ' +
-        noteLines.join(' '),
+        'No risks were extracted. Headers may be unusual; the parser looks for Malay or English terms ' +
+        'like "Huraian / Keterangan Risiko", "Punca / Sebab", "Impak", "Kebarangkalian", "Manusia", ' +
+        '"Reputasi", "Kewangan", "Operasi", "Objektif". ' + noteLines.join(' '),
     })
   }
 
   return NextResponse.json({
     risks: allRisks,
     general_notes: noteLines.join(' '),
-    model: 'free-xlsx-parser',
+    model: 'free-xlsx-parser-v3',
   })
 }
