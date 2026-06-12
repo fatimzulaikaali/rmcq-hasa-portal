@@ -24,6 +24,14 @@ interface FormState {
   impact_objektif: number
   treatment_status: TreatmentStatus | ''
   treatment_update: string
+  // Paper-source metadata for THIS cycle (only relevant when the risk is
+  // entry_mode='rmcq_managed' — i.e. every cycle is a fresh paper borang from
+  // the dept that the RC transcribes into the portal).
+  paper_reviewed_by: string
+  paper_review_date: string
+  paper_endorsed_by: string
+  paper_endorsement_date: string
+  paper_reference: string
 }
 
 const TREATMENT_LABEL: Record<TreatmentStatus, string> = {
@@ -59,6 +67,9 @@ export default function NewReviewPage() {
     impact_operasi: 0, impact_objektif: 0,
     treatment_status: '',
     treatment_update: '',
+    paper_reviewed_by: '', paper_review_date: '',
+    paper_endorsed_by: '', paper_endorsement_date: '',
+    paper_reference: '',
   })
 
   useEffect(() => { void load() }, [riskRowId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,9 +145,14 @@ export default function NewReviewPage() {
       ])
     : null
 
+  const isRmcqMode = risk?.entry_mode === 'rmcq_managed'
   const errors: string[] = []
   if (!form.review_date) errors.push('Review date is required')
   if (!scoreInputs) errors.push('All scoring inputs must be 1-5')
+  if (isRmcqMode) {
+    if (!form.paper_reviewed_by.trim()) errors.push('Paper: who reviewed (dept side) is required')
+    if (!form.paper_review_date) errors.push('Paper: review date on the borang is required')
+  }
   const canSubmit = !submitting && errors.length === 0 && riskUserId !== null && risk !== null
 
   async function handleSubmit() {
@@ -159,22 +175,31 @@ export default function NewReviewPage() {
         risk_level: computed.riskLevel,
         treatment_status: form.treatment_status || null,
         treatment_update: form.treatment_update.trim() || null,
+        // Paper-source metadata for the cycle (only populated under RMCQ-mode).
+        paper_reviewed_by: form.paper_reviewed_by.trim() || null,
+        paper_review_date: form.paper_review_date || null,
+        paper_endorsed_by: form.paper_endorsed_by.trim() || null,
+        paper_endorsement_date: form.paper_endorsement_date || null,
+        paper_reference: form.paper_reference.trim() || null,
       })
       if (revErr) throw new Error(`Insert review: ${revErr.code ?? ''} ${revErr.message}`)
 
+      const paperSummary = isRmcqMode
+        ? ` — paper reviewed by ${form.paper_reviewed_by.trim()} on ${form.paper_review_date}${form.paper_endorsed_by.trim() ? `, HOD-endorsed by ${form.paper_endorsed_by.trim()}` : ''}${form.paper_endorsement_date ? ` on ${form.paper_endorsement_date}` : ''}${form.paper_reference.trim() ? ` (ref: ${form.paper_reference.trim()})` : ''}`
+        : ''
       const { error: auditErr } = await supabase.from('risk_audit_logs').insert({
         risk_id: risk.id,
         entity_type: 'risk_review',
-        action_type: 'ADD_REVIEW_CYCLE',
+        action_type: isRmcqMode ? 'ADD_REVIEW_CYCLE_PAPER' : 'ADD_REVIEW_CYCLE',
         performed_by: riskUserId,
-        user_role: 'RLO',
+        user_role: isRmcqMode ? 'RC' : 'RLO',
         new_value: {
           cycle_number: nextCycle,
           risk_score: computed.riskScore,
           risk_level: computed.riskLevel,
           treatment_status: form.treatment_status || null,
         },
-        comment: `Added review cycle ${nextCycle} via /risk/${risk.id}/review`,
+        comment: `Added review cycle ${nextCycle}${paperSummary}`,
       })
       if (auditErr) console.warn('Audit log insert failed:', auditErr)
 
@@ -328,6 +353,44 @@ export default function NewReviewPage() {
                   )}
                 </div>
               </div>
+
+              {/* Paper source for THIS cycle — RMCQ-mode only */}
+              {isRmcqMode && (
+                <div className="panel">
+                  <div className="pf"><div>
+                    <div className="pt">Paper Source · cycle {nextCycle}</div>
+                    <div className="psub">Every cycle is its own paper submission from the department. Capture who reviewed/endorsed and when.</div>
+                  </div></div>
+                  <div className="risk-form-grid">
+                    <div className="risk-field">
+                      <label>Reviewed by (RLO name)<span style={{ color: 'var(--red)' }}> *</span></label>
+                      <input type="text" value={form.paper_reviewed_by}
+                        onChange={(e) => set('paper_reviewed_by', e.target.value)} placeholder="e.g. Dr Suk Hui" />
+                    </div>
+                    <div className="risk-field">
+                      <label>Review date on borang<span style={{ color: 'var(--red)' }}> *</span></label>
+                      <input type="date" value={form.paper_review_date}
+                        onChange={(e) => set('paper_review_date', e.target.value)} />
+                    </div>
+                    <div className="risk-field">
+                      <label>HOD endorser</label>
+                      <input type="text" value={form.paper_endorsed_by}
+                        onChange={(e) => set('paper_endorsed_by', e.target.value)} placeholder="e.g. Dr Rosnida" />
+                    </div>
+                    <div className="risk-field">
+                      <label>HOD endorsement date</label>
+                      <input type="date" value={form.paper_endorsement_date}
+                        onChange={(e) => set('paper_endorsement_date', e.target.value)} />
+                    </div>
+                    <div className="risk-field full">
+                      <label>Paper reference</label>
+                      <input type="text" value={form.paper_reference}
+                        onChange={(e) => set('paper_reference', e.target.value)}
+                        placeholder="Optional — form number or file location" />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Treatment progress */}
               <div className="panel">

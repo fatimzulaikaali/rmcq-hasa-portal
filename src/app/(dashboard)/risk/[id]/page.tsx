@@ -448,6 +448,12 @@ export default function RiskDetailPage() {
                     <span className="risk-chip" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
                       {RISK_STATUS_LABEL[risk.status]}
                     </span>
+                    {risk.entry_mode === 'rmcq_managed' && (
+                      <span className="risk-chip" style={{ color: '#92400E', background: '#FEF3C7' }}
+                        title="Paper submission entered by RC on behalf of the department">
+                        📝 Paper-submitted
+                      </span>
+                    )}
                     <span className="risk-chip" style={{ color: 'var(--muted)', background: '#fff', border: '1px solid var(--border)' }}>
                       Cycle {latest?.cycle_number ?? '—'}
                     </span>
@@ -755,6 +761,17 @@ export default function RiskDetailPage() {
                       {themes.map((t) => (
                         <span key={t.id} className="theme-pill" style={{ marginRight: 6 }}>{t.name}</span>
                       ))}
+                    </DefLine>
+                  )}
+                  {risk.entry_mode === 'rmcq_managed' && (risk.paper_submitted_by || risk.paper_endorsed_by || risk.paper_reference) && (
+                    <DefLine label="Paper source" full>
+                      <span style={{ display: 'inline-block', padding: '6px 10px', background: '#FEF3C7', borderRadius: 6, border: '1px solid #FCD34D', fontSize: 12, color: '#78350F' }}>
+                        {risk.paper_submitted_by && <>Submitted by <b>{risk.paper_submitted_by}</b></>}
+                        {risk.paper_submission_date && <> on {risk.paper_submission_date}</>}
+                        {risk.paper_endorsed_by && <> · HOD-endorsed by <b>{risk.paper_endorsed_by}</b></>}
+                        {risk.paper_endorsement_date && <> on {risk.paper_endorsement_date}</>}
+                        {risk.paper_reference && <> · ref: <i>{risk.paper_reference}</i></>}
+                      </span>
                     </DefLine>
                   )}
                 </div>

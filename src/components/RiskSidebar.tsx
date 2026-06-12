@@ -18,12 +18,16 @@ import { getModuleAccess } from '@/lib/risk/auth'
  * The component resolves access itself so pages don't have to pass it in. */
 export function RiskSidebar({ onClose, active, children }: {
   onClose: () => void
-  active: 'risk' | 'committees' | 'actions'
+  active: 'risk' | 'committees' | 'actions' | 'quickadd'
   children?: React.ReactNode
 }) {
   const supabase = useMemo(() => createClient(), [])
   const [showGlobal, setShowGlobal] = useState(false)
   const [actionCount, setActionCount] = useState(0)
+  /* RMCQ-mode intake queue: paper submissions held as DRAFT awaiting the dept
+   * to send back the missing information. Surfaced as a badge on Quick Add
+   * so it doesn't slip off Fatim's desk. */
+  const [draftCount, setDraftCount] = useState(0)
 
   useEffect(() => {
     void (async () => {
@@ -42,6 +46,13 @@ export function RiskSidebar({ onClose, active, children }: {
         }
         const { data } = await q
         setActionCount((data ?? []).length)
+
+        // RMCQ-mode draft count — only shown for global-role users.
+        if (access.allModules) {
+          const { data: drafts } = await supabase.from('risks').select('id')
+            .eq('status', 'DRAFT').eq('entry_mode', 'rmcq_managed')
+          setDraftCount((drafts ?? []).length)
+        }
       } catch { /* leave hidden on error */ }
     })()
   }, [supabase])
@@ -66,6 +77,17 @@ export function RiskSidebar({ onClose, active, children }: {
           <Link href="/risk" className={`nav-item ${active === 'risk' ? 'active' : ''}`}>
             <span className="nav-icon">⚠️</span><span>Risk Register</span>
           </Link>
+          {showGlobal && (
+            <Link href="/risk/quick-add" className={`nav-item nav-sub ${active === 'quickadd' ? 'active' : ''}`}
+              title="Enter a paper-submitted risk on behalf of a department">
+              <span className="nav-icon">📝</span><span>Quick Add (paper)</span>
+              {draftCount > 0 && (
+                <span className="nav-badge" title={`${draftCount} draft${draftCount === 1 ? '' : 's'} awaiting clarification from dept`}>
+                  {draftCount}
+                </span>
+              )}
+            </Link>
+          )}
           <Link href="/risk/actions" className={`nav-item nav-sub ${active === 'actions' ? 'active' : ''}`}>
             <span className="nav-icon">📌</span><span>Action Items</span>
             {actionCount > 0 && <span className="nav-badge">{actionCount}</span>}

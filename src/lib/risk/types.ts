@@ -59,6 +59,16 @@ export interface Risk {
   implementation_period: string | null
   notes: string | null
   status: RiskStatus
+  /* RMCQ-mode: distinguishes portal-driven (workflow) from paper-driven
+   * (rmcq_managed) submissions. Defaults to 'workflow' on existing rows. */
+  entry_mode: 'workflow' | 'rmcq_managed'
+  /* Paper-source metadata for the ORIGINAL submission. Populated when an RC
+   * enters a paper risk via /risk/quick-add; null for workflow-mode risks. */
+  paper_submitted_by: string | null
+  paper_submission_date: string | null
+  paper_endorsed_by: string | null
+  paper_endorsement_date: string | null
+  paper_reference: string | null
   date_opened: string
   date_closed: string | null
   closed_by: number | null
@@ -96,6 +106,13 @@ export interface RiskReview {
   validated_by: number | null
   validated_at: string | null
   validation_comment: string | null
+  /* Paper-source metadata for THIS review cycle (cycle 2+ under RMCQ-mode).
+   * Cycle 1 inherits its paper source from the risks row. */
+  paper_reviewed_by: string | null
+  paper_review_date: string | null
+  paper_endorsed_by: string | null
+  paper_endorsement_date: string | null
+  paper_reference: string | null
   created_at: string
 }
 
