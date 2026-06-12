@@ -20,6 +20,7 @@ import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
   RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
+import { exportMeetingMinutesPdf, exportMeetingMinutesXlsx, type MeetingExportData } from '@/lib/risk/exports'
 
 interface AgendaEntry {
   item: RiskMeetingAgenda
@@ -551,6 +552,40 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
+  /* Snapshot of in-memory state shaped for the exports helper. */
+  function buildExportData(): MeetingExportData | null {
+    if (!meeting) return null
+    // Simplify latestReviewByRisk → just the fields the export needs.
+    const latestByRisk = new Map<number, { risk_level: string; risk_score: number; cycle_number: number }>()
+    Array.from(latestReviewByRisk.entries()).forEach(([k, v]) => {
+      latestByRisk.set(k, { risk_level: v.risk_level, risk_score: v.risk_score, cycle_number: v.cycle_number })
+    })
+    const chairName = meeting.chaired_by
+      ? users.find((u) => u.id === meeting.chaired_by)?.name ?? null
+      : null
+    return {
+      meeting,
+      agenda,
+      risksById,
+      latestByRisk,
+      actions,
+      depts: allDepts.length ? allDepts : Array.from(deptNames.entries()).map(([code, name_en]) => ({ code, name_en })),
+      users: users.map((u) => ({ id: u.id, name: u.name })),
+      chairName,
+      themes,
+      themeTagsByRisk: tagsByRisk,
+      rocSummary: meeting.meeting_type === 'ROC' && rocSummary ? {
+        total: rocSummary.total,
+        escalatedCount: rocSummary.escalatedCount,
+        byDept: rocSummary.byDept,
+        levelMap: rocSummary.levelMap,
+        byCycle: rocSummary.byCycle,
+        byTheme: rocSummary.byTheme,
+        linkedRtc,
+      } : undefined,
+    }
+  }
+
   // Agenda grouped by department (sorted), and the same items flattened in that
   // order — the flat list drives the full-screen presentation stepper.
   const groups = useMemo(() => {
@@ -707,14 +742,30 @@ export default function RiskMeetingDetailPage() {
             <>
               {/* Meeting header */}
               <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">{meeting.title}</div>
-                  <div className="psub">
-                    {MEETING_TYPE_LABEL[meeting.meeting_type]} · {meeting.meeting_date}
-                    {meeting.location ? ` · ${meeting.location}` : ''}
-                    {meeting.chaired_by ? ` · chaired by ${nameOf(meeting.chaired_by)}` : ''}
+                <div className="pf" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="pt">{meeting.title}</div>
+                    <div className="psub">
+                      {MEETING_TYPE_LABEL[meeting.meeting_type]} · {meeting.meeting_date}
+                      {meeting.location ? ` · ${meeting.location}` : ''}
+                      {meeting.chaired_by ? ` · chaired by ${nameOf(meeting.chaired_by)}` : ''}
+                    </div>
                   </div>
-                </div></div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      title="Print or save the meeting minutes as PDF"
+                      onClick={() => { const d = buildExportData(); if (d) exportMeetingMinutesPdf(d) }}>
+                      🖨 Minutes PDF
+                    </button>
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      title="Download agenda + action items as Excel"
+                      onClick={() => { const d = buildExportData(); if (d) exportMeetingMinutesXlsx(d) }}>
+                      📊 Excel
+                    </button>
+                  </div>
+                </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>Status:</span>
                   {MEETING_STATUSES.map((s) => (

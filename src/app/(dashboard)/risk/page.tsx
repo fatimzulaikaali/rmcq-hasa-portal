@@ -18,6 +18,7 @@ import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
   RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
 } from '@/lib/risk/scoring'
+import { exportRegisterXlsx, exportRegisterPdf } from '@/lib/risk/exports'
 
 type StatusFilter   = 'all' | RiskStatus
 type LevelFilter    = 'all' | RiskLevel
@@ -340,6 +341,23 @@ export default function RiskListPage() {
                     Reset ({activeFilters})
                   </button>
                 )}
+                <div style={{ flex: 1 }} />
+                <button type="button" className="signout-btn"
+                  style={{ fontSize: 11, padding: '4px 10px' }}
+                  disabled={filtered.length === 0}
+                  title="Download the current view as Excel — full column set"
+                  onClick={() => exportRegisterXlsx(filtered,
+                    { view, status: statusF, level: levelF, category: categoryF, deptCode: deptF }, depts)}>
+                  📊 Excel
+                </button>
+                <button type="button" className="signout-btn"
+                  style={{ fontSize: 11, padding: '4px 10px' }}
+                  disabled={filtered.length === 0}
+                  title="Print or save the current view as PDF"
+                  onClick={() => exportRegisterPdf(filtered,
+                    { view, status: statusF, level: levelF, category: categoryF, deptCode: deptF }, depts)}>
+                  🖨 PDF
+                </button>
               </div>
 
               <div className="panel" style={{ marginTop: 14 }}>
@@ -449,10 +467,6 @@ export default function RiskListPage() {
                 )}
               </div>
 
-              <div style={{ marginTop: 10, fontSize: 10, color: 'var(--muted)' }}>
-                Phase 3.1 — read-only list. Coming soon: new risk form (3.2), risk detail (3.3),
-                review cycles (3.4), approval workflow (3.5), meetings (3.6), audit log (3.7), report cards (3.8).
-              </div>
             </>
           )}
         </main>

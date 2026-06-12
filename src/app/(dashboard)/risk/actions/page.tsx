@@ -11,6 +11,7 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import type { RiskActionItem, ActionStatus } from '@/lib/risk/types'
 import { ACTION_TYPE_LABEL, ACTION_STATUS_LABEL } from '@/lib/risk/scoring'
+import { exportActionItemsXlsx, exportActionItemsPdf, type ActionItemListItem } from '@/lib/risk/exports'
 
 interface ActionRow extends RiskActionItem {
   risks: { id: number; risk_id: string; dept_code: string; description: string } | null
@@ -198,12 +199,38 @@ export default function RiskActionsPage() {
               </div>
 
               <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">{tab === 'open' ? 'Awaiting Response' : tab === 'responded' ? 'Responded' : 'Closed'}</div>
-                  <div className="psub">
-                    {isRC ? 'You can review responses and accept or escalate each item.' : canRespond ? 'Record your department’s feedback on each directive.' : 'Read-only view of committee action items.'}
+                <div className="pf" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="pt">{tab === 'open' ? 'Awaiting Response' : tab === 'responded' ? 'Responded' : 'Closed'}</div>
+                    <div className="psub">
+                      {isRC ? 'You can review responses and accept or escalate each item.' : canRespond ? 'Record your department’s feedback on each directive.' : 'Read-only view of committee action items.'}
+                    </div>
                   </div>
-                </div></div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      disabled={shown.length === 0}
+                      title="Download the current tab as Excel"
+                      onClick={() => {
+                        const items: ActionItemListItem[] = shown.map((a) => ({ item: a, risk: a.risks }))
+                        const depts = Array.from(deptNames.entries()).map(([code, name_en]) => ({ code, name_en }))
+                        exportActionItemsXlsx(items, { view: tab, deptScope: null }, depts)
+                      }}>
+                      📊 Excel
+                    </button>
+                    <button type="button" className="signout-btn"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      disabled={shown.length === 0}
+                      title="Print or save the current tab as PDF"
+                      onClick={() => {
+                        const items: ActionItemListItem[] = shown.map((a) => ({ item: a, risk: a.risks }))
+                        const depts = Array.from(deptNames.entries()).map(([code, name_en]) => ({ code, name_en }))
+                        exportActionItemsPdf(items, { view: tab, deptScope: null }, depts)
+                      }}>
+                      🖨 PDF
+                    </button>
+                  </div>
+                </div>
 
                 {shown.length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', padding: '20px 4px', textAlign: 'center' }}>
