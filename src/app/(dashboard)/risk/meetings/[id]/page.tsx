@@ -396,6 +396,110 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
+  /* Edit a previously-recorded decision — outcome, discussion notes, and/or
+   * the re-score. If the agenda item already has a review_id (re-score was
+   * applied at decision time), the same review row is updated in place rather
+   * than spawning a new cycle. The risk's status flips to match the new
+   * outcome, and a separate audit entry records the edit. */
+  async function editDecision(
+    item: RiskMeetingAgenda,
+    risk: Risk,
+    opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null },
+  ) {
+    if (!meeting || !currentUserId) return
+    setBusy(true); setActionError(null)
+    try {
+      let reviewId: number | null = item.review_id
+      if (opts.rescore) {
+        const computed = computeRiskScore(opts.rescore.likelihood, [
+          opts.rescore.impact_manusia, opts.rescore.impact_reputasi, opts.rescore.impact_kewangan,
+          opts.rescore.impact_operasi, opts.rescore.impact_objektif])
+        if (reviewId) {
+          // Update the existing re-score row in place — same cycle number.
+          const { error: rvErr } = await supabase.from('risk_reviews').update({
+            likelihood: opts.rescore.likelihood,
+            impact_manusia: opts.rescore.impact_manusia,
+            impact_reputasi: opts.rescore.impact_reputasi,
+            impact_kewangan: opts.rescore.impact_kewangan,
+            impact_operasi: opts.rescore.impact_operasi,
+            impact_objektif: opts.rescore.impact_objektif,
+            avg_impact: computed.avgImpact,
+            risk_score: computed.riskScore,
+            risk_level: computed.riskLevel,
+            review_date: new Date().toISOString().slice(0, 10),
+          }).eq('id', reviewId)
+          if (rvErr) throw new Error(`Re-score update: ${rvErr.code ?? ''} ${rvErr.message}`)
+        } else {
+          // No previous re-score on this item — insert a new cycle.
+          const latest = latestReviewByRisk.get(risk.id)
+          const nextCycle = (latest?.cycle_number ?? 0) + 1
+          const { data: rv, error: rvErr } = await supabase.from('risk_reviews').insert({
+            risk_id: risk.id,
+            cycle_number: nextCycle,
+            reviewed_by: currentUserId,
+            review_date: new Date().toISOString().slice(0, 10),
+            likelihood: opts.rescore.likelihood,
+            impact_manusia: opts.rescore.impact_manusia,
+            impact_reputasi: opts.rescore.impact_reputasi,
+            impact_kewangan: opts.rescore.impact_kewangan,
+            impact_operasi: opts.rescore.impact_operasi,
+            impact_objektif: opts.rescore.impact_objektif,
+            avg_impact: computed.avgImpact,
+            risk_score: computed.riskScore,
+            risk_level: computed.riskLevel,
+          }).select('id').single()
+          if (rvErr) throw new Error(`Re-score insert: ${rvErr.code ?? ''} ${rvErr.message}`)
+          reviewId = rv.id as number
+        }
+      }
+
+      // Update the agenda row — the edit may also be by a different RC, so
+      // we refresh decided_by and decided_at to reflect who finalised it.
+      const { error: agErr } = await supabase.from('risk_meeting_agenda').update({
+        outcome: opts.outcome,
+        discussion_notes: opts.notes.trim() || null,
+        review_id: reviewId,
+        decided_by: currentUserId,
+        decided_at: new Date().toISOString(),
+      }).eq('id', item.id)
+      if (agErr) throw new Error(`Edit decision: ${agErr.code ?? ''} ${agErr.message}`)
+
+      // Sync the risk's status to the new outcome.
+      const newStatus = outcomeToStatus(opts.outcome)
+      const riskPatch: Partial<Risk> = { status: newStatus }
+      if (opts.outcome === 'SEND_BACK_DEPT') {
+        const note = opts.notes.trim() || `Sent back by ${meeting.meeting_type} for rework`
+        riskPatch.rejection_reason = note.slice(0, 50)
+        riskPatch.rejection_comment = note
+        riskPatch.rejected_by = currentUserId
+        riskPatch.rejected_at = new Date().toISOString()
+      }
+      const { error: rErr } = await supabase.from('risks').update(riskPatch).eq('id', risk.id)
+      if (rErr) throw new Error(`Risk status: ${rErr.code ?? ''} ${rErr.message}`)
+
+      // Audit — keep separate from the original record so the timeline shows
+      // both the original decision and the edit.
+      await supabase.from('risk_audit_logs').insert({
+        risk_id: risk.id,
+        entity_type: 'risk',
+        entity_id: risk.id,
+        action_type: `${meeting.meeting_type}_${opts.outcome}_EDIT`,
+        performed_by: currentUserId,
+        user_role: 'RC',
+        old_value: {
+          previous_outcome: item.outcome,
+          previous_notes: item.discussion_notes,
+          previous_status: risk.status,
+        },
+        new_value: { status: newStatus, ...(opts.rescore ? { rescored: true } : {}) },
+        comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} decision edited — now ${COMMITTEE_OUTCOME_LABEL[opts.outcome]}${opts.rescore ? ' (re-scored)' : ''}${opts.notes.trim() ? `: ${opts.notes.trim()}` : ''}`,
+      })
+
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   /* Add an action item tied to a specific risk on the agenda (so it routes to
    * that risk's department), with a named assignee. */
   async function addActionItem(
@@ -1007,6 +1111,7 @@ export default function RiskMeetingDetailPage() {
                               deptNameOf={(c) => deptNames.get(c) ?? allDepts.find((d) => d.code === c)?.name_en ?? c}
                               onAddAction={(payload) => addActionItem(item.id, risk.id, payload)}
                               onDecide={(opts) => recordDecision(item, risk, opts)}
+                              onEditDecision={(opts) => editDecision(item, risk, opts)}
                               onRemove={() => removeAgendaItem(item)}
                             />
                           ))}
@@ -1372,7 +1477,7 @@ interface ScoreInputs {
 function AgendaItemCard({
   item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
   themes, taggedThemeIds, onToggleTheme, onAddCustomTheme, onEditNotes,
-  actionItems, allDepts, deptNameOf, onAddAction, onDecide, onRemove,
+  actionItems, allDepts, deptNameOf, onAddAction, onDecide, onEditDecision, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -1392,12 +1497,18 @@ function AgendaItemCard({
   deptNameOf: (code: string) => string
   onAddAction: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
   onDecide: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
+  onEditDecision: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
 }) {
   const [themesOpen, setThemesOpen] = useState(false)
   const [newTheme, setNewTheme] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesEdit, setNotesEdit] = useState(item.discussion_notes ?? '')
+  /* editingDecision lets RC re-open the full decision form for a decided item.
+   * Outcome / notes / rescore states are reused — they're populated from the
+   * existing item values when the Edit button is clicked, so the form opens
+   * pre-filled with what was last saved. */
+  const [editingDecision, setEditingDecision] = useState(false)
   const [outcome, setOutcome] = useState<CommitteeOutcome | ''>('')
   const [notes, setNotes] = useState('')
   const [rescoreOpen, setRescoreOpen] = useState(false)
@@ -1485,7 +1596,9 @@ function AgendaItemCard({
         </div>
       )}
 
-      {decided ? (
+      {/* Decided banner — shown whenever the item has been decided, including
+       * while RC is editing (so they keep the prior decision in view). */}
+      {decided && (
         <div style={{ marginTop: 10 }}>
           <div className="ac" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
             <div className="ai">✓</div>
@@ -1498,7 +1611,8 @@ function AgendaItemCard({
               </div>
             </div>
           </div>
-          {isRC && (editingNotes ? (
+          {/* Notes-only edit (existing flow) */}
+          {isRC && editingNotes && (
             <div style={{ marginTop: 8 }}>
               <textarea rows={2} value={notesEdit} onChange={(e) => setNotesEdit(e.target.value)}
                 placeholder="Discussion notes…"
@@ -1511,19 +1625,47 @@ function AgendaItemCard({
                   disabled={busy} onClick={() => { onEditNotes(notesEdit); setEditingNotes(false) }}>Save notes</button>
               </div>
             </div>
-          ) : (
-            <div style={{ marginTop: 6 }}>
+          )}
+          {/* Edit affordances — only when not already editing something */}
+          {isRC && !editingNotes && !editingDecision && (
+            <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
-                onClick={() => { setNotesEdit(item.discussion_notes ?? ''); setEditingNotes(true) }}>✎ Edit discussion notes</button>
+                onClick={() => { setNotesEdit(item.discussion_notes ?? ''); setEditingNotes(true) }}>
+                ✎ Edit discussion notes
+              </button>
+              <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+                onClick={() => {
+                  // Pre-fill the decision form from the existing values so the
+                  // RC sees what they're editing rather than starting blank.
+                  setOutcome(item.outcome as CommitteeOutcome)
+                  setNotes(item.discussion_notes ?? '')
+                  setRescoreOpen(false)
+                  setEditingDecision(true)
+                }}>
+                ✎ Edit decision &amp; scoring
+              </button>
             </div>
-          ))}
+          )}
         </div>
-      ) : !isRC ? (
+      )}
+
+      {/* Waiting message for non-RC viewers when not yet decided */}
+      {!decided && !isRC && (
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
           Awaiting the committee&apos;s decision (recorded by the RC).
         </div>
-      ) : (
+      )}
+
+      {/* Decision form — shown for fresh decisions AND for edits. When editing
+       * a previously-decided item, the form is pre-filled and the save button
+       * routes through onEditDecision instead of onDecide. */}
+      {isRC && (!decided || editingDecision) && (
         <div style={{ marginTop: 12, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
+          {editingDecision && (
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)', marginBottom: 6 }}>
+              Editing the recorded decision — change the outcome, re-score, or update the notes, then Update decision.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={outcome} onChange={(e) => setOutcome(e.target.value as CommitteeOutcome)}
               style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -1564,13 +1706,31 @@ function AgendaItemCard({
             placeholder="Discussion notes (shown to the department if sent back)…"
             style={{ width: '100%', marginTop: 10, padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-            <button type="button" className="role-pill" onClick={onRemove} disabled={busy}>Remove from agenda</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, gap: 6, flexWrap: 'wrap' }}>
+            {editingDecision ? (
+              <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
+                onClick={() => {
+                  setEditingDecision(false)
+                  setOutcome('')
+                  setNotes('')
+                  setRescoreOpen(false)
+                }}>Cancel edit</button>
+            ) : (
+              <button type="button" className="role-pill" onClick={onRemove} disabled={busy}>Remove from agenda</button>
+            )}
             <button type="button" className="signout-btn"
               style={{ fontSize: 12, padding: '6px 14px', background: canSave ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: canSave ? 'var(--blue)' : '#9CA3AF', cursor: canSave ? 'pointer' : 'not-allowed' }}
               disabled={!canSave}
-              onClick={() => onDecide({ outcome: outcome as CommitteeOutcome, notes, rescore: rescoreOpen ? scores : null })}>
-              Record decision
+              onClick={() => {
+                const payload = { outcome: outcome as CommitteeOutcome, notes, rescore: rescoreOpen ? scores : null }
+                if (editingDecision) {
+                  onEditDecision(payload)
+                  setEditingDecision(false)
+                } else {
+                  onDecide(payload)
+                }
+              }}>
+              {editingDecision ? 'Update decision' : 'Record decision'}
             </button>
           </div>
         </div>
