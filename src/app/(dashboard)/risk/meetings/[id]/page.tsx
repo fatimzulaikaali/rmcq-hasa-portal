@@ -319,11 +319,13 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
-  /* Record a committee decision on one agenda item — the heart of the flow. */
+  /* Record a committee decision on one agenda item — the heart of the flow.
+   * discussion = what was debated; decision = the formal resolution text.
+   * outcome    = the categorical workflow flag. */
   async function recordDecision(
     item: RiskMeetingAgenda,
     risk: Risk,
-    opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null },
+    opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null },
   ) {
     if (!meeting || !currentUserId) return
     setBusy(true); setActionError(null)
@@ -355,10 +357,11 @@ export default function RiskMeetingDetailPage() {
         reviewId = rv.id as number
       }
 
-      // 2) Update the agenda item with the decision
+      // 2) Update the agenda item with the decision — both discussion + decision text
       const { error: agErr } = await supabase.from('risk_meeting_agenda').update({
         outcome: opts.outcome,
-        discussion_notes: opts.notes.trim() || null,
+        discussion_notes: opts.discussion.trim() || null,
+        decision_text: opts.decision.trim() || null,
         review_id: reviewId,
         decided_by: currentUserId,
         decided_at: new Date().toISOString(),
@@ -369,9 +372,11 @@ export default function RiskMeetingDetailPage() {
       const newStatus = outcomeToStatus(opts.outcome)
       const riskPatch: Partial<Risk> = { status: newStatus }
       if (opts.outcome === 'SEND_BACK_DEPT') {
-        const note = opts.notes.trim() || `Sent back by ${meeting.meeting_type} for rework`
-        riskPatch.rejection_reason = note.slice(0, 50)
-        riskPatch.rejection_comment = note
+        // Prefer the formal decision text for the rejection note; fall back to
+        // discussion, then a generic phrase.
+        const rejectText = opts.decision.trim() || opts.discussion.trim() || `Sent back by ${meeting.meeting_type} for rework`
+        riskPatch.rejection_reason = rejectText.slice(0, 50)
+        riskPatch.rejection_comment = rejectText
         riskPatch.rejected_by = currentUserId
         riskPatch.rejected_at = new Date().toISOString()
       }
@@ -379,6 +384,9 @@ export default function RiskMeetingDetailPage() {
       if (rErr) throw new Error(`Risk status: ${rErr.code ?? ''} ${rErr.message}`)
 
       // 4) Audit log on the risk
+      const auditParts: string[] = [COMMITTEE_OUTCOME_LABEL[opts.outcome]]
+      if (opts.decision.trim()) auditParts.push(`decision: ${opts.decision.trim()}`)
+      if (opts.discussion.trim()) auditParts.push(`discussion: ${opts.discussion.trim()}`)
       await supabase.from('risk_audit_logs').insert({
         risk_id: risk.id,
         entity_type: 'risk',
@@ -388,7 +396,7 @@ export default function RiskMeetingDetailPage() {
         user_role: 'RC',
         old_value: { status: risk.status },
         new_value: { status: newStatus, ...(reviewId !== item.review_id ? { rescored: true } : {}) },
-        comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} — ${COMMITTEE_OUTCOME_LABEL[opts.outcome]}${opts.notes.trim() ? `: ${opts.notes.trim()}` : ''}`,
+        comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} — ${auditParts.join(' · ')}`,
       })
 
       await load({ silent: true })
@@ -404,7 +412,7 @@ export default function RiskMeetingDetailPage() {
   async function editDecision(
     item: RiskMeetingAgenda,
     risk: Risk,
-    opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null },
+    opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null },
   ) {
     if (!meeting || !currentUserId) return
     setBusy(true); setActionError(null)
@@ -457,7 +465,8 @@ export default function RiskMeetingDetailPage() {
       // we refresh decided_by and decided_at to reflect who finalised it.
       const { error: agErr } = await supabase.from('risk_meeting_agenda').update({
         outcome: opts.outcome,
-        discussion_notes: opts.notes.trim() || null,
+        discussion_notes: opts.discussion.trim() || null,
+        decision_text: opts.decision.trim() || null,
         review_id: reviewId,
         decided_by: currentUserId,
         decided_at: new Date().toISOString(),
@@ -468,9 +477,9 @@ export default function RiskMeetingDetailPage() {
       const newStatus = outcomeToStatus(opts.outcome)
       const riskPatch: Partial<Risk> = { status: newStatus }
       if (opts.outcome === 'SEND_BACK_DEPT') {
-        const note = opts.notes.trim() || `Sent back by ${meeting.meeting_type} for rework`
-        riskPatch.rejection_reason = note.slice(0, 50)
-        riskPatch.rejection_comment = note
+        const rejectText = opts.decision.trim() || opts.discussion.trim() || `Sent back by ${meeting.meeting_type} for rework`
+        riskPatch.rejection_reason = rejectText.slice(0, 50)
+        riskPatch.rejection_comment = rejectText
         riskPatch.rejected_by = currentUserId
         riskPatch.rejected_at = new Date().toISOString()
       }
@@ -479,6 +488,9 @@ export default function RiskMeetingDetailPage() {
 
       // Audit — keep separate from the original record so the timeline shows
       // both the original decision and the edit.
+      const editParts: string[] = [COMMITTEE_OUTCOME_LABEL[opts.outcome]]
+      if (opts.decision.trim()) editParts.push(`decision: ${opts.decision.trim()}`)
+      if (opts.discussion.trim()) editParts.push(`discussion: ${opts.discussion.trim()}`)
       await supabase.from('risk_audit_logs').insert({
         risk_id: risk.id,
         entity_type: 'risk',
@@ -488,11 +500,12 @@ export default function RiskMeetingDetailPage() {
         user_role: 'RC',
         old_value: {
           previous_outcome: item.outcome,
-          previous_notes: item.discussion_notes,
+          previous_discussion: item.discussion_notes,
+          previous_decision: item.decision_text,
           previous_status: risk.status,
         },
         new_value: { status: newStatus, ...(opts.rescore ? { rescored: true } : {}) },
-        comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} decision edited — now ${COMMITTEE_OUTCOME_LABEL[opts.outcome]}${opts.rescore ? ' (re-scored)' : ''}${opts.notes.trim() ? `: ${opts.notes.trim()}` : ''}`,
+        comment: `${MEETING_TYPE_LABEL[meeting.meeting_type]} decision edited — ${editParts.join(' · ')}${opts.rescore ? ' (re-scored)' : ''}`,
       })
 
       await load({ silent: true })
@@ -972,7 +985,7 @@ export default function RiskMeetingDetailPage() {
                         ) : (
                           <div style={{ overflowX: 'auto' }}>
                             <table className="risk-table">
-                              <thead><tr><th>Risk</th><th>Department</th><th style={{ textAlign: 'center' }}>Level</th><th>RTC discussion notes</th></tr></thead>
+                              <thead><tr><th>Risk</th><th>Department</th><th style={{ textAlign: 'center' }}>Level</th><th>RTC discussion &amp; decision</th></tr></thead>
                               <tbody>
                                 {rocSummary.escalated.map(({ item, risk }) => {
                                   const lr = latestReviewByRisk.get(risk.id)
@@ -987,7 +1000,11 @@ export default function RiskMeetingDetailPage() {
                                           </span>
                                         ) : '—'}
                                       </td>
-                                      <td style={{ fontSize: 12 }}>{item.discussion_notes || '—'}</td>
+                                      <td style={{ fontSize: 12 }}>
+                                        {item.decision_text && <div><b>Decision:</b> {item.decision_text}</div>}
+                                        {item.discussion_notes && <div style={{ color: 'var(--muted)' }}><b>Discussion:</b> {item.discussion_notes}</div>}
+                                        {!item.decision_text && !item.discussion_notes && '—'}
+                                      </td>
                                     </tr>
                                   )
                                 })}
@@ -1496,8 +1513,8 @@ function AgendaItemCard({
   allDepts: { code: string; name_en: string }[]
   deptNameOf: (code: string) => string
   onAddAction: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
-  onDecide: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
-  onEditDecision: (opts: { outcome: CommitteeOutcome; notes: string; rescore: ScoreInputs | null }) => void
+  onDecide: (opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null }) => void
+  onEditDecision: (opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
 }) {
   const [themesOpen, setThemesOpen] = useState(false)
@@ -1510,7 +1527,11 @@ function AgendaItemCard({
    * pre-filled with what was last saved. */
   const [editingDecision, setEditingDecision] = useState(false)
   const [outcome, setOutcome] = useState<CommitteeOutcome | ''>('')
-  const [notes, setNotes] = useState('')
+  /* discussion = the free-form record of what the committee debated.
+   * decision   = the formal resolution text (separate from the outcome flag,
+   *              which is the categorical workflow driver). */
+  const [discussion, setDiscussion] = useState('')
+  const [decision, setDecision] = useState('')
   const [rescoreOpen, setRescoreOpen] = useState(false)
   const [scores, setScores] = useState<ScoreInputs>({
     likelihood: latest?.likelihood ?? 0,
@@ -1602,13 +1623,22 @@ function AgendaItemCard({
         <div style={{ marginTop: 10 }}>
           <div className="ac" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
             <div className="ai">✓</div>
-            <div>
-              <div className="at">Decision: {COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome]}</div>
+            <div style={{ flex: 1 }}>
+              <div className="at">Outcome: {COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome]}</div>
               <div className="as">
                 Recorded by {decidedByName}{item.decided_at ? ` on ${item.decided_at.slice(0, 10)}` : ''}
                 {item.review_id ? ' · re-scored' : ''}
-                {item.discussion_notes ? ` — ${item.discussion_notes}` : ''}
               </div>
+              {item.discussion_notes && (
+                <div style={{ marginTop: 6, fontSize: 12, color: '#1F2937' }}>
+                  <span style={{ fontWeight: 700, color: '#166534' }}>Discussion: </span>{item.discussion_notes}
+                </div>
+              )}
+              {item.decision_text && (
+                <div style={{ marginTop: 4, fontSize: 12, color: '#1F2937' }}>
+                  <span style={{ fontWeight: 700, color: '#166534' }}>Decision: </span>{item.decision_text}
+                </div>
+              )}
             </div>
           </div>
           {/* Notes-only edit (existing flow) */}
@@ -1638,7 +1668,8 @@ function AgendaItemCard({
                   // Pre-fill the decision form from the existing values so the
                   // RC sees what they're editing rather than starting blank.
                   setOutcome(item.outcome as CommitteeOutcome)
-                  setNotes(item.discussion_notes ?? '')
+                  setDiscussion(item.discussion_notes ?? '')
+                  setDecision(item.decision_text ?? '')
                   setRescoreOpen(false)
                   setEditingDecision(true)
                 }}>
@@ -1663,25 +1694,51 @@ function AgendaItemCard({
         <div style={{ marginTop: 12, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
           {editingDecision && (
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)', marginBottom: 6 }}>
-              Editing the recorded decision — change the outcome, re-score, or update the notes, then Update decision.
+              Editing the recorded decision — update any section, then Update decision.
             </div>
           )}
+
+          {/* 1. Discussion — what was debated */}
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>
+            1. Discussion
+          </label>
+          <textarea rows={3} value={discussion} onChange={(e) => setDiscussion(e.target.value)}
+            placeholder="What did the committee discuss? Capture the points raised, concerns, alternatives considered…"
+            style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
+
+          {/* 2. Decision — the formal resolution text */}
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 12, marginBottom: 4 }}>
+            2. Decision
+          </label>
+          <textarea rows={2} value={decision} onChange={(e) => setDecision(e.target.value)}
+            placeholder="The committee's formal decision — e.g. “The committee endorses this risk as active and directs the dept to…”"
+            style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
+
+          {/* 3. Outcome — the categorical workflow driver */}
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 12, marginBottom: 4 }}>
+            3. Outcome
+          </label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={outcome} onChange={(e) => setOutcome(e.target.value as CommitteeOutcome)}
               style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
-              <option value="">— decision —</option>
+              <option value="">— pick an outcome —</option>
               {opts.map((o) => <option key={o} value={o}>{COMMITTEE_OUTCOME_LABEL[o]}</option>)}
             </select>
-            <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '6px 10px' }}
-              onClick={() => setRescoreOpen((v) => !v)}>
-              {rescoreOpen ? 'Cancel re-score' : '✎ Re-score'}
-            </button>
             {outcome && (
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                 → moves risk to <b>{RISK_STATUS_LABEL[outcomeToStatus(outcome)]}</b>
               </span>
             )}
           </div>
+
+          {/* 4. Re-score (optional) */}
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 12, marginBottom: 4 }}>
+            4. Re-score <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span>
+          </label>
+          <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '6px 10px' }}
+            onClick={() => setRescoreOpen((v) => !v)}>
+            {rescoreOpen ? 'Cancel re-score' : '✎ Open scoring grid'}
+          </button>
 
           {rescoreOpen && (
             <div style={{ marginTop: 10 }}>
@@ -1702,17 +1759,14 @@ function AgendaItemCard({
             </div>
           )}
 
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
-            placeholder="Discussion notes (shown to the department if sent back)…"
-            style={{ width: '100%', marginTop: 10, padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, gap: 6, flexWrap: 'wrap' }}>
             {editingDecision ? (
               <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
                 onClick={() => {
                   setEditingDecision(false)
                   setOutcome('')
-                  setNotes('')
+                  setDiscussion('')
+                  setDecision('')
                   setRescoreOpen(false)
                 }}>Cancel edit</button>
             ) : (
@@ -1722,7 +1776,7 @@ function AgendaItemCard({
               style={{ fontSize: 12, padding: '6px 14px', background: canSave ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: canSave ? 'var(--blue)' : '#9CA3AF', cursor: canSave ? 'pointer' : 'not-allowed' }}
               disabled={!canSave}
               onClick={() => {
-                const payload = { outcome: outcome as CommitteeOutcome, notes, rescore: rescoreOpen ? scores : null }
+                const payload = { outcome: outcome as CommitteeOutcome, discussion, decision, rescore: rescoreOpen ? scores : null }
                 if (editingDecision) {
                   onEditDecision(payload)
                   setEditingDecision(false)

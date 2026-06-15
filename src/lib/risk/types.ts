@@ -176,7 +176,11 @@ export interface RiskMeetingAgenda {
   risk_id: number
   seq: number
   outcome: CommitteeOutcome | null
+  /* What the committee discussed — free-form notes captured during debate. */
   discussion_notes: string | null
+  /* The formal decision text — separate from discussion so minutes can show
+   * both ("here's what was discussed" then "here's what was decided"). */
+  decision_text: string | null
   review_id: number | null
   decided_by: number | null
   decided_at: string | null

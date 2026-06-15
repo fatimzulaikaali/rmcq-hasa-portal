@@ -373,6 +373,7 @@ export function exportMeetingMinutesPdf(data: MeetingExportData): void {
               : '<em>not yet decided</em>'}</span>
           </div>
           ${item.discussion_notes ? `<div class="ai-row"><span class="ai-label">Discussion</span><span>${htmlEsc(item.discussion_notes)}</span></div>` : ''}
+          ${item.decision_text ? `<div class="ai-row"><span class="ai-label">Decision</span><span>${htmlEsc(item.decision_text)}</span></div>` : ''}
           ${itemActions.length > 0 ? `
             <div class="ai-row"><span class="ai-label">Action items</span><span>
               <ul style="margin:2px 0 0 14px;padding:0">
@@ -433,7 +434,7 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
   ]
   const agendaCols = [
     'Risk ID', 'Department', 'Category', 'Description', 'Cycle', 'Score', 'Level',
-    'Decision', 'Discussion notes', 'Decided by', 'Decided on',
+    'Outcome', 'Discussion', 'Decision text', 'Decided by', 'Decided on',
   ]
   const agendaRows = data.agenda.map((item) => {
     const risk = data.risksById.get(item.risk_id)
@@ -448,12 +449,13 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
       latest ? RISK_LEVEL_LABEL[latest.risk_level as keyof typeof RISK_LEVEL_LABEL] : '',
       item.outcome ? COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome] : '',
       item.discussion_notes ?? '',
+      item.decision_text ?? '',
       userName(item.decided_by),
       item.decided_at?.slice(0, 10) ?? '',
     ]
   })
   const wsAgenda = XLSX.utils.aoa_to_sheet([...agendaHead, agendaCols, ...agendaRows])
-  wsAgenda['!cols'] = [16, 26, 10, 50, 8, 8, 12, 22, 50, 22, 12].map((w) => ({ wch: w }))
+  wsAgenda['!cols'] = [16, 26, 10, 50, 8, 8, 12, 22, 50, 50, 22, 12].map((w) => ({ wch: w }))
 
   // Sheet 2: Action items issued at this meeting
   const actionHead = [

@@ -697,8 +697,15 @@ export default function RiskDetailPage() {
                               </span>
                             )}
                           </div>
+                          {cr.decision_text && (
+                            <div style={{ fontSize: 12, marginTop: 6 }}>
+                              <span style={{ fontWeight: 700, color: '#166534' }}>Decision: </span>{cr.decision_text}
+                            </div>
+                          )}
                           {cr.discussion_notes && (
-                            <div style={{ fontSize: 12, marginTop: 6 }}>{cr.discussion_notes}</div>
+                            <div style={{ fontSize: 12, marginTop: 4, color: 'var(--muted)' }}>
+                              <span style={{ fontWeight: 700 }}>Discussion: </span>{cr.discussion_notes}
+                            </div>
                           )}
                           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
                             Recorded by {nameOf(cr.decided_by)}{cr.decided_at ? ` on ${cr.decided_at.slice(0, 10)}` : ''}
