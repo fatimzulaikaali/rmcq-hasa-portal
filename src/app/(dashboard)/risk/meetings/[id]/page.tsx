@@ -12,6 +12,7 @@ import { RiskSidebar } from '@/components/RiskSidebar'
 import type {
   RiskMeeting, RiskMeetingAgenda, RiskActionItem, Risk, RiskReview, RiskUser,
   CommitteeOutcome, MeetingStatus, ActionType, CrossCuttingTheme, RiskLevel,
+  PreMeetingScoring,
 } from '@/lib/risk/types'
 import {
   computeRiskScore, outcomeToStatus, allowedOutcomes,
@@ -331,30 +332,68 @@ export default function RiskMeetingDetailPage() {
     setBusy(true); setActionError(null)
     try {
       let reviewId: number | null = item.review_id
-      // 1) Optional re-score → new review cycle
+      let preMeetingSnapshot: PreMeetingScoring | null = item.pre_meeting_scoring
+      // 1) Optional re-score — refines the CURRENT review cycle in place rather
+      // than creating a new one. The pre-meeting scoring is snapshotted (only
+      // the first time) so the minutes can show both.
       if (opts.rescore) {
         const computed = computeRiskScore(opts.rescore.likelihood, [
           opts.rescore.impact_manusia, opts.rescore.impact_reputasi, opts.rescore.impact_kewangan,
           opts.rescore.impact_operasi, opts.rescore.impact_objektif])
         const latest = latestReviewByRisk.get(risk.id)
-        const nextCycle = (latest?.cycle_number ?? 0) + 1
-        const { data: rv, error: rvErr } = await supabase.from('risk_reviews').insert({
-          risk_id: risk.id,
-          cycle_number: nextCycle,
-          reviewed_by: currentUserId,
-          review_date: new Date().toISOString().slice(0, 10),
-          likelihood: opts.rescore.likelihood,
-          impact_manusia: opts.rescore.impact_manusia,
-          impact_reputasi: opts.rescore.impact_reputasi,
-          impact_kewangan: opts.rescore.impact_kewangan,
-          impact_operasi: opts.rescore.impact_operasi,
-          impact_objektif: opts.rescore.impact_objektif,
-          avg_impact: computed.avgImpact,
-          risk_score: computed.riskScore,
-          risk_level: computed.riskLevel,
-        }).select('id').single()
-        if (rvErr) throw new Error(`Re-score: ${rvErr.code ?? ''} ${rvErr.message}`)
-        reviewId = rv.id as number
+        if (!latest) {
+          // Edge case — no prior cycle to refine. Fall back to creating one as cycle 1.
+          const { data: rv, error: rvErr } = await supabase.from('risk_reviews').insert({
+            risk_id: risk.id,
+            cycle_number: 1,
+            reviewed_by: currentUserId,
+            review_date: new Date().toISOString().slice(0, 10),
+            likelihood: opts.rescore.likelihood,
+            impact_manusia: opts.rescore.impact_manusia,
+            impact_reputasi: opts.rescore.impact_reputasi,
+            impact_kewangan: opts.rescore.impact_kewangan,
+            impact_operasi: opts.rescore.impact_operasi,
+            impact_objektif: opts.rescore.impact_objektif,
+            avg_impact: computed.avgImpact,
+            risk_score: computed.riskScore,
+            risk_level: computed.riskLevel,
+          }).select('id').single()
+          if (rvErr) throw new Error(`Re-score (initial): ${rvErr.code ?? ''} ${rvErr.message}`)
+          reviewId = rv.id as number
+        } else {
+          // Snapshot the pre-meeting values — only on the first re-score; later
+          // edits preserve the original snapshot so it always reflects what
+          // ENTERED the meeting.
+          if (!preMeetingSnapshot) {
+            preMeetingSnapshot = {
+              likelihood: latest.likelihood,
+              impact_manusia: latest.impact_manusia,
+              impact_reputasi: latest.impact_reputasi,
+              impact_kewangan: latest.impact_kewangan,
+              impact_operasi: latest.impact_operasi,
+              impact_objektif: latest.impact_objektif,
+              avg_impact: latest.avg_impact,
+              risk_score: latest.risk_score,
+              risk_level: latest.risk_level,
+              cycle_number: latest.cycle_number,
+            }
+          }
+          // Refine the current cycle in place — same cycle_number.
+          const { error: rvErr } = await supabase.from('risk_reviews').update({
+            likelihood: opts.rescore.likelihood,
+            impact_manusia: opts.rescore.impact_manusia,
+            impact_reputasi: opts.rescore.impact_reputasi,
+            impact_kewangan: opts.rescore.impact_kewangan,
+            impact_operasi: opts.rescore.impact_operasi,
+            impact_objektif: opts.rescore.impact_objektif,
+            avg_impact: computed.avgImpact,
+            risk_score: computed.riskScore,
+            risk_level: computed.riskLevel,
+            review_date: new Date().toISOString().slice(0, 10),
+          }).eq('id', latest.id)
+          if (rvErr) throw new Error(`Re-score (refine): ${rvErr.code ?? ''} ${rvErr.message}`)
+          reviewId = latest.id
+        }
       }
 
       // 2) Update the agenda item with the decision — both discussion + decision text
@@ -363,6 +402,7 @@ export default function RiskMeetingDetailPage() {
         discussion_notes: opts.discussion.trim() || null,
         decision_text: opts.decision.trim() || null,
         review_id: reviewId,
+        pre_meeting_scoring: preMeetingSnapshot,
         decided_by: currentUserId,
         decided_at: new Date().toISOString(),
       }).eq('id', item.id)
@@ -418,12 +458,29 @@ export default function RiskMeetingDetailPage() {
     setBusy(true); setActionError(null)
     try {
       let reviewId: number | null = item.review_id
+      let preMeetingSnapshot: PreMeetingScoring | null = item.pre_meeting_scoring
       if (opts.rescore) {
         const computed = computeRiskScore(opts.rescore.likelihood, [
           opts.rescore.impact_manusia, opts.rescore.impact_reputasi, opts.rescore.impact_kewangan,
           opts.rescore.impact_operasi, opts.rescore.impact_objektif])
+        const latest = latestReviewByRisk.get(risk.id)
         if (reviewId) {
-          // Update the existing re-score row in place — same cycle number.
+          // The item already has a review attached — keep refining the SAME
+          // row. Snapshot the pre-meeting values only if not already captured.
+          if (!preMeetingSnapshot && latest) {
+            preMeetingSnapshot = {
+              likelihood: latest.likelihood,
+              impact_manusia: latest.impact_manusia,
+              impact_reputasi: latest.impact_reputasi,
+              impact_kewangan: latest.impact_kewangan,
+              impact_operasi: latest.impact_operasi,
+              impact_objektif: latest.impact_objektif,
+              avg_impact: latest.avg_impact,
+              risk_score: latest.risk_score,
+              risk_level: latest.risk_level,
+              cycle_number: latest.cycle_number,
+            }
+          }
           const { error: rvErr } = await supabase.from('risk_reviews').update({
             likelihood: opts.rescore.likelihood,
             impact_manusia: opts.rescore.impact_manusia,
@@ -437,13 +494,42 @@ export default function RiskMeetingDetailPage() {
             review_date: new Date().toISOString().slice(0, 10),
           }).eq('id', reviewId)
           if (rvErr) throw new Error(`Re-score update: ${rvErr.code ?? ''} ${rvErr.message}`)
+        } else if (latest) {
+          // First time the committee touches scoring on this item — snapshot the
+          // pre-meeting values and refine the current cycle in place.
+          if (!preMeetingSnapshot) {
+            preMeetingSnapshot = {
+              likelihood: latest.likelihood,
+              impact_manusia: latest.impact_manusia,
+              impact_reputasi: latest.impact_reputasi,
+              impact_kewangan: latest.impact_kewangan,
+              impact_operasi: latest.impact_operasi,
+              impact_objektif: latest.impact_objektif,
+              avg_impact: latest.avg_impact,
+              risk_score: latest.risk_score,
+              risk_level: latest.risk_level,
+              cycle_number: latest.cycle_number,
+            }
+          }
+          const { error: rvErr } = await supabase.from('risk_reviews').update({
+            likelihood: opts.rescore.likelihood,
+            impact_manusia: opts.rescore.impact_manusia,
+            impact_reputasi: opts.rescore.impact_reputasi,
+            impact_kewangan: opts.rescore.impact_kewangan,
+            impact_operasi: opts.rescore.impact_operasi,
+            impact_objektif: opts.rescore.impact_objektif,
+            avg_impact: computed.avgImpact,
+            risk_score: computed.riskScore,
+            risk_level: computed.riskLevel,
+            review_date: new Date().toISOString().slice(0, 10),
+          }).eq('id', latest.id)
+          if (rvErr) throw new Error(`Re-score (refine): ${rvErr.code ?? ''} ${rvErr.message}`)
+          reviewId = latest.id
         } else {
-          // No previous re-score on this item — insert a new cycle.
-          const latest = latestReviewByRisk.get(risk.id)
-          const nextCycle = (latest?.cycle_number ?? 0) + 1
+          // No cycle at all — create cycle 1 as a fallback.
           const { data: rv, error: rvErr } = await supabase.from('risk_reviews').insert({
             risk_id: risk.id,
-            cycle_number: nextCycle,
+            cycle_number: 1,
             reviewed_by: currentUserId,
             review_date: new Date().toISOString().slice(0, 10),
             likelihood: opts.rescore.likelihood,
@@ -456,7 +542,7 @@ export default function RiskMeetingDetailPage() {
             risk_score: computed.riskScore,
             risk_level: computed.riskLevel,
           }).select('id').single()
-          if (rvErr) throw new Error(`Re-score insert: ${rvErr.code ?? ''} ${rvErr.message}`)
+          if (rvErr) throw new Error(`Re-score (initial): ${rvErr.code ?? ''} ${rvErr.message}`)
           reviewId = rv.id as number
         }
       }
@@ -468,6 +554,7 @@ export default function RiskMeetingDetailPage() {
         discussion_notes: opts.discussion.trim() || null,
         decision_text: opts.decision.trim() || null,
         review_id: reviewId,
+        pre_meeting_scoring: preMeetingSnapshot,
         decided_by: currentUserId,
         decided_at: new Date().toISOString(),
       }).eq('id', item.id)
@@ -1637,6 +1724,16 @@ function AgendaItemCard({
               {item.decision_text && (
                 <div style={{ marginTop: 4, fontSize: 12, color: '#1F2937' }}>
                   <span style={{ fontWeight: 700, color: '#166534' }}>Decision: </span>{item.decision_text}
+                </div>
+              )}
+              {item.pre_meeting_scoring && latest && (
+                <div style={{ marginTop: 4, fontSize: 12, color: '#1F2937' }}>
+                  <span style={{ fontWeight: 700, color: '#166534' }}>Re-scoring: </span>
+                  <span style={{ color: '#6B7280' }}>
+                    Pre-meeting <b>{(Math.round(item.pre_meeting_scoring.risk_score * 10) / 10).toFixed(1)}</b> ({RISK_LEVEL_LABEL[item.pre_meeting_scoring.risk_level]})
+                  </span>
+                  {' → '}
+                  <span>After meeting <b>{(Math.round(latest.risk_score * 10) / 10).toFixed(1)}</b> ({RISK_LEVEL_LABEL[latest.risk_level]})</span>
                 </div>
               )}
             </div>

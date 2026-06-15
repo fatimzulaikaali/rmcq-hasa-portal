@@ -170,6 +170,19 @@ export interface RiskMeetingAttendee {
   created_at: string
 }
 
+export interface PreMeetingScoring {
+  likelihood: number
+  impact_manusia: number
+  impact_reputasi: number
+  impact_kewangan: number
+  impact_operasi: number
+  impact_objektif: number
+  avg_impact: number
+  risk_score: number
+  risk_level: RiskLevel
+  cycle_number: number
+}
+
 export interface RiskMeetingAgenda {
   id: number
   meeting_id: number
@@ -181,6 +194,10 @@ export interface RiskMeetingAgenda {
   /* The formal decision text — separate from discussion so minutes can show
    * both ("here's what was discussed" then "here's what was decided"). */
   decision_text: string | null
+  /* Snapshot of the scoring as it ENTERED the meeting — captured the first
+   * time the committee re-scores. Used to display pre vs. post in the minutes.
+   * Null when no re-score was applied at this meeting. */
+  pre_meeting_scoring: PreMeetingScoring | null
   review_id: number | null
   decided_by: number | null
   decided_at: string | null

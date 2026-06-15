@@ -365,6 +365,7 @@ export function exportMeetingMinutesPdf(data: MeetingExportData): void {
           <div class="ai-meta">
             ${htmlEsc(risk.category)} — ${htmlEsc(RISK_CATEGORY_LABEL[risk.category] ?? '')}
             ${latest ? ` · Level <span class="badge lvl-${latest.risk_level}">${htmlEsc(RISK_LEVEL_LABEL[latest.risk_level as keyof typeof RISK_LEVEL_LABEL])}</span> · Score ${(Math.round(latest.risk_score * 10) / 10).toFixed(1)} · Cycle ${latest.cycle_number}` : ''}
+            ${item.pre_meeting_scoring ? ` · <span style="color:#6B7280">Pre-meeting:</span> <span class="badge lvl-${item.pre_meeting_scoring.risk_level}">${htmlEsc(RISK_LEVEL_LABEL[item.pre_meeting_scoring.risk_level as keyof typeof RISK_LEVEL_LABEL])}</span> ${(Math.round(item.pre_meeting_scoring.risk_score * 10) / 10).toFixed(1)}` : ''}
             ${themes.length > 0 ? ` · Themes: ${themes.map(htmlEsc).join(', ')}` : ''}
           </div>
           <div class="ai-row"><span class="ai-label">Decision</span>
@@ -433,18 +434,23 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
     [],
   ]
   const agendaCols = [
-    'Risk ID', 'Department', 'Category', 'Description', 'Cycle', 'Score', 'Level',
+    'Risk ID', 'Department', 'Category', 'Description', 'Cycle',
+    'Pre-meeting score', 'Pre-meeting level',
+    'After-meeting score', 'After-meeting level',
     'Outcome', 'Discussion', 'Decision text', 'Decided by', 'Decided on',
   ]
   const agendaRows = data.agenda.map((item) => {
     const risk = data.risksById.get(item.risk_id)
     const latest = data.latestByRisk.get(item.risk_id)
+    const pre = item.pre_meeting_scoring
     return [
       risk?.risk_id ?? '—',
       risk ? deptName(risk.dept_code) : '—',
       risk?.category ?? '',
       risk?.description ?? '',
       latest?.cycle_number ?? '',
+      pre ? Math.round(pre.risk_score * 10) / 10 : '',
+      pre ? RISK_LEVEL_LABEL[pre.risk_level] : '',
       latest ? Math.round(latest.risk_score * 10) / 10 : '',
       latest ? RISK_LEVEL_LABEL[latest.risk_level as keyof typeof RISK_LEVEL_LABEL] : '',
       item.outcome ? COMMITTEE_OUTCOME_LABEL[item.outcome as CommitteeOutcome] : '',
@@ -455,7 +461,7 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
     ]
   })
   const wsAgenda = XLSX.utils.aoa_to_sheet([...agendaHead, agendaCols, ...agendaRows])
-  wsAgenda['!cols'] = [16, 26, 10, 50, 8, 8, 12, 22, 50, 50, 22, 12].map((w) => ({ wch: w }))
+  wsAgenda['!cols'] = [16, 26, 10, 50, 8, 14, 14, 14, 14, 22, 50, 50, 22, 12].map((w) => ({ wch: w }))
 
   // Sheet 2: Action items issued at this meeting
   const actionHead = [

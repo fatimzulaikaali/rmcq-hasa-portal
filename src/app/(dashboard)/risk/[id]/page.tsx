@@ -707,6 +707,16 @@ export default function RiskDetailPage() {
                               <span style={{ fontWeight: 700 }}>Discussion: </span>{cr.discussion_notes}
                             </div>
                           )}
+                          {cr.pre_meeting_scoring && (
+                            <div style={{ fontSize: 12, marginTop: 4 }}>
+                              <span style={{ fontWeight: 700, color: '#166534' }}>Re-scoring: </span>
+                              <span style={{ color: 'var(--muted)' }}>
+                                pre-meeting <b>{(Math.round(cr.pre_meeting_scoring.risk_score * 10) / 10).toFixed(1)}</b> ({RISK_LEVEL_LABEL[cr.pre_meeting_scoring.risk_level]})
+                              </span>
+                              {' → '}
+                              <span>after meeting refined in same cycle</span>
+                            </div>
+                          )}
                           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
                             Recorded by {nameOf(cr.decided_by)}{cr.decided_at ? ` on ${cr.decided_at.slice(0, 10)}` : ''}
                             {cr.review_id ? ' · risk was re-scored at this meeting' : ''}
