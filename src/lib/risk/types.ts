@@ -152,7 +152,10 @@ export interface RiskMeeting {
   title: string
   meeting_date: string
   status: MeetingStatus
+  /* Legacy FK — kept for historical rows; new code uses chair_name. */
   chaired_by: number | null
+  /* Free-text chair name (current). Chair may be anyone — internal or external. */
+  chair_name: string | null
   location: string | null
   minutes: string | null
   created_by: number | null

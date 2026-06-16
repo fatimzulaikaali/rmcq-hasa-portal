@@ -682,13 +682,14 @@ export default function RiskMeetingDetailPage() {
     finally { setBusy(false) }
   }
 
-  /* Set / clear who chaired this meeting (RC). Not auto-filled on create. */
-  async function setChair(uid: number | null) {
+  /* Set / clear who chaired this meeting (RC). Free text — chair may be anyone,
+   * not necessarily a registered risk_users account. */
+  async function setChair(name: string) {
     if (!meeting) return
     setBusy(true); setActionError(null)
     try {
       const { error } = await supabase.from('risk_meetings')
-        .update({ chaired_by: uid, updated_at: new Date().toISOString() }).eq('id', meeting.id)
+        .update({ chair_name: name.trim() || null, updated_at: new Date().toISOString() }).eq('id', meeting.id)
       if (error) throw new Error(`Set chair: ${error.code ?? ''} ${error.message}`)
       await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
@@ -764,9 +765,10 @@ export default function RiskMeetingDetailPage() {
     Array.from(latestReviewByRisk.entries()).forEach(([k, v]) => {
       latestByRisk.set(k, { risk_level: v.risk_level, risk_score: v.risk_score, cycle_number: v.cycle_number })
     })
-    const chairName = meeting.chaired_by
-      ? users.find((u) => u.id === meeting.chaired_by)?.name ?? null
-      : null
+    // Prefer the free-text chair_name; fall back to the legacy chaired_by FK
+    // user lookup so historical meetings still render the chair.
+    const chairName = meeting.chair_name
+      ?? (meeting.chaired_by ? users.find((u) => u.id === meeting.chaired_by)?.name ?? null : null)
     return {
       meeting,
       agenda,
@@ -952,7 +954,7 @@ export default function RiskMeetingDetailPage() {
                     <div className="psub">
                       {MEETING_TYPE_LABEL[meeting.meeting_type]} · {meeting.meeting_date}
                       {meeting.location ? ` · ${meeting.location}` : ''}
-                      {meeting.chaired_by ? ` · chaired by ${nameOf(meeting.chaired_by)}` : ''}
+                      {(meeting.chair_name || meeting.chaired_by) ? ` · chaired by ${meeting.chair_name ?? nameOf(meeting.chaired_by)}` : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
@@ -991,14 +993,20 @@ export default function RiskMeetingDetailPage() {
                 {isRC && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>Chair:</span>
-                    <select value={meeting.chaired_by ?? ''} disabled={busy}
-                      onChange={(e) => setChair(e.target.value ? parseInt(e.target.value, 10) : null)}
-                      style={{ fontSize: 12, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
-                      <option value="">— not set —</option>
-                      {users.filter((u) => u.is_active).map((u) => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </select>
+                    {/* Free text — chair may be anyone, not necessarily a portal
+                     * user. Uncontrolled input so RC can type freely; saves on
+                     * blur. `key` resets it if the meeting changes underneath. */}
+                    <input type="text"
+                      key={`chair-${meeting.id}-${meeting.chair_name ?? meeting.chaired_by ?? ''}`}
+                      defaultValue={meeting.chair_name ?? (meeting.chaired_by ? nameOf(meeting.chaired_by) : '')}
+                      placeholder="e.g. Dr Fatim Zulaika"
+                      disabled={busy}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim()
+                        const current = meeting.chair_name ?? (meeting.chaired_by ? nameOf(meeting.chaired_by) : '')
+                        if (v !== current) setChair(v)
+                      }}
+                      style={{ fontSize: 12, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 220 }} />
                     <div style={{ flex: 1 }} />
                     <button type="button" className="signout-btn"
                       style={{ fontSize: 11, padding: '4px 10px', color: 'var(--red)', borderColor: 'var(--red)' }}
