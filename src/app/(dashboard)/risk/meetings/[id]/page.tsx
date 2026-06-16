@@ -22,6 +22,7 @@ import {
   RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
 import { exportMeetingMinutesPdf, exportMeetingMinutesXlsx, type MeetingExportData } from '@/lib/risk/exports'
+import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 
 interface AgendaEntry {
   item: RiskMeetingAgenda
@@ -601,10 +602,11 @@ export default function RiskMeetingDetailPage() {
   }
 
   /* Add an action item tied to a specific risk on the agenda (so it routes to
-   * that risk's department), with a named assignee. */
+   * that risk's department). No due date — RMCQ uses the next committee
+   * sitting as the implicit deadline. */
   async function addActionItem(
     agendaId: number, riskId: number,
-    a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null },
+    a: { action_type: ActionType; description: string; assigned_depts: string[] },
   ) {
     if (!meeting || !a.description.trim() || a.assigned_depts.length === 0) return
     setBusy(true); setActionError(null)
@@ -616,7 +618,7 @@ export default function RiskMeetingDetailPage() {
         action_type: a.action_type,
         description: a.description.trim(),
         assigned_depts: a.assigned_depts,
-        due_date: a.due_date || null,
+        due_date: null,
         status: 'PENDING',
         created_by: currentUserId,
       }).select('id').single()
@@ -630,6 +632,66 @@ export default function RiskMeetingDetailPage() {
         performed_by: currentUserId, user_role: 'RC',
         comment: `${ACTION_TYPE_LABEL[a.action_type]} → ${deptLabel}: ${a.description.trim()}`,
       })
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Edit a previously-recorded action item (RC). Updates type, description,
+   * and assigned departments. Adds an audit entry recording the change. */
+  async function editActionItem(
+    item: RiskActionItem,
+    payload: { action_type: ActionType; description: string; assigned_depts: string[] },
+  ) {
+    if (!meeting || !currentUserId) return
+    if (!payload.description.trim() || payload.assigned_depts.length === 0) return
+    setBusy(true); setActionError(null)
+    try {
+      const { error } = await supabase.from('risk_action_items').update({
+        action_type: payload.action_type,
+        description: payload.description.trim(),
+        assigned_depts: payload.assigned_depts,
+        updated_at: new Date().toISOString(),
+      }).eq('id', item.id)
+      if (error) throw new Error(`Edit action: ${error.code ?? ''} ${error.message}`)
+
+      if (item.risk_id) {
+        const oldLabel = (item.assigned_depts ?? []).map((c) => allDepts.find((d) => d.code === c)?.name_en ?? c).join(', ')
+        const newLabel = payload.assigned_depts.map((c) => allDepts.find((d) => d.code === c)?.name_en ?? c).join(', ')
+        await supabase.from('risk_audit_logs').insert({
+          risk_id: item.risk_id, entity_type: 'action_item', entity_id: item.id,
+          action_type: `ACTION_EDITED_${payload.action_type}`,
+          performed_by: currentUserId, user_role: 'RC',
+          old_value: { type: item.action_type, description: item.description, assigned_depts: item.assigned_depts },
+          new_value: { type: payload.action_type, description: payload.description.trim(), assigned_depts: payload.assigned_depts },
+          comment: `Action item edited — ${ACTION_TYPE_LABEL[payload.action_type]} → ${newLabel}: ${payload.description.trim()}${oldLabel !== newLabel ? ` (was assigned to ${oldLabel})` : ''}`,
+        })
+      }
+      await load({ silent: true })
+    } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  /* Delete an action item (RC). Logs the removal in the risk's audit trail. */
+  async function deleteActionItem(item: RiskActionItem) {
+    if (!meeting || !currentUserId) return
+    if (!window.confirm(`Remove this action item?\n\n"${item.description}"\n\nThe department's response (if any) will also be removed. This cannot be undone.`)) return
+    setBusy(true); setActionError(null)
+    try {
+      const riskId = item.risk_id
+      const description = item.description
+      const actionType = item.action_type
+      const { error } = await supabase.from('risk_action_items').delete().eq('id', item.id)
+      if (error) throw new Error(`Delete action: ${error.code ?? ''} ${error.message}`)
+
+      if (riskId) {
+        await supabase.from('risk_audit_logs').insert({
+          risk_id: riskId, entity_type: 'action_item', entity_id: item.id,
+          action_type: `ACTION_REMOVED_${actionType}`,
+          performed_by: currentUserId, user_role: 'RC',
+          comment: `Action item removed — ${ACTION_TYPE_LABEL[actionType]}: ${description}`,
+        })
+      }
       await load({ silent: true })
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
@@ -1222,6 +1284,8 @@ export default function RiskMeetingDetailPage() {
                               allDepts={allDepts}
                               deptNameOf={(c) => deptNames.get(c) ?? allDepts.find((d) => d.code === c)?.name_en ?? c}
                               onAddAction={(payload) => addActionItem(item.id, risk.id, payload)}
+                              onEditAction={editActionItem}
+                              onDeleteAction={deleteActionItem}
                               onDecide={(opts) => recordDecision(item, risk, opts)}
                               onEditDecision={(opts) => editDecision(item, risk, opts)}
                               onRemove={() => removeAgendaItem(item)}
@@ -1589,7 +1653,8 @@ interface ScoreInputs {
 function AgendaItemCard({
   item, risk, latest, deptLabel, meetingType, isRC, busy, decidedByName,
   themes, taggedThemeIds, onToggleTheme, onAddCustomTheme, onEditNotes,
-  actionItems, allDepts, deptNameOf, onAddAction, onDecide, onEditDecision, onRemove,
+  actionItems, allDepts, deptNameOf, onAddAction, onEditAction, onDeleteAction,
+  onDecide, onEditDecision, onRemove,
 }: {
   item: RiskMeetingAgenda
   risk: Risk
@@ -1607,7 +1672,9 @@ function AgendaItemCard({
   actionItems: RiskActionItem[]
   allDepts: { code: string; name_en: string }[]
   deptNameOf: (code: string) => string
-  onAddAction: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
+  onAddAction: (a: { action_type: ActionType; description: string; assigned_depts: string[] }) => void
+  onEditAction: (item: RiskActionItem, payload: { action_type: ActionType; description: string; assigned_depts: string[] }) => void
+  onDeleteAction: (item: RiskActionItem) => void
   onDecide: (opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null }) => void
   onEditDecision: (opts: { outcome: CommitteeOutcome; discussion: string; decision: string; rescore: ScoreInputs | null }) => void
   onRemove: () => void
@@ -1902,14 +1969,12 @@ function AgendaItemCard({
             Action items{actionItems.length > 0 ? ` (${actionItems.length})` : ''}
           </div>
           {actionItems.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: isRC ? 10 : 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: isRC ? 10 : 0 }}>
               {actionItems.map((a) => (
-                <div key={a.id} style={{ fontSize: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 600 }}>{ACTION_TYPE_LABEL[a.action_type]}:</span>
-                  <span>{a.description}</span>
-                  <span style={{ color: 'var(--muted)' }}>→ {(a.assigned_depts ?? []).map(deptNameOf).join(', ') || '—'}{a.due_date ? ` · due ${a.due_date}` : ''}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>[{ACTION_STATUS_LABEL[a.status]}]</span>
-                </div>
+                <ActionItemRow key={a.id} item={a} isRC={isRC} busy={busy}
+                  allDepts={allDepts} deptNameOf={deptNameOf}
+                  onEdit={(payload) => onEditAction(a, payload)}
+                  onDelete={() => onDeleteAction(a)} />
               ))}
             </div>
           )}
@@ -1933,32 +1998,78 @@ function ScorePicker({ label, value, onChange }: { label: string; value: number;
   )
 }
 
-/* ---------- Add action item form ---------- */
+/* ---------- Action item row (display + inline edit) ---------- */
 
-function AddActionForm({ depts, busy, onAdd }: {
+function ActionItemRow({ item, isRC, busy, allDepts, deptNameOf, onEdit, onDelete }: {
+  item: RiskActionItem
+  isRC: boolean
+  busy: boolean
+  allDepts: { code: string; name_en: string }[]
+  deptNameOf: (code: string) => string
+  onEdit: (payload: { action_type: ActionType; description: string; assigned_depts: string[] }) => void
+  onDelete: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) {
+    return (
+      <ActionItemEditForm initial={item} depts={allDepts} busy={busy}
+        onSave={(payload) => { onEdit(payload); setEditing(false) }}
+        onCancel={() => setEditing(false)} />
+    )
+  }
+
+  return (
+    <div style={{ fontSize: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span style={{ fontWeight: 600 }}>{ACTION_TYPE_LABEL[item.action_type]}:</span>
+      <span>{item.description}</span>
+      <span style={{ color: 'var(--muted)' }}>→ {(item.assigned_depts ?? []).map(deptNameOf).join(', ') || '—'}</span>
+      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>[{ACTION_STATUS_LABEL[item.status]}]</span>
+      {isRC && (
+        <span style={{ display: 'inline-flex', gap: 4 }}>
+          <button type="button" className="signout-btn" style={{ fontSize: 10, padding: '2px 8px' }}
+            disabled={busy} onClick={() => setEditing(true)}>✎ Edit</button>
+          <button type="button" className="signout-btn"
+            style={{ fontSize: 10, padding: '2px 8px', color: 'var(--red)', borderColor: 'var(--red)' }}
+            disabled={busy} onClick={onDelete}>🗑 Delete</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/* Inline form used by both AddActionForm (new) and ActionItemRow (edit). */
+function ActionItemEditForm({ initial, depts, busy, onSave, onCancel, addMode }: {
+  initial?: { action_type: ActionType; description: string; assigned_depts: string[] | null }
   depts: { code: string; name_en: string }[]
   busy: boolean
-  onAdd: (a: { action_type: ActionType; description: string; assigned_depts: string[]; due_date: string | null }) => void
+  onSave: (payload: { action_type: ActionType; description: string; assigned_depts: string[] }) => void
+  onCancel?: () => void
+  addMode?: boolean
 }) {
-  const [type, setType] = useState<ActionType>('DIRECTIVE')
-  const [desc, setDesc] = useState('')
-  const [assigned, setAssigned] = useState<string[]>([])
-  const [due, setDue] = useState('')
+  const [type, setType] = useState<ActionType>(initial?.action_type ?? 'DIRECTIVE')
+  const [desc, setDesc] = useState(initial?.description ?? '')
+  const [assigned, setAssigned] = useState<string[]>(initial?.assigned_depts ?? [])
 
   const ready = desc.trim() && assigned.length > 0
   const addDept = (code: string) => { if (code && !assigned.includes(code)) setAssigned([...assigned, code]) }
   const removeDept = (code: string) => setAssigned(assigned.filter((c) => c !== code))
   const nameOfDept = (c: string) => depts.find((d) => d.code === c)?.name_en ?? c
+  const sortedDepts = useMemo(() => sortDeptsAlpha(depts), [depts])
 
   const submit = () => {
     if (!ready) return
-    onAdd({ action_type: type, description: desc, assigned_depts: assigned, due_date: due || null })
-    setDesc(''); setAssigned([]); setDue(''); setType('DIRECTIVE')
+    onSave({ action_type: type, description: desc, assigned_depts: assigned })
+    if (addMode) { setDesc(''); setAssigned([]); setType('DIRECTIVE') }
   }
 
   return (
-    <div style={{ borderTop: '1px dashed var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 600 }}>+ Add action item</div>
+    <div style={{ borderTop: addMode ? '1px dashed var(--border)' : '1px solid var(--border)',
+                  background: addMode ? 'transparent' : '#F8FAFC',
+                  borderRadius: addMode ? 0 : 6,
+                  padding: addMode ? '12px 0 0' : '10px',
+                  display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 600 }}>{addMode ? '+ Add action item' : '✎ Edit action item'}</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={type} onChange={(e) => setType(e.target.value as ActionType)}
           style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -1968,10 +2079,8 @@ function AddActionForm({ depts, busy, onAdd }: {
         <select value="" onChange={(e) => { addDept(e.target.value); e.currentTarget.selectedIndex = 0 }}
           style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, minWidth: 200 }}>
           <option value="">+ assign to department…</option>
-          {depts.filter((d) => !assigned.includes(d.code)).map((d) => <option key={d.code} value={d.code}>{d.name_en}</option>)}
+          {sortedDepts.filter((d) => !assigned.includes(d.code)).map((d) => <option key={d.code} value={d.code}>{d.name_en}</option>)}
         </select>
-        <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
-          style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }} />
       </div>
       {assigned.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
@@ -1983,11 +2092,25 @@ function AddActionForm({ depts, busy, onAdd }: {
       )}
       <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What needs to be done…"
         style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 12 }} />
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+        {!addMode && onCancel && (
+          <button type="button" className="signout-btn" style={{ fontSize: 12, padding: '6px 12px' }}
+            onClick={onCancel}>Cancel</button>
+        )}
         <button type="button" className="signout-btn"
           style={{ fontSize: 12, padding: '6px 14px', background: ready ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: ready ? 'var(--blue)' : '#9CA3AF' }}
-          disabled={!ready || busy} onClick={submit}>Add action</button>
+          disabled={!ready || busy} onClick={submit}>{addMode ? 'Add action' : 'Save changes'}</button>
       </div>
     </div>
   )
+}
+
+/* ---------- Add action item form ---------- */
+
+function AddActionForm({ depts, busy, onAdd }: {
+  depts: { code: string; name_en: string }[]
+  busy: boolean
+  onAdd: (a: { action_type: ActionType; description: string; assigned_depts: string[] }) => void
+}) {
+  return <ActionItemEditForm depts={depts} busy={busy} onSave={onAdd} addMode />
 }

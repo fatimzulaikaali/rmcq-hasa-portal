@@ -382,7 +382,7 @@ export function exportMeetingMinutesPdf(data: MeetingExportData): void {
                 <li style="margin:2px 0">
                   <span class="badge at-${a.action_type}">${htmlEsc(ACTION_TYPE_LABEL[a.action_type])}</span>
                   ${htmlEsc(a.description)}
-                  <span class="small"> — to ${htmlEsc((a.assigned_depts ?? []).map(deptName).join(', ') || '—')}${a.due_date ? ` · due ${htmlEsc(a.due_date)}` : ''}</span>
+                  <span class="small"> — to ${htmlEsc((a.assigned_depts ?? []).map(deptName).join(', ') || '—')}</span>
                 </li>
               `).join('')}
               </ul>
@@ -470,7 +470,7 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
     [],
   ]
   const actionCols = [
-    'Risk ID', 'Action type', 'Description', 'Assigned to (dept)', 'Due date',
+    'Risk ID', 'Action type', 'Description', 'Assigned to (dept)',
     'Status', 'Response', 'Date issued',
   ]
   const actionRows = data.actions.map((a) => {
@@ -480,14 +480,13 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
       ACTION_TYPE_LABEL[a.action_type],
       a.description,
       (a.assigned_depts ?? []).map(deptName).join(', '),
-      a.due_date ?? '',
       ACTION_STATUS_LABEL[a.status],
       a.response ?? '',
       a.created_at?.slice(0, 10) ?? '',
     ]
   })
   const wsActions = XLSX.utils.aoa_to_sheet([...actionHead, actionCols, ...actionRows])
-  wsActions['!cols'] = [16, 18, 50, 30, 12, 14, 50, 12].map((w) => ({ wch: w }))
+  wsActions['!cols'] = [16, 18, 50, 30, 14, 50, 12].map((w) => ({ wch: w }))
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, wsAgenda, 'Agenda')
@@ -531,7 +530,7 @@ export function exportActionItemsXlsx(
   ]
   const COLS = [
     'Action type', 'Description', 'Risk ID', 'Risk description', 'Risk dept',
-    'Assigned to (dept)', 'Status', 'Due date', 'Response', 'Date issued', 'Date responded',
+    'Assigned to (dept)', 'Status', 'Response', 'Date issued', 'Date responded',
   ]
   const data = rows.map(({ item, risk }) => [
     ACTION_TYPE_LABEL[item.action_type],
@@ -541,13 +540,12 @@ export function exportActionItemsXlsx(
     risk ? deptName(risk.dept_code) : '',
     (item.assigned_depts ?? []).map(deptName).join(', '),
     ACTION_STATUS_LABEL[item.status],
-    item.due_date ?? '',
     item.response ?? '',
     item.created_at?.slice(0, 10) ?? '',
     item.updated_at?.slice(0, 10) ?? '',
   ])
   const ws = XLSX.utils.aoa_to_sheet([...HEAD, COLS, ...data])
-  ws['!cols'] = [16, 50, 16, 50, 26, 30, 14, 12, 50, 12, 14].map((w) => ({ wch: w }))
+  ws['!cols'] = [16, 50, 16, 50, 26, 30, 14, 50, 12, 14].map((w) => ({ wch: w }))
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Action Items')
@@ -584,7 +582,6 @@ export function exportActionItemsPdf(
           </div>
           <div class="card-sub">
             Assigned to: ${htmlEsc((item.assigned_depts ?? []).map(deptName).join(', ') || '—')}
-            ${item.due_date ? ` · Due ${htmlEsc(item.due_date)}` : ''}
             ${item.created_at ? ` · Issued ${htmlEsc(item.created_at.slice(0, 10))}` : ''}
           </div>
           <div class="card-body">${htmlEsc(item.description)}</div>

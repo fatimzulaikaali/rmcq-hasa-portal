@@ -299,7 +299,7 @@ function ActionCard({ item, deptLabel, assignedLabel, isRC, canRespond, busy, on
 
       <div style={{ fontSize: 13, marginTop: 6 }}>{item.description}</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-        Assigned to {assignedLabel}{item.due_date ? ` · due ${item.due_date}` : ''}
+        Assigned to {assignedLabel}
       </div>
 
       {item.response && !editing && (

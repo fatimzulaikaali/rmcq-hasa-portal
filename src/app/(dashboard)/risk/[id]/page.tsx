@@ -1005,7 +1005,7 @@ function ActionItemBlock({ item, assignedLabel, canRespond, onRespond }: {
         <div style={{ fontSize: 13, fontWeight: 600 }}>
           {ACTION_TYPE_LABEL[item.action_type]}
           <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
-            {' '}· assigned to {assignedLabel}{item.due_date ? ` · due ${item.due_date}` : ''}
+            {' '}· assigned to {assignedLabel}
           </span>
         </div>
         <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sb.fg, background: sb.bg }}>
