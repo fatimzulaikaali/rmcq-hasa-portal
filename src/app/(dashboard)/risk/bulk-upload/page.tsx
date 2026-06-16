@@ -24,6 +24,8 @@ import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { RiskDept, RiskCategory, RiskScope } from '@/lib/risk/types'
+import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
+import { DeptSearchPicker } from '@/components/DeptSearchPicker'
 import {
   computeRiskScore, formatRiskId,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
@@ -492,10 +494,12 @@ export default function BulkUploadPage() {
                   <div className="risk-field" style={{ margin: 0, minWidth: 240 }}>
                     <label style={{ fontSize: 10 }}>Default department (applies to extracted rows)</label>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <select value={defaultDept} onChange={(e) => setDefaultDept(e.target.value)} style={{ flex: 1 }}>
-                        <option value="">— none —</option>
-                        {depts.map((d) => <option key={d.code} value={d.code}>{d.name_en}</option>)}
-                      </select>
+                      <div style={{ flex: 1 }}>
+                        <DeptSearchPicker depts={depts} value={defaultDept}
+                          onChange={setDefaultDept}
+                          placeholder="Type to search…"
+                          allowEmpty />
+                      </div>
                       {drafts.length > 0 && defaultDept && (
                         <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
                           onClick={applyDefaultDeptToAll}>Apply to all</button>
@@ -650,7 +654,7 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
         <select value={d.dept_code} onChange={(e) => onChange({ dept_code: e.target.value })}
           style={{ fontSize: 11, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, minWidth: 200 }}>
           <option value="">— department —</option>
-          {depts.map((dx) => <option key={dx.code} value={dx.code}>{dx.name_en}</option>)}
+          {sortDeptsAlpha(depts).map((dx) => <option key={dx.code} value={dx.code}>{dx.name_en}</option>)}
         </select>
         <select value={d.category} onChange={(e) => onChange({ category: e.target.value as RiskCategory | '' })}
           style={{ fontSize: 11, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4 }}>

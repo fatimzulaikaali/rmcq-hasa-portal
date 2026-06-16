@@ -10,6 +10,7 @@ import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
+import { DeptSearchPicker } from '@/components/DeptSearchPicker'
 import {
   RiskDept, RiskCategory, RiskScope,
 } from '@/lib/risk/types'
@@ -285,12 +286,10 @@ export default function NewRiskPage() {
                 <div className="pf"><div><div className="pt">1. Risk Identification</div><div className="psub">Department, category, and scope of the risk.</div></div></div>
                 <div className="risk-form-grid">
                   <Field label="Department" required>
-                    <select value={form.dept_code} onChange={(e) => set('dept_code', e.target.value)}>
-                      <option value="">— pick a department —</option>
-                      {depts.map((d) => (
-                        <option key={d.code} value={d.code}>{d.name_en}</option>
-                      ))}
-                    </select>
+                    <DeptSearchPicker depts={depts} value={form.dept_code}
+                      onChange={(code) => set('dept_code', code)}
+                      placeholder="Type to search a department…"
+                      allowEmpty />
                   </Field>
                   <Field label="Category" required>
                     <select value={form.category} onChange={(e) => set('category', e.target.value as RiskCategory)}>

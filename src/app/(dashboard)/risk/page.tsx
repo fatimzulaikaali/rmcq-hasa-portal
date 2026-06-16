@@ -19,6 +19,7 @@ import {
   RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
 } from '@/lib/risk/scoring'
 import { exportRegisterXlsx, exportRegisterPdf } from '@/lib/risk/exports'
+import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 
 type StatusFilter   = 'all' | RiskStatus
 type LevelFilter    = 'all' | RiskLevel
@@ -332,7 +333,7 @@ export default function RiskListPage() {
                 </select>
                 <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
                   <option value="all">All departments</option>
-                  {depts.filter((d) => d.kind === 'department').map((d) => (
+                  {sortDeptsAlpha(depts.filter((d) => d.kind === 'department')).map((d) => (
                     <option key={d.code} value={d.code}>{d.name_en}</option>
                   ))}
                 </select>
