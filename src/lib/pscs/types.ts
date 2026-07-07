@@ -70,7 +70,7 @@ export interface PscsResponse {
   sub_department_code: string | null
   tenure_hospital: '<1y' | '1-5y' | '6-10y' | '11+y' | null
   tenure_unit: '<1y' | '1-5y' | '6-10y' | '11+y' | null
-  hours_per_week: '<30' | '30-40' | '>40' | null
+  hours_per_week: '<30' | '30-45' | '>45' | null
   direct_patient_contact: boolean | null
   comment: string | null
   response_hash: string

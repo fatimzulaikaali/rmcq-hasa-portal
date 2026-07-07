@@ -78,7 +78,7 @@ type FormState = {
   subDepartmentCode: string | null
   tenureHospital: '<1y' | '1-5y' | '6-10y' | '11+y' | null
   tenureUnit: '<1y' | '1-5y' | '6-10y' | '11+y' | null
-  hoursPerWeek: '<30' | '30-40' | '>40' | null
+  hoursPerWeek: '<30' | '30-45' | '>45' | null
   directPatientContact: boolean | null
   answers: Record<string, number>
   comment: string
@@ -146,8 +146,8 @@ const TXT = {
   ] as const,
   hoursOpts: [
     { v: '<30',   en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
-    { v: '30-40', en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
-    { v: '>40',   en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+    { v: '30-45', en: '30 to 45 hours per week',     ms: '30 hingga 45 jam seminggu' },
+    { v: '>45',   en: 'More than 45 hours per week', ms: 'Lebih dari 45 jam seminggu' },
   ] as const,
   agreementLabels: [
     { v: 0, en: 'N/A',               ms: 'Tidak Berkaitan' },

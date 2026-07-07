@@ -196,9 +196,9 @@ export default function PscsPage() {
       const map: Record<string, string> = { '<1y': 'a', '1-5y': 'b', '6-10y': 'c', '11+y': 'd' }
       return v && v in map ? map[v] : ''
     }
-    // BQ3 hours: <30->a, 30-40->b, >40->c
+    // BQ3 hours: <30->a, 30-45->b, >45->c
     function encHours(v: string | null): string {
-      const map: Record<string, string> = { '<30': 'a', '30-40': 'b', '>40': 'c' }
+      const map: Record<string, string> = { '<30': 'a', '30-45': 'b', '>45': 'c' }
       return v && v in map ? map[v] : ''
     }
     // BQ4 direct_patient_contact: true->a, false->b
@@ -298,8 +298,8 @@ export default function PscsPage() {
     add('BQ1, BQ2 tenure', 'c', '6 to 10 years',    '6-10 tahun')
     add('BQ1, BQ2 tenure', 'd', '11 or more years', '11+ tahun')
     add('BQ3 hours_per_week', 'a', 'Less than 30 hours per week', 'Kurang dari 30 jam seminggu')
-    add('BQ3 hours_per_week', 'b', '30 to 40 hours per week',     '30 hingga 40 jam seminggu')
-    add('BQ3 hours_per_week', 'c', 'More than 40 hours per week', 'Lebih dari 40 jam seminggu')
+    add('BQ3 hours_per_week', 'b', '30 to 45 hours per week',     '30 hingga 45 jam seminggu')
+    add('BQ3 hours_per_week', 'c', 'More than 45 hours per week', 'Lebih dari 45 jam seminggu')
     add('BQ4 direct_patient_contact', 'a', 'YES — direct interaction or contact with patients', 'YA — interaksi langsung dengan pesakit')
     add('BQ4 direct_patient_contact', 'b', 'NO — no direct interaction',                        'TIDAK — tiada interaksi langsung')
     add('blank (any column)', '(empty cell)', 'MISSING / not answered', 'TIADA / tidak dijawab')
@@ -732,8 +732,8 @@ function ItemLevelTab({ responses, answers, questions, composites, positions, de
       } else if (compareBy === 'hours') {
         const map: Record<string, { en: string; ms: string; sort: number }> = {
           '<30':   { en: 'Less than 30 hrs/wk', ms: 'Kurang dari 30 jam/mgu', sort: 1 },
-          '30-40': { en: '30 to 40 hrs/wk',     ms: '30 hingga 40 jam/mgu',  sort: 2 },
-          '>40':   { en: 'More than 40 hrs/wk', ms: 'Lebih dari 40 jam/mgu', sort: 3 },
+          '30-45': { en: '30 to 45 hrs/wk',     ms: '30 hingga 45 jam/mgu',  sort: 2 },
+          '>45':   { en: 'More than 45 hrs/wk', ms: 'Lebih dari 45 jam/mgu', sort: 3 },
         }
         if (!r.hours_per_week) continue
         const lbl = map[r.hours_per_week]
@@ -877,7 +877,7 @@ interface BreakdownFilters {
   posgroup:    string          // 'all' | group_en
   position:    string          // 'all' | position_id as string
   tenure:      string          // 'all' | tenure_hospital value
-  hours:       string          // 'all' | hours_per_week value ('<30','30-40','>40')
+  hours:       string          // 'all' | hours_per_week value ('<30','30-45','>45')
   contact:     ContactFilter
 }
 
@@ -896,8 +896,8 @@ const TENURE_OPTIONS: { key: string; en: string; ms: string }[] = [
 // Working hours per week — labels match the survey form exactly.
 const HOURS_OPTIONS: { key: string; en: string; ms: string }[] = [
   { key: '<30',   en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
-  { key: '30-40', en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
-  { key: '>40',   en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+  { key: '30-45', en: '30 to 45 hours per week',     ms: '30 hingga 45 jam seminggu' },
+  { key: '>45',   en: 'More than 45 hours per week', ms: 'Lebih dari 45 jam seminggu' },
 ]
 
 const COMPARE_OPTIONS: { id: CompareAxis; en: string; ms: string }[] = [
@@ -2020,11 +2020,11 @@ function ReportAdminStats({
   }, [scoped])
 
   const hoursBy = useMemo(() => {
-    const order = ['<30','30-40','>40']
+    const order = ['<30','30-45','>45']
     const labels: Record<string, { en: string; ms: string }> = {
       '<30':   { en: '< 30 hrs/wk', ms: '< 30 jam/mgu' },
-      '30-40': { en: '30–40 hrs/wk', ms: '30–40 jam/mgu' },
-      '>40':   { en: '> 40 hrs/wk', ms: '> 40 jam/mgu' },
+      '30-45': { en: '30–45 hrs/wk', ms: '30–45 jam/mgu' },
+      '>45':   { en: '> 45 hrs/wk', ms: '> 45 jam/mgu' },
     }
     const counts = new Map<string, number>()
     for (const o of order) counts.set(o, 0)
@@ -2609,12 +2609,12 @@ function ReportCrossTabs({
       labelOf: (k) => {
         const map: Record<string, { en: string; ms: string }> = {
           '<30':   { en: 'Less than 30 hours per week', ms: 'Kurang dari 30 jam seminggu' },
-          '30-40': { en: '30 to 40 hours per week',     ms: '30 hingga 40 jam seminggu' },
-          '>40':   { en: 'More than 40 hours per week', ms: 'Lebih dari 40 jam seminggu' },
+          '30-45': { en: '30 to 45 hours per week',     ms: '30 hingga 45 jam seminggu' },
+          '>45':   { en: 'More than 45 hours per week', ms: 'Lebih dari 45 jam seminggu' },
         }
         return map[k] ?? { en: k, ms: k }
       },
-      order: (a, b) => ['<30','30-40','>40'].indexOf(a) - ['<30','30-40','>40'].indexOf(b),
+      order: (a, b) => ['<30','30-45','>45'].indexOf(a) - ['<30','30-45','>45'].indexOf(b),
     },
     {
       key: 'contact',
