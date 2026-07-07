@@ -12,7 +12,7 @@ type Step =
   | 'loading'
   | 'closed'
   | 'welcome'
-  | 'staffid'
+  | 'icdigits'
   | 'demographics'
   | 'section'
   | 'comments'
@@ -69,7 +69,7 @@ type Campaign = {
 
 type FormState = {
   language: Lang
-  staffId: string
+  icDigits: string
   positionGroup: string | null
   positionId: number | null
   positionOther: string
@@ -86,7 +86,7 @@ type FormState = {
 
 const INITIAL_STATE: FormState = {
   language: 'en',
-  staffId: '',
+  icDigits: '',
   positionGroup: null,
   positionId: null,
   positionOther: '',
@@ -111,19 +111,19 @@ const TXT = {
   langLabel:          { en: 'Language',                                        ms: 'Bahasa' },
   welcomeTitle:       { en: 'Patient Safety Culture Survey',                  ms: 'Kajian Budaya Keselamatan Pesakit' },
   welcomeIntro:       {
-    en: 'This survey asks for your opinions about patient safety, medical error, and event reporting in your hospital. It takes about 10–15 minutes. Your responses are anonymous and confidential — they will only be used to improve hospital services.',
-    ms: 'Tinjauan ini bertujuan mengumpulkan pendapat anda berkenaan keselamatan pesakit, kesilapan perubatan dan pelaporan kejadian di hospital. Ia mengambil masa kira-kira 10–15 minit. Maklum balas anda adalah tanpa nama dan sulit — hanya digunakan untuk menambah baik perkhidmatan hospital.',
+    en: 'This survey asks for your opinions about patient safety, medical error, and event reporting in your hospital. It takes about 10–15 minutes. Your responses are anonymous — we ask only for the last 6 digits of your IC, which are scrambled the instant you enter them and can never be traced back to you. They are used only so each person answers once. Results are reported only in groups of 3 or more, so no individual can be identified. RMCQ is independent — we act as a bridge between staff and management, and your feedback is used only to improve hospital services, never to assess individuals. Please answer honestly.',
+    ms: 'Tinjauan ini bertujuan mengumpulkan pendapat anda berkenaan keselamatan pesakit, kesilapan perubatan dan pelaporan kejadian di hospital. Ia mengambil masa kira-kira 10–15 minit. Maklum balas anda adalah tanpa nama — kami hanya meminta 6 digit terakhir No. KP anda, yang dikaburkan sebaik sahaja anda memasukkannya dan tidak boleh dikesan kembali kepada anda. Ia hanya digunakan supaya setiap orang menjawab sekali sahaja. Keputusan hanya dilaporkan dalam kumpulan 3 orang atau lebih, jadi tiada individu boleh dikenal pasti. RMCQ adalah bebas — kami menjadi jambatan antara kakitangan dan pengurusan, dan maklum balas anda hanya digunakan untuk menambah baik perkhidmatan hospital, bukan untuk menilai individu. Sila jawab dengan jujur.',
   },
   scaleNote:          {
     en: 'If a question does not apply to you or you don\'t know the answer, please choose 0 (Don\'t Know / Not Applicable).',
     ms: 'Jika soalan tidak berkenaan dengan anda atau anda tidak tahu jawapannya, sila pilih 0 (Tidak Tahu / Tidak Berkaitan).',
   },
-  staffIdTitle:       { en: 'Staff ID',                                        ms: 'ID Kakitangan' },
-  staffIdPrompt:      {
-    en: 'Please enter your staff ID to begin. We do NOT store your ID — it is used only to ensure each person submits the survey once.',
-    ms: 'Sila masukkan ID kakitangan anda untuk bermula. Kami TIDAK menyimpan ID anda — ia hanya digunakan untuk memastikan setiap orang menjawab satu kali sahaja.',
+  icTitle:            { en: 'One Quick Step', ms: 'Satu Langkah Ringkas' },
+  icPrompt:           {
+    en: 'Please enter the LAST 6 DIGITS of your IC (MyKad) number. We do NOT ask for your full IC or your name. These 6 digits are scrambled the instant you enter them and can never be traced back to you — they are used only so each person answers once.',
+    ms: 'Sila masukkan 6 DIGIT TERAKHIR No. KP (MyKad) anda. Kami TIDAK meminta No. KP penuh atau nama anda. 6 digit ini dikaburkan sebaik sahaja anda memasukkannya dan tidak boleh dikesan kembali kepada anda — ia hanya digunakan supaya setiap orang menjawab sekali sahaja.',
   },
-  staffIdPlaceholder: { en: 'Enter your staff ID', ms: 'Masukkan ID kakitangan anda' },
+  icPlaceholder:      { en: 'Last 6 digits', ms: '6 digit terakhir' },
   demogTitle:         { en: 'About You',                                       ms: 'Tentang Anda' },
   positionGroupLabel: { en: 'Which staff group do you belong to?',              ms: 'Anda dari kumpulan kakitangan yang mana?' },
   positionLabel:      { en: 'What is your specific position?',                  ms: 'Apakah jawatan khusus anda?' },
@@ -204,13 +204,14 @@ const TXT = {
   doneTitle:          { en: 'Thank You!',                                     ms: 'Terima Kasih!' },
   doneBody:           { en: 'Your response has been submitted. Your feedback helps improve patient safety culture at our hospital.', ms: 'Maklum balas anda telah dihantar. Pendapat anda membantu menambah baik budaya keselamatan pesakit di hospital kami.' },
   duplicateTitle:     { en: 'Already Submitted',                              ms: 'Sudah Dijawab' },
-  duplicateBody:      { en: 'A response from this staff ID has already been recorded for this campaign. Each staff member may only submit once.', ms: 'Maklum balas dari ID kakitangan ini telah direkodkan untuk kempen ini. Setiap kakitangan hanya boleh menjawab sekali sahaja.' },
+  duplicateBody:      { en: 'A response using these details has already been recorded for this campaign. Each person may only submit once. Thank you — there is no need to submit again.', ms: 'Maklum balas menggunakan butiran ini telah pun direkodkan untuk kempen ini. Setiap orang hanya boleh menjawab sekali sahaja. Terima kasih — tidak perlu menjawab lagi.' },
   errSelectPositionGroup: { en: 'Please select your staff group.', ms: 'Sila pilih kumpulan kakitangan anda.' },
   errSelectPosition:  { en: 'Please select your position.', ms: 'Sila pilih jawatan anda.' },
   errSelectDirectorate: { en: 'Please select your directorate.', ms: 'Sila pilih direktorat anda.' },
   errSelectDept:      { en: 'Please select your department.', ms: 'Sila pilih jabatan anda.' },
   errFillAll:         { en: 'Please answer all questions in this section.', ms: 'Sila jawab semua soalan di bahagian ini.' },
-  errStaffIdRequired: { en: 'Staff ID is required.', ms: 'ID kakitangan diperlukan.' },
+  errIcRequired:      { en: 'Please enter the last 6 digits of your IC.', ms: 'Sila masukkan 6 digit terakhir No. KP anda.' },
+  errIcInvalid:       { en: 'Please enter exactly 6 digits (numbers only).', ms: 'Sila masukkan tepat 6 digit (nombor sahaja).' },
   errOtherRequired:   { en: 'Please specify your position.', ms: 'Sila nyatakan jawatan anda.' },
   errSubmit:          { en: 'There was a problem submitting your response. Please try again.', ms: 'Terdapat masalah ketika menghantar maklum balas anda. Sila cuba lagi.' },
 }
@@ -226,24 +227,25 @@ const t = (key: keyof typeof TXT, lang: Lang) => {
 
 /* ======================== HELPERS ======================== */
 
-async function hashStaffId(staffId: string, salt: string): Promise<string> {
-  const input = staffId.trim().toLowerCase() + '|' + salt
-  // Prefer SHA-256 via Web Crypto (HTTPS required)
+/* response_hash is a salted, one-way hash of the last 6 digits of the staff
+ * member's IC. The raw digits are NEVER stored or transmitted — only this hash
+ * is sent, and it cannot be reversed back to the IC. It satisfies the NOT NULL
+ * + unique (campaign_id, response_hash) constraint and enforces one-per-person
+ * per campaign. The per-campaign salt means the same IC produces a different
+ * hash in each campaign, so responses can't be linked across campaigns. */
+async function hashIdentifier(value: string, salt: string): Promise<string> {
+  const input = value.trim().toLowerCase() + '|' + salt
   if (typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.digest === 'function') {
     try {
-      const encoder = new TextEncoder()
-      const data = encoder.encode(input)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      return Array.from(new Uint8Array(hashBuffer))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')
-    } catch (err) {
-      console.warn('crypto.subtle failed, falling back to deterministic hash', err)
+      const bytes = new TextEncoder().encode(input)
+      const digest = await crypto.subtle.digest('SHA-256', bytes)
+      return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
+    } catch {
+      /* fall through to cyrb53 */
     }
   }
-  // Fallback: deterministic 64-bit-ish hash (cyrb53). Same staff ID -> same hash, so dedup still works.
-  // NOT cryptographic; only used when secure context unavailable (rare on Vercel HTTPS).
-  let h1 = 0xdeadbeef ^ 0, h2 = 0x41c6ce57 ^ 0
+  // cyrb53 fallback (non-crypto environments) — still deterministic per (IC, salt)
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57
   for (let i = 0; i < input.length; i++) {
     const ch = input.charCodeAt(i)
     h1 = Math.imul(h1 ^ ch, 2654435761)
@@ -251,8 +253,8 @@ async function hashStaffId(staffId: string, salt: string): Promise<string> {
   }
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
-  const hex = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
-  return 'fb_' + hex
+  const out = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16)
+  return 'fb_' + out
 }
 
 const STORAGE_KEY = (campaignCode: string) => `pscs_draft_${campaignCode}`
@@ -353,11 +355,11 @@ export default function SurveyPage() {
     [departments, state.departmentCode],
   )
 
-  // Progress: 11 stages welcome→staffid→demographics→A→B→C→D→E→F→comments→submit
+  // Progress: 10 stages welcome→icdigits→demographics→A→B→C→D→E→F→comments→submit
   const totalSteps = 10
   const currentProgress = useMemo(() => {
     if (step === 'welcome') return 1
-    if (step === 'staffid') return 2
+    if (step === 'icdigits') return 2
     if (step === 'demographics') return 3
     if (step === 'section') return 3 + (['A', 'B', 'C', 'D', 'E', 'F'].indexOf(currentSection) + 1)
     if (step === 'comments') return 10
@@ -365,12 +367,11 @@ export default function SurveyPage() {
   }, [step, currentSection])
 
   /* ---- Step transitions ---- */
-  const goWelcomeNext = () => setStep('staffid')
-  const goStaffIdNext = () => {
-    if (!state.staffId.trim()) {
-      setError(t('errStaffIdRequired', lang))
-      return
-    }
+  const goWelcomeNext = () => { setError(null); setStep('icdigits') }
+  const goIcNext = () => {
+    const v = state.icDigits.trim()
+    if (!v) { setError(t('errIcRequired', lang)); return }
+    if (!/^\d{6}$/.test(v)) { setError(t('errIcInvalid', lang)); return }
     setError(null)
     setStep('demographics')
   }
@@ -433,7 +434,7 @@ export default function SurveyPage() {
     setStep('submitting')
     setError(null)
     try {
-      const responseHash = await hashStaffId(state.staffId, campaign.salt)
+      const responseHash = await hashIdentifier(state.icDigits, campaign.salt)
       const selectedPos = positions.find((p) => p.id === state.positionId)
       const isOther = selectedPos?.name_en === 'Other (please specify)'
 
@@ -480,7 +481,9 @@ export default function SurveyPage() {
       }
 
       // Clear draft
-      if (typeof window !== 'undefined') window.localStorage.removeItem(STORAGE_KEY(campaignCode))
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(STORAGE_KEY(campaignCode))
+      }
       setStep('done')
     } catch (e) {
       console.error('PSCS submit error:', e)
@@ -592,19 +595,23 @@ export default function SurveyPage() {
           </Card>
         )}
 
-        {step === 'staffid' && (
+        {step === 'icdigits' && (
           <Card>
-            <h2 className="srv-h2">{t('staffIdTitle', lang)}</h2>
-            <p className="srv-p">{t('staffIdPrompt', lang)}</p>
-            <input
-              type="text"
-              className="srv-input"
-              autoFocus
-              value={state.staffId}
-              onChange={(e) => setState({ ...state, staffId: e.target.value })}
-              placeholder={t('staffIdPlaceholder', lang)}
-              aria-label={t('staffIdTitle', lang)}
-            />
+            <h2 className="srv-h2">{t('icTitle', lang)}</h2>
+            <p className="srv-p">{t('icPrompt', lang)}</p>
+            <div className="srv-field">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                className="srv-input"
+                style={{ fontSize: 24, letterSpacing: 6, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+                value={state.icDigits}
+                onChange={(e) => setState({ ...state, icDigits: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                placeholder={t('icPlaceholder', lang)}
+                maxLength={6}
+              />
+            </div>
           </Card>
         )}
 
@@ -845,15 +852,15 @@ export default function SurveyPage() {
             <button className="srv-btn primary" onClick={goWelcomeNext} type="button">{t('beginButton', lang)}</button>
           </>
         )}
-        {step === 'staffid' && (
+        {step === 'icdigits' && (
           <>
-            <button className="srv-btn ghost" onClick={() => setStep('welcome')} type="button">{t('backButton', lang)}</button>
-            <button className="srv-btn primary" onClick={goStaffIdNext} type="button">{t('nextButton', lang)}</button>
+            <button className="srv-btn ghost" onClick={() => { setError(null); setStep('welcome') }} type="button">{t('backButton', lang)}</button>
+            <button className="srv-btn primary" onClick={goIcNext} type="button">{t('nextButton', lang)}</button>
           </>
         )}
         {step === 'demographics' && (
           <>
-            <button className="srv-btn ghost" onClick={() => setStep('staffid')} type="button">{t('backButton', lang)}</button>
+            <button className="srv-btn ghost" onClick={() => setStep('icdigits')} type="button">{t('backButton', lang)}</button>
             <button className="srv-btn primary" onClick={goDemographicsNext} type="button">{t('nextButton', lang)}</button>
           </>
         )}
