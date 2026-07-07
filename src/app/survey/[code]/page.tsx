@@ -110,18 +110,53 @@ const TXT = {
   submitButton:       { en: 'Submit Survey',                                  ms: 'Hantar Tinjauan' },
   langLabel:          { en: 'Language',                                        ms: 'Bahasa' },
   welcomeTitle:       { en: 'Patient Safety Culture Survey',                  ms: 'Kajian Budaya Keselamatan Pesakit' },
-  welcomeIntro:       {
-    en: 'This survey asks for your opinions about patient safety, medical error, and event reporting in your hospital. It takes about 10–15 minutes. Your responses are anonymous — we ask only for the last 6 digits of your IC, which are scrambled the instant you enter them and can never be traced back to you. They are used only so each person answers once. Results are reported only in groups of 3 or more, so no individual can be identified. RMCQ is independent — we act as a bridge between staff and management, and your feedback is used only to improve hospital services, never to assess individuals. Please answer honestly.',
-    ms: 'Tinjauan ini bertujuan mengumpulkan pendapat anda berkenaan keselamatan pesakit, kesilapan perubatan dan pelaporan kejadian di hospital. Ia mengambil masa kira-kira 10–15 minit. Maklum balas anda adalah tanpa nama — kami hanya meminta 6 digit terakhir No. KP anda, yang dikaburkan sebaik sahaja anda memasukkannya dan tidak boleh dikesan kembali kepada anda. Ia hanya digunakan supaya setiap orang menjawab sekali sahaja. Keputusan hanya dilaporkan dalam kumpulan 3 orang atau lebih, jadi tiada individu boleh dikenal pasti. RMCQ adalah bebas — kami menjadi jambatan antara kakitangan dan pengurusan, dan maklum balas anda hanya digunakan untuk menambah baik perkhidmatan hospital, bukan untuk menilai individu. Sila jawab dengan jujur.',
+  welcomeLead:        {
+    en: 'Welcome! This survey gathers your views on patient safety and event reporting in your hospital.',
+    ms: 'Selamat datang! Tinjauan ini bertujuan untuk mendapatkan pandangan anda mengenai keselamatan pesakit dan pelaporan insiden di hospital anda.',
+  },
+  welcomeBullets: [
+    {
+      lead: { en: 'Time:', ms: 'Masa:' },
+      body: { en: '10–15 minutes.', ms: '10–15 minit.' },
+    },
+    {
+      lead: { en: '100% Anonymous:', ms: '100% Tanpa Nama:' },
+      body: {
+        en: 'The last 6 digits of your IC are requested only to prevent duplicate entries. They are instantly scrambled and cannot be traced back to you.',
+        ms: '6 digit terakhir No. KP anda hanya diperlukan untuk mengelakkan penyertaan bertindih. Ia akan disulitkan (scrambled) serta-merta dan tidak boleh dikesan semula kepada anda.',
+      },
+    },
+    {
+      lead: { en: 'Privacy Protected:', ms: 'Privasi Terpelihara:' },
+      body: {
+        en: 'Results are reported in groups of 3 or more so no individual can be identified.',
+        ms: 'Keputusan hanya dilaporkan secara berkumpulan (3 orang atau lebih) supaya tiada individu boleh dikenal pasti.',
+      },
+    },
+    {
+      lead: { en: 'Independent & Safe:', ms: 'Bebas & Selamat:' },
+      body: {
+        en: 'RMCQ is an independent bridge between staff and management. Your honest feedback is used solely to improve hospital services—never to assess individuals.',
+        ms: 'RMCQ bertindak sebagai penghubung bebas antara kakitangan dan pihak pengurusan. Maklum balas jujur anda hanya digunakan untuk menambah baik perkhidmatan hospital—bukan untuk menilai individu.',
+      },
+    },
+  ],
+  welcomeClose:       {
+    en: 'Please answer honestly. Thank you!',
+    ms: 'Sila jawab dengan jujur. Terima kasih!',
   },
   scaleNote:          {
     en: 'If a question does not apply to you or you don\'t know the answer, please choose 0 (Don\'t Know / Not Applicable).',
     ms: 'Jika soalan tidak berkenaan dengan anda atau anda tidak tahu jawapannya, sila pilih 0 (Tidak Tahu / Tidak Berkaitan).',
   },
-  icTitle:            { en: 'One Quick Step', ms: 'Satu Langkah Ringkas' },
+  icTitle:            { en: 'One Last Step', ms: 'Satu Langkah Lagi' },
   icPrompt:           {
-    en: 'Please enter the LAST 6 DIGITS of your IC (MyKad) number. We do NOT ask for your full IC or your name. These 6 digits are scrambled the instant you enter them and can never be traced back to you — they are used only so each person answers once.',
-    ms: 'Sila masukkan 6 DIGIT TERAKHIR No. KP (MyKad) anda. Kami TIDAK meminta No. KP penuh atau nama anda. 6 digit ini dikaburkan sebaik sahaja anda memasukkannya dan tidak boleh dikesan kembali kepada anda — ia hanya digunakan supaya setiap orang menjawab sekali sahaja.',
+    en: 'Please enter the last 6 digits of your IC (MyKad) number.',
+    ms: 'Sila masukkan 6 digit terakhir nombor IC (MyKad) anda.',
+  },
+  icBullet:           {
+    en: 'These digits are instantly scrambled, completely untraceable, and used only to prevent duplicate entries.',
+    ms: 'Digit ini disulitkan (scrambled) serta-merta, tidak boleh dikesan, dan hanya digunakan untuk mengelakkan penyertaan bertindih.',
   },
   icPlaceholder:      { en: 'Last 6 digits', ms: '6 digit terakhir' },
   demogTitle:         { en: 'About You',                                       ms: 'Tentang Anda' },
@@ -579,7 +614,16 @@ export default function SurveyPage() {
               <h1 className="srv-h1">{t('welcomeTitle', lang)}</h1>
               <p className="srv-hero-sub">{lang === 'en' ? 'Your voice matters' : 'Suara anda penting'}</p>
             </div>
-            <p className="srv-p">{t('welcomeIntro', lang)}</p>
+            <p className="srv-p">{t('welcomeLead', lang)}</p>
+            <ul style={{ margin: '8px 0 14px', paddingLeft: 20, lineHeight: 1.6, color: '#374151' }}>
+              {TXT.welcomeBullets.map((b, i) => (
+                <li key={i} style={{ marginBottom: 8 }}>
+                  <strong>{lang === 'en' ? b.lead.en : b.lead.ms}</strong>{' '}
+                  {lang === 'en' ? b.body.en : b.body.ms}
+                </li>
+              ))}
+            </ul>
+            <p className="srv-p">{t('welcomeClose', lang)}</p>
             <div className="srv-callout">
               <strong>{lang === 'en' ? 'Response scale' : 'Skala maklum balas'}:</strong>
               <div className="srv-scale-grid">
@@ -599,6 +643,9 @@ export default function SurveyPage() {
           <Card>
             <h2 className="srv-h2">{t('icTitle', lang)}</h2>
             <p className="srv-p">{t('icPrompt', lang)}</p>
+            <ul style={{ margin: '4px 0 14px', paddingLeft: 20, lineHeight: 1.6, color: '#6B7280' }}>
+              <li>{t('icBullet', lang)}</li>
+            </ul>
             <div className="srv-field">
               <input
                 type="text"
