@@ -29,6 +29,7 @@ export interface IrFilters {
   careSetting: string // 'all' | INPATIENT etc
   type: string // 'all' | ACTUAL | NEARMISS
   category: string // 'all' | category name
+  ward: string // 'all' | ward name (uppercased)
 }
 
 export const DEFAULT_FILTERS: IrFilters = {
@@ -37,6 +38,7 @@ export const DEFAULT_FILTERS: IrFilters = {
   careSetting: 'all',
   type: 'all',
   category: 'all',
+  ward: 'all',
 }
 
 export const NON_PSI = 'Not Patient Safety Incident'
@@ -123,6 +125,7 @@ export function applyFilters(rows: Incident[], f: IrFilters): Incident[] {
     if (f.careSetting !== 'all' && (r.care_setting ?? '').toUpperCase() !== f.careSetting) return false
     if (f.type !== 'all' && (r.incident_type ?? '').toUpperCase().replace(/\s+/g, '') !== f.type) return false
     if (f.category !== 'all' && r.category !== f.category) return false
+    if (f.ward !== 'all' && (r.ward ?? '').trim().toUpperCase() !== f.ward) return false
     return true
   })
 }

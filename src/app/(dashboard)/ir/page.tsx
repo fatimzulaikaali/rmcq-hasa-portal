@@ -175,6 +175,14 @@ export default function IrPage() {
   const monthOpts = useMemo(() => uniqueMonths(rows ?? []), [rows])
   const deptOpts = useMemo(() => uniqueValues(rows ?? [], 'dept_code'), [rows])
   const catOpts = useMemo(() => uniqueValues(rows ?? [], 'category'), [rows])
+  const wardOpts = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of rows ?? []) {
+      const w = (r.ward ?? '').trim().toUpperCase()
+      if (w) set.add(w)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [rows])
   const meta = useMemo(() => activeMonthRange(rows ?? [], filters), [rows, filters])
 
   return (
@@ -234,6 +242,12 @@ export default function IrPage() {
             value={filters.category}
             onChange={(v) => setFilters({ ...filters, category: v })}
             options={[{ value: 'all', label: 'All Categories' }, ...catOpts.map((v) => ({ value: v, label: v }))]}
+          />
+          <FilterSelect
+            label="Ward / Location"
+            value={filters.ward}
+            onChange={(v) => setFilters({ ...filters, ward: v })}
+            options={[{ value: 'all', label: 'All Wards' }, ...wardOpts.map((v) => ({ value: v, label: v }))]}
           />
           <button className="reset-btn" onClick={() => setFilters(DEFAULT_FILTERS)} type="button">
             ↺ Reset Filters
@@ -480,6 +494,27 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
   }, [rows])
   const actionTaken = useMemo(() => sortedTop(counts(rows.filter(isPsi), (r) => r.action_taken), 12), [rows])
 
+  // Where incidents happen — location/ward distribution, split PSI vs Non-PSI (top 15)
+  const wardData = useMemo(() => {
+    const acc = new Map<string, { psi: number; nonPsi: number; total: number }>()
+    for (const r of rows) {
+      const w = (r.ward ?? '').trim().toUpperCase()
+      if (!w) continue
+      if (!acc.has(w)) acc.set(w, { psi: 0, nonPsi: 0, total: 0 })
+      const a = acc.get(w)!
+      a.total++
+      if (isPsi(r)) a.psi++; else a.nonPsi++
+    }
+    const sorted = Array.from(acc.entries()).sort(([, a], [, b]) => b.total - a.total)
+    const top = sorted.slice(0, 15)
+    return {
+      distinct: acc.size,
+      labels: top.map(([w]) => w),
+      psi: top.map(([, v]) => v.psi),
+      nonPsi: top.map(([, v]) => v.nonPsi),
+    }
+  }, [rows])
+
   return (
     <>
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
@@ -556,6 +591,46 @@ function OverviewTab({ rows }: { rows: Incident[] }) {
             }}
           />
         </div>
+      </Panel>
+
+      <Panel title="Incidents by Ward / Location" subtitle={`Where incidents occurred — top ${wardData.labels.length} of ${wardData.distinct} wards/units, split PSI vs Non-PSI`}>
+        {wardData.labels.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 12 }}>No ward/location data in current selection.</div>
+        ) : (
+          <div style={{ height: Math.max(220, wardData.labels.length * 26 + 20) }}>
+            <Bar
+              data={{
+                labels: wardData.labels,
+                datasets: [
+                  { label: 'PSI',     data: wardData.psi,    backgroundColor: '#378ADD', borderRadius: 4, stack: 'w' },
+                  { label: 'Non-PSI', data: wardData.nonPsi, backgroundColor: '#B4B2A9', borderRadius: 4, stack: 'w' },
+                ],
+              }}
+              options={{
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 11 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => {
+                        const v = ctx.parsed.x as number
+                        return `${ctx.dataset.label}: ${v} incident${v === 1 ? '' : 's'}`
+                      },
+                      footer: (items) => {
+                        const total = items.reduce((s, it) => s + (it.parsed.x as number), 0)
+                        return `Total: ${total}`
+                      },
+                    },
+                  },
+                },
+                scales: {
+                  x: { stacked: true, beginAtZero: true, ticks: { font: { size: 11 }, precision: 0 }, grid: { color: '#E0DED6' } },
+                  y: { stacked: true, ticks: { font: { size: 11 } }, grid: { display: false } },
+                },
+              }}
+            />
+          </div>
+        )}
       </Panel>
 
       <div className="g2">
