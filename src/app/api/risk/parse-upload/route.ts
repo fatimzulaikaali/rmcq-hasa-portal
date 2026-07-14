@@ -26,28 +26,28 @@ interface RiskDraft {
   description: string
   cause: string
   impact: string
-  category: string
+  context: string
+  risk_nature: string
+  treatment_option: string
   scope: string
   existing_controls: string
   additional_controls: string
   action_owner_dept_names: string[]
   implementation_period: string
   likelihood: number | null
-  impact_manusia: number | null
-  impact_reputasi: number | null
-  impact_kewangan: number | null
-  impact_operasi: number | null
-  impact_objektif: number | null
+  severity: number | null
+  residual_likelihood: number | null
+  residual_severity: number | null
   _source_note?: string
 }
 
 type FieldKey =
   | 'description' | 'cause' | 'impact'
-  | 'category' | 'scope'
+  | 'context' | 'risk_nature' | 'treatment_option' | 'scope'
   | 'existing_controls' | 'additional_controls'
   | 'action_owner' | 'implementation_period'
-  | 'likelihood'
-  | 'impact_manusia' | 'impact_reputasi' | 'impact_kewangan' | 'impact_operasi' | 'impact_objektif'
+  | 'likelihood' | 'severity'
+  | 'residual_likelihood' | 'residual_severity'
   | 'dept'
 
 /* Pattern order matters: the FIRST match wins for any given header string. So
@@ -55,14 +55,19 @@ type FieldKey =
  * general "impact" pattern, otherwise "Penilaian Impak (a) Manusia" would
  * match `impact` instead of `impact_manusia`. */
 const HEADER_PATTERNS: { field: FieldKey; patterns: string[] }[] = [
-  // Specific scoring dimensions (must come before general 'impact')
-  { field: 'impact_manusia',  patterns: ['manusia', 'human impact', 'human'] },
-  { field: 'impact_reputasi', patterns: ['reputasi', 'reputation', 'imej', 'image'] },
-  { field: 'impact_kewangan', patterns: ['kewangan', 'financial impact', 'financial', 'finance'] },
-  { field: 'impact_operasi',  patterns: ['operasi', 'operational impact', 'operations', 'operasional'] },
-  { field: 'impact_objektif', patterns: ['objektif', 'objective impact', 'objective'] },
+  // Residual scoring (must come before base likelihood/severity so
+  // "Risiko Baki - Kebarangkalian" maps to residual, not the current score).
+  { field: 'residual_likelihood', patterns: [
+    'risiko baki kebarangkalian', 'baki kebarangkalian',
+    'residual likelihood', 'residual probability',
+  ] },
+  { field: 'residual_severity', patterns: [
+    'risiko baki keterukan', 'baki keterukan', 'baki impak',
+    'residual severity', 'residual impact',
+  ] },
 
-  // Likelihood
+  // Current scoring
+  { field: 'severity', patterns: ['severity', 'keterukan', 'tahap keterukan'] },
   { field: 'likelihood', patterns: ['likelihood', 'kebarangkalian', 'probability'] },
 
   // Risk text fields
@@ -74,9 +79,18 @@ const HEADER_PATTERNS: { field: FieldKey; patterns: string[] }[] = [
     'description',
   ] },
   { field: 'cause', patterns: ['punca', 'sebab', 'penyebab', 'root cause', 'cause'] },
-  { field: 'impact', patterns: ['impak risiko', 'risk impact', 'impak', 'impact'] },
+  { field: 'impact', patterns: [
+    'konsekuen', 'consequence', 'impak risiko', 'risk impact', 'impak', 'impact', 'kesan',
+  ] },
 
-  { field: 'category', patterns: ['kategori risiko', 'risk category', 'kategori', 'category'] },
+  { field: 'context', patterns: ['konteks', 'context'] },
+  { field: 'risk_nature', patterns: [
+    'jenis risiko', 'sifat risiko', 'nature of risk', 'risk nature',
+    'actual/potential', 'sebenar/berpotensi',
+  ] },
+  { field: 'treatment_option', patterns: [
+    'pilihan rawatan', 'treatment option', 'opsyen rawatan', 'risk treatment',
+  ] },
   { field: 'scope', patterns: [
     'risiko institusi atau unit', 'institusi atau unit',
     'risiko institusi', 'risiko unit',
@@ -102,13 +116,16 @@ const HEADER_PATTERNS: { field: FieldKey; patterns: string[] }[] = [
   { field: 'dept', patterns: ['department', 'jabatan'] },
 ]
 
-const CATEGORY_KEYWORDS: { code: string; words: string[] }[] = [
-  { code: 'OPS', words: ['operational', 'operasi', 'process', 'operations', 'ops'] },
-  { code: 'KEW', words: ['financial', 'kewangan', 'budget', 'finance', 'kew'] },
-  { code: 'REP', words: ['reputational', 'reputasi', 'reputation', 'public', 'media', 'rep'] },
-  { code: 'PER', words: ['personnel', 'staffing', 'human resource', 'peraturan', 'kualiti', 'quality', 'people', 'staff', 'per'] },
-  { code: 'STR', words: ['strategic', 'strategy', 'strategik', 'str'] },
-  { code: 'PRJ', words: ['project', 'projek', 'initiative', 'prj'] },
+const NATURE_KEYWORDS: { code: string; words: string[] }[] = [
+  { code: 'ACTUAL',    words: ['actual', 'sebenar', 'sedia ada', 'existing'] },
+  { code: 'POTENTIAL', words: ['potential', 'berpotensi', 'potensi', 'jangkaan'] },
+]
+
+const TREATMENT_KEYWORDS: { code: string; words: string[] }[] = [
+  { code: 'AVOID',    words: ['avoid', 'elak', 'hindar'] },
+  { code: 'TRANSFER', words: ['transfer', 'pindah', 'alih'] },
+  { code: 'CONTROL',  words: ['control', 'kawal', 'mitigate', 'kurang'] },
+  { code: 'ACCEPT',   words: ['accept', 'terima'] },
 ]
 
 const SCOPE_KEYWORDS: { code: string; words: string[] }[] = [
@@ -163,13 +180,25 @@ function parseScore(v: unknown): number | null {
   return parseInt(m[0], 10)
 }
 
-function pickCategory(v: unknown): string {
+function pickNature(v: unknown): string {
   if (!v) return ''
   const s = String(v).toLowerCase()
-  for (const c of ['OPS', 'KEW', 'REP', 'PER', 'STR', 'PRJ']) {
+  for (const c of ['ACTUAL', 'POTENTIAL']) {
     if (s === c.toLowerCase()) return c
   }
-  for (const { code, words } of CATEGORY_KEYWORDS) {
+  for (const { code, words } of NATURE_KEYWORDS) {
+    if (words.some((w) => s.includes(w))) return code
+  }
+  return ''
+}
+
+function pickTreatment(v: unknown): string {
+  if (!v) return ''
+  const s = String(v).toLowerCase()
+  for (const c of ['AVOID', 'TRANSFER', 'CONTROL', 'ACCEPT']) {
+    if (s === c.toLowerCase()) return c
+  }
+  for (const { code, words } of TREATMENT_KEYWORDS) {
     if (words.some((w) => s.includes(w))) return code
   }
   return ''
@@ -229,7 +258,7 @@ function passesHeaderTest(fields: Set<FieldKey>): boolean {
   // text fields so we don't mistake a stray block of metadata for a header.
   return fields.size >= 3 && (
     fields.has('description') || fields.has('cause') || fields.has('impact') ||
-    fields.has('likelihood') || fields.has('impact_manusia')
+    fields.has('likelihood') || fields.has('severity') || fields.has('context')
   )
 }
 
@@ -378,18 +407,18 @@ export async function POST(req: NextRequest) {
         description,
         cause,
         impact,
-        category: pickCategory(firstColumn(row, colsForField(headerMap, 'category'))),
+        context: concatColumns(row, colsForField(headerMap, 'context')),
+        risk_nature: pickNature(firstColumn(row, colsForField(headerMap, 'risk_nature'))),
+        treatment_option: pickTreatment(firstColumn(row, colsForField(headerMap, 'treatment_option'))),
         scope: pickScope(firstColumn(row, colsForField(headerMap, 'scope'))),
         existing_controls: concatColumns(row, colsForField(headerMap, 'existing_controls')),
         additional_controls: concatColumns(row, colsForField(headerMap, 'additional_controls')),
         action_owner_dept_names,
         implementation_period: concatColumns(row, colsForField(headerMap, 'implementation_period')),
         likelihood: parseScore(firstColumn(row, colsForField(headerMap, 'likelihood'))),
-        impact_manusia: parseScore(firstColumn(row, colsForField(headerMap, 'impact_manusia'))),
-        impact_reputasi: parseScore(firstColumn(row, colsForField(headerMap, 'impact_reputasi'))),
-        impact_kewangan: parseScore(firstColumn(row, colsForField(headerMap, 'impact_kewangan'))),
-        impact_operasi: parseScore(firstColumn(row, colsForField(headerMap, 'impact_operasi'))),
-        impact_objektif: parseScore(firstColumn(row, colsForField(headerMap, 'impact_objektif'))),
+        severity: parseScore(firstColumn(row, colsForField(headerMap, 'severity'))),
+        residual_likelihood: parseScore(firstColumn(row, colsForField(headerMap, 'residual_likelihood'))),
+        residual_severity: parseScore(firstColumn(row, colsForField(headerMap, 'residual_severity'))),
       })
       extracted++
     }
@@ -401,8 +430,9 @@ export async function POST(req: NextRequest) {
       risks: [],
       general_notes:
         'No risks were extracted. Headers may be unusual; the parser looks for Malay or English terms ' +
-        'like "Huraian / Keterangan Risiko", "Punca / Sebab", "Impak", "Kebarangkalian", "Manusia", ' +
-        '"Reputasi", "Kewangan", "Operasi", "Objektif". ' + noteLines.join(' '),
+        'like "Konteks / Context", "Huraian / Keterangan Risiko", "Punca / Sebab", "Konsekuen / Impak", ' +
+        '"Kebarangkalian / Likelihood", "Keterukan / Severity", and "Risiko Baki" for residual scoring. ' +
+        noteLines.join(' '),
     })
   }
 

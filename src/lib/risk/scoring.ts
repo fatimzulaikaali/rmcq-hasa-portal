@@ -1,16 +1,46 @@
 /* Risk Management module — scoring helper.
  *
- * Per the HASA Risk brief:
- *   Risk Score = Likelihood × Average(Manusia, Reputasi, Kewangan, Operasi, Objektif)
- *   Risk Level: > 12 = EKSTREM, > 7 = TINGGI, > 3 = SEDERHANA, else RENDAH
+ * Per the HASA ERMS (ISO 31000:2018) model:
+ *   Risk Rating = Likelihood × Severity   (both integers 1-5, score range 1-25)
+ *   Risk Level:  16-25 = Extreme, 10-15 = High, 6-9 = Moderate, 1-5 = Low
  *
- * Likelihood and each impact are integers 1-5. Score range: 1-25.
+ * The internal RiskLevel enum keeps its stable identifiers
+ * (EKSTREM/TINGGI/SEDERHANA/RENDAH) which map 1:1 onto the English bands;
+ * only the displayed labels are English (see RISK_LEVEL_LABEL).
+ *
+ * `computeSeverityScore` is the new single-severity model (used by the revamped
+ * register form). `computeRiskScore` retains the legacy 5-impact-average
+ * signature so existing callers keep compiling until the register form is
+ * migrated; both route their level through the shared `riskLevelFromScore`.
  */
 
 import {
-  RiskLevel, RiskCategory, RiskStatus, RiskScope, RiskRole, MeetingType,
-  MeetingStatus, CommitteeOutcome, ActionType, ActionStatus,
+  RiskLevel, RiskDomain, RiskNature, TreatmentOption, RiskStatus, RiskScope,
+  RiskRole, MeetingType, MeetingStatus, CommitteeOutcome, ActionType, ActionStatus,
 } from './types'
+
+/* Shared banding — the single source of truth for the ISO 5×5 grid.
+ *   Extreme 16-25 · High 10-15 · Moderate 6-9 · Low 1-5 */
+export function riskLevelFromScore(score: number): RiskLevel {
+  if (score >= 16) return 'EKSTREM'
+  if (score >= 10) return 'TINGGI'
+  if (score >= 6)  return 'SEDERHANA'
+  return 'RENDAH'
+}
+
+export interface ComputedSeverityScore {
+  riskScore: number
+  riskLevel: RiskLevel
+}
+
+/* New ERMS model — Likelihood × Severity, both 1-5. */
+export function computeSeverityScore(
+  likelihood: number,
+  severity: number,
+): ComputedSeverityScore {
+  const riskScore = likelihood * severity
+  return { riskScore, riskLevel: riskLevelFromScore(riskScore) }
+}
 
 export interface ComputedRiskScore {
   avgImpact: number
@@ -18,6 +48,8 @@ export interface ComputedRiskScore {
   riskLevel: RiskLevel
 }
 
+/* Legacy 5-impact-average model — kept only so pre-migration callers compile.
+ * Removed once the register form + reviews move to single severity (Phase 2). */
 export function computeRiskScore(
   likelihood: number,
   impacts: number[],
@@ -27,12 +59,7 @@ export function computeRiskScore(
   }
   const avgImpact = impacts.reduce((a, b) => a + b, 0) / impacts.length
   const riskScore = likelihood * avgImpact
-  const riskLevel: RiskLevel =
-    riskScore > 12 ? 'EKSTREM' :
-    riskScore > 7  ? 'TINGGI'  :
-    riskScore > 3  ? 'SEDERHANA' :
-                     'RENDAH'
-  return { avgImpact, riskScore, riskLevel }
+  return { avgImpact, riskScore, riskLevel: riskLevelFromScore(riskScore) }
 }
 
 /* Risk ID format: [RISK_CODE]-[YY]-[SEQ]   e.g. MED-26-001
@@ -60,19 +87,38 @@ export const RISK_LEVEL_BG: Record<RiskLevel, string> = {
 }
 
 export const RISK_LEVEL_LABEL: Record<RiskLevel, string> = {
-  EKSTREM:   'Ekstrem',
-  TINGGI:    'Tinggi',
-  SEDERHANA: 'Sederhana',
-  RENDAH:    'Rendah',
+  EKSTREM:   'Extreme',
+  TINGGI:    'High',
+  SEDERHANA: 'Moderate',
+  RENDAH:    'Low',
 }
 
-export const RISK_CATEGORY_LABEL: Record<RiskCategory, string> = {
-  OPS: 'Operasi',
-  KEW: 'Kewangan',
-  REP: 'Reputasi',
-  PER: 'Perundangan',
-  STR: 'Strategik',
-  PRJ: 'Projek',
+/* The 12 UiTM domains — Coordinator-assigned, for presentation / submission. */
+export const RISK_DOMAIN_LABEL: Record<RiskDomain, string> = {
+  STRATEGIC:        'Strategic',
+  OPERATIONAL:      'Operational',
+  FINANCIAL:        'Financial',
+  LEGAL_COMPLIANCE: 'Legal / Compliance',
+  REPUTATIONAL:     'Reputational',
+  CLINICAL:         'Clinical / Patient Care',
+  HEALTH_SAFETY:    'Health & Safety',
+  ENVIRONMENTAL:    'Environmental',
+  SECURITY_IT:      'Security / IT',
+  HR:               'Human Resource',
+  PROJECT:          'Project',
+  SUPPLY_CHAIN:     'Supply Chain',
+}
+
+export const RISK_NATURE_LABEL: Record<RiskNature, string> = {
+  ACTUAL:    'Actual risk',
+  POTENTIAL: 'Potential risk',
+}
+
+export const TREATMENT_OPTION_LABEL: Record<TreatmentOption, string> = {
+  AVOID:    'Avoid',
+  TRANSFER: 'Transfer',
+  CONTROL:  'Control',
+  ACCEPT:   'Accept',
 }
 
 export const RISK_STATUS_LABEL: Record<RiskStatus, string> = {

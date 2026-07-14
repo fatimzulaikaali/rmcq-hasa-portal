@@ -19,7 +19,8 @@ import type {
   CommitteeOutcome, CrossCuttingTheme,
 } from './types'
 import {
-  RISK_CATEGORY_LABEL, RISK_LEVEL_LABEL, RISK_SCOPE_LABEL, RISK_STATUS_LABEL,
+  RISK_DOMAIN_LABEL, RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL,
+  RISK_LEVEL_LABEL, RISK_SCOPE_LABEL, RISK_STATUS_LABEL,
   COMMITTEE_OUTCOME_LABEL, MEETING_TYPE_LABEL, MEETING_STATUS_LABEL,
   ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
 } from './scoring'
@@ -153,7 +154,7 @@ export interface RegisterFilterContext {
   view: 'attention' | 'active' | 'archive'
   status: string
   level: string
-  category: string
+  domain: string
   deptCode: string
 }
 
@@ -162,7 +163,7 @@ function describeRegisterFilter(f: RegisterFilterContext, deptName: (c: string) 
   lines.push(`Tab: ${f.view === 'attention' ? 'Needs attention' : f.view === 'archive' ? 'Archive' : 'Active Register'}`)
   if (f.status !== 'all') lines.push(`Status: ${RISK_STATUS_LABEL[f.status as keyof typeof RISK_STATUS_LABEL] ?? f.status}`)
   if (f.level !== 'all') lines.push(`Level: ${RISK_LEVEL_LABEL[f.level as keyof typeof RISK_LEVEL_LABEL] ?? f.level}`)
-  if (f.category !== 'all') lines.push(`Category: ${f.category}`)
+  if (f.domain !== 'all') lines.push(`Domain: ${f.domain === 'unassigned' ? 'Unassigned' : (RISK_DOMAIN_LABEL[f.domain as keyof typeof RISK_DOMAIN_LABEL] ?? f.domain)}`)
   if (f.deptCode !== 'all') lines.push(`Department: ${deptName(f.deptCode)}`)
   return lines
 }
@@ -185,11 +186,11 @@ export function exportRegisterXlsx(
   ]
 
   const COLUMNS = [
-    'Risk ID', 'Department', 'Category', 'Category meaning', 'Scope',
-    'Status', 'Risk Level', 'Risk Score', 'Avg Impact',
-    'L', 'Manusia', 'Reputasi', 'Kewangan', 'Operasi', 'Objektif',
-    'Latest cycle', 'Latest review date',
-    'Description', 'Cause', 'Impact',
+    'Risk ID', 'Department', 'Domain (UiTM)', 'Context', 'Nature', 'Scope',
+    'Status', 'Risk Level', 'Risk Score', 'L', 'S',
+    'Residual L', 'Residual S', 'Residual Score', 'Residual Level',
+    'Treatment', 'Latest cycle', 'Latest review date',
+    'Description', 'Cause', 'Consequence',
     'Existing controls', 'Additional controls',
     'Action owner', 'Implementation period', 'Notes',
     'Date opened', 'Date closed',
@@ -198,19 +199,20 @@ export function exportRegisterXlsx(
   const dataRows = rows.map(({ risk, dept, latest }) => [
     risk.risk_id,
     dept?.name_en ?? risk.dept_code,
-    risk.category,
-    RISK_CATEGORY_LABEL[risk.category] ?? '',
+    risk.uitm_domain ? RISK_DOMAIN_LABEL[risk.uitm_domain] : 'Unassigned',
+    risk.context ?? '',
+    risk.risk_nature ? RISK_NATURE_LABEL[risk.risk_nature] : '',
     RISK_SCOPE_LABEL[risk.scope] ?? '',
     RISK_STATUS_LABEL[risk.status] ?? risk.status,
     latest ? RISK_LEVEL_LABEL[latest.risk_level] : '',
-    latest ? Math.round(latest.risk_score * 10) / 10 : '',
-    latest ? Math.round(latest.avg_impact * 10) / 10 : '',
+    latest ? latest.risk_score : '',
     latest?.likelihood ?? '',
-    latest?.impact_manusia ?? '',
-    latest?.impact_reputasi ?? '',
-    latest?.impact_kewangan ?? '',
-    latest?.impact_operasi ?? '',
-    latest?.impact_objektif ?? '',
+    latest?.severity ?? '',
+    latest?.residual_likelihood ?? '',
+    latest?.residual_severity ?? '',
+    latest?.residual_score ?? '',
+    latest?.residual_level ? RISK_LEVEL_LABEL[latest.residual_level] : '',
+    risk.treatment_option ? TREATMENT_OPTION_LABEL[risk.treatment_option] : '',
     latest?.cycle_number ?? '',
     latest?.review_date ?? '',
     risk.description,
@@ -227,7 +229,7 @@ export function exportRegisterXlsx(
 
   const ws = XLSX.utils.aoa_to_sheet([...HEAD_ROWS, COLUMNS, ...dataRows])
   // Column widths — narrower numeric, wider text
-  const widths = [16, 28, 8, 28, 14, 22, 14, 10, 10, 6, 9, 9, 9, 9, 9, 8, 14, 50, 50, 50, 40, 40, 28, 22, 50, 12, 12]
+  const widths = [16, 28, 20, 40, 12, 14, 22, 14, 10, 6, 6, 9, 9, 12, 14, 12, 8, 14, 50, 50, 50, 40, 40, 28, 22, 50, 12, 12]
   ws['!cols'] = widths.map((w) => ({ wch: w }))
 
   const wb = XLSX.utils.book_new()
@@ -248,7 +250,7 @@ export function exportRegisterPdf(
     <tr>
       <td class="mono">${htmlEsc(risk.risk_id)}</td>
       <td>${htmlEsc(dept?.name_en ?? risk.dept_code)}</td>
-      <td><b>${htmlEsc(risk.category)}</b></td>
+      <td>${risk.uitm_domain ? `<b>${htmlEsc(RISK_DOMAIN_LABEL[risk.uitm_domain])}</b>` : '<i>Unassigned</i>'}</td>
       <td>${htmlEsc(risk.description)}</td>
       <td class="center">${latest ? `<span class="badge lvl-${latest.risk_level}">${htmlEsc(RISK_LEVEL_LABEL[latest.risk_level])}</span>` : '—'}</td>
       <td class="num">${latest ? (Math.round(latest.risk_score * 10) / 10).toFixed(1) : '—'}</td>
@@ -271,7 +273,7 @@ export function exportRegisterPdf(
     <table>
       <thead>
         <tr>
-          <th>Risk ID</th><th>Department</th><th>Cat.</th><th>Description</th>
+          <th>Risk ID</th><th>Department</th><th>Domain</th><th>Description</th>
           <th style="text-align:center">Level</th><th style="text-align:right">Score</th>
           <th style="text-align:center">Cycle</th><th style="text-align:center">Status</th>
           <th>Action owner</th><th>Opened</th>
@@ -462,7 +464,7 @@ export function exportMeetingMinutesPdf(data: MeetingExportData): void {
               <span class="risk-card-title">${htmlEsc(risk.description)}</span>
             </header>
             <div class="risk-card-meta">
-              <span><b>${htmlEsc(risk.category)}</b> — ${htmlEsc(RISK_CATEGORY_LABEL[risk.category] ?? '')}</span>
+              <span>${risk.uitm_domain ? `<b>${htmlEsc(RISK_DOMAIN_LABEL[risk.uitm_domain])}</b>` : '<i>Domain unassigned</i>'}</span>
               ${latest ? `<span>Level: <span class="badge lvl-${latest.risk_level}">${htmlEsc(RISK_LEVEL_LABEL[latest.risk_level as keyof typeof RISK_LEVEL_LABEL])}</span></span><span>Score: <b>${(Math.round(latest.risk_score * 10) / 10).toFixed(1)}</b></span><span>Cycle: <b>${latest.cycle_number}</b></span>` : ''}
               ${item.pre_meeting_scoring ? `<span class="pre-meeting">(Pre-meeting: <span class="badge lvl-${item.pre_meeting_scoring.risk_level}">${htmlEsc(RISK_LEVEL_LABEL[item.pre_meeting_scoring.risk_level as keyof typeof RISK_LEVEL_LABEL])}</span> ${(Math.round(item.pre_meeting_scoring.risk_score * 10) / 10).toFixed(1)})</span>` : ''}
               ${themes.length > 0 ? `<span>Themes: ${themes.map(htmlEsc).join(', ')}</span>` : ''}
@@ -668,7 +670,7 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
     [],
   ]
   const agendaCols = [
-    'Risk ID', 'Department', 'Category', 'Description', 'Cycle',
+    'Risk ID', 'Department', 'Domain', 'Description', 'Cycle',
     'Pre-meeting score', 'Pre-meeting level',
     'After-meeting score', 'After-meeting level',
     'Outcome', 'Discussion', 'Decision text', 'Decided by', 'Decided on',
@@ -680,7 +682,7 @@ export function exportMeetingMinutesXlsx(data: MeetingExportData): void {
     return [
       risk?.risk_id ?? '—',
       risk ? deptName(risk.dept_code) : '—',
-      risk?.category ?? '',
+      risk?.uitm_domain ? RISK_DOMAIN_LABEL[risk.uitm_domain] : 'Unassigned',
       risk?.description ?? '',
       latest?.cycle_number ?? '',
       pre ? Math.round(pre.risk_score * 10) / 10 : '',

@@ -10,18 +10,16 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { Risk, RiskReview, RiskDept, TreatmentStatus } from '@/lib/risk/types'
 import {
-  computeRiskScore,
+  computeSeverityScore,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
 } from '@/lib/risk/scoring'
 
 interface FormState {
   review_date: string                    // YYYY-MM-DD
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
+  severity: number
+  residual_likelihood: number
+  residual_severity: number
   treatment_status: TreatmentStatus | ''
   treatment_update: string
   // Paper-source metadata for THIS cycle (only relevant when the risk is
@@ -62,9 +60,8 @@ export default function NewReviewPage() {
 
   const [form, setForm] = useState<FormState>({
     review_date: new Date().toISOString().slice(0, 10),
-    likelihood: 0,
-    impact_manusia: 0, impact_reputasi: 0, impact_kewangan: 0,
-    impact_operasi: 0, impact_objektif: 0,
+    likelihood: 0, severity: 0,
+    residual_likelihood: 0, residual_severity: 0,
     treatment_status: '',
     treatment_update: '',
     paper_reviewed_by: '', paper_review_date: '',
@@ -114,12 +111,10 @@ export default function NewReviewPage() {
       if (last) {
         setForm((prev) => ({
           ...prev,
-          likelihood:      last.likelihood,
-          impact_manusia:  last.impact_manusia,
-          impact_reputasi: last.impact_reputasi,
-          impact_kewangan: last.impact_kewangan,
-          impact_operasi:  last.impact_operasi,
-          impact_objektif: last.impact_objektif,
+          likelihood:          last.likelihood,
+          severity:            last.severity ?? 0,
+          residual_likelihood: last.residual_likelihood ?? 0,
+          residual_severity:   last.residual_severity ?? 0,
           treatment_status: last.treatment_status ?? '',
         }))
       }
@@ -135,20 +130,19 @@ export default function NewReviewPage() {
     router.push('/login')
   }
 
-  const scoreInputs = form.likelihood > 0 &&
-    form.impact_manusia > 0 && form.impact_reputasi > 0 && form.impact_kewangan > 0 &&
-    form.impact_operasi > 0 && form.impact_objektif > 0
+  const scoreInputs = form.likelihood > 0 && form.severity > 0
   const computed = scoreInputs
-    ? computeRiskScore(form.likelihood, [
-        form.impact_manusia, form.impact_reputasi, form.impact_kewangan,
-        form.impact_operasi, form.impact_objektif,
-      ])
+    ? computeSeverityScore(form.likelihood, form.severity)
+    : null
+  const hasResidual = form.residual_likelihood > 0 && form.residual_severity > 0
+  const residual = hasResidual
+    ? computeSeverityScore(form.residual_likelihood, form.residual_severity)
     : null
 
   const isRmcqMode = risk?.entry_mode === 'rmcq_managed'
   const errors: string[] = []
   if (!form.review_date) errors.push('Review date is required')
-  if (!scoreInputs) errors.push('All scoring inputs must be 1-5')
+  if (!scoreInputs) errors.push('Likelihood and Severity must both be 1-5')
   if (isRmcqMode) {
     if (!form.paper_reviewed_by.trim()) errors.push('Paper: who reviewed (dept side) is required')
     if (!form.paper_review_date) errors.push('Paper: review date on the borang is required')
@@ -165,14 +159,13 @@ export default function NewReviewPage() {
         reviewed_by: riskUserId,
         review_date: form.review_date,
         likelihood: form.likelihood,
-        impact_manusia: form.impact_manusia,
-        impact_reputasi: form.impact_reputasi,
-        impact_kewangan: form.impact_kewangan,
-        impact_operasi: form.impact_operasi,
-        impact_objektif: form.impact_objektif,
-        avg_impact: computed.avgImpact,
+        severity: form.severity,
         risk_score: computed.riskScore,
         risk_level: computed.riskLevel,
+        residual_likelihood: hasResidual ? form.residual_likelihood : null,
+        residual_severity: hasResidual ? form.residual_severity : null,
+        residual_score: residual ? residual.riskScore : null,
+        residual_level: residual ? residual.riskLevel : null,
         treatment_status: form.treatment_status || null,
         treatment_update: form.treatment_update.trim() || null,
         // Paper-source metadata for the cycle (only populated under RMCQ-mode).
@@ -295,30 +288,22 @@ export default function NewReviewPage() {
                     <input type="date" value={form.review_date}
                       onChange={(e) => set('review_date', e.target.value)} />
                   </div>
-                  <ScoreField label="Likelihood (Kebarangkalian)" value={form.likelihood}
+                  <ScoreField label="Likelihood" value={form.likelihood}
                     onChange={(v) => set('likelihood', v)} />
-                  <ScoreField label="Impact: Manusia" value={form.impact_manusia}
-                    onChange={(v) => set('impact_manusia', v)} />
-                  <ScoreField label="Impact: Reputasi" value={form.impact_reputasi}
-                    onChange={(v) => set('impact_reputasi', v)} />
-                  <ScoreField label="Impact: Kewangan" value={form.impact_kewangan}
-                    onChange={(v) => set('impact_kewangan', v)} />
-                  <ScoreField label="Impact: Operasi" value={form.impact_operasi}
-                    onChange={(v) => set('impact_operasi', v)} />
-                  <ScoreField label="Impact: Objektif" value={form.impact_objektif}
-                    onChange={(v) => set('impact_objektif', v)} />
+                  <ScoreField label="Severity" value={form.severity}
+                    onChange={(v) => set('severity', v)} />
                 </div>
 
                 <div className="risk-score-preview">
                   {computed ? (
                     <>
                       <div className="rsp-block">
-                        <div className="rsp-label">New Avg Impact</div>
-                        <div className="rsp-value">{(Math.round(computed.avgImpact * 10) / 10).toFixed(1)}</div>
+                        <div className="rsp-label">Likelihood × Severity</div>
+                        <div className="rsp-value">{form.likelihood} × {form.severity}</div>
                       </div>
                       <div className="rsp-block">
                         <div className="rsp-label">New Risk Score</div>
-                        <div className="rsp-value">{(Math.round(computed.riskScore * 10) / 10).toFixed(1)}</div>
+                        <div className="rsp-value">{computed.riskScore}</div>
                       </div>
                       <div className="rsp-block">
                         <div className="rsp-label">New Risk Level</div>
@@ -348,10 +333,33 @@ export default function NewReviewPage() {
                     </>
                   ) : (
                     <div style={{ color: 'var(--muted)', fontSize: 13, fontStyle: 'italic' }}>
-                      Pick all 6 scoring inputs to see the new score.
+                      Pick both Likelihood and Severity to see the new score.
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Residual risk (optional) */}
+              <div className="panel">
+                <div className="pf"><div><div className="pt">Residual Risk (optional)</div><div className="psub">Expected rating after controls. Leave blank if not assessed this cycle.</div></div></div>
+                <div className="risk-form-grid">
+                  <ScoreFieldOptional label="Residual Likelihood" value={form.residual_likelihood}
+                    onChange={(v) => set('residual_likelihood', v)} />
+                  <ScoreFieldOptional label="Residual Severity" value={form.residual_severity}
+                    onChange={(v) => set('residual_severity', v)} />
+                </div>
+                {residual && (
+                  <div className="risk-score-preview">
+                    <div className="rsp-block"><div className="rsp-label">Residual Score</div><div className="rsp-value">{residual.riskScore}</div></div>
+                    <div className="rsp-block"><div className="rsp-label">Residual Level</div>
+                      <div className="rsp-value">
+                        <span style={{ display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 14, fontWeight: 700,
+                          color: RISK_LEVEL_COLOR[residual.riskLevel], background: RISK_LEVEL_BG[residual.riskLevel] }}>
+                          {RISK_LEVEL_LABEL[residual.riskLevel]}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Paper source for THIS cycle — RMCQ-mode only */}
@@ -467,6 +475,27 @@ function ScoreField({ label, value, onChange }: {
           <button key={n} type="button"
             className={`score-pill ${value === n ? 'active' : ''}`}
             onClick={() => onChange(n)}>
+            {n}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ScoreFieldOptional({ label, value, onChange }: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="risk-field">
+      <label>{label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+      <div className="score-pills">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button"
+            className={`score-pill ${value === n ? 'active' : ''}`}
+            onClick={() => onChange(value === n ? 0 : n)}>
             {n}
           </button>
         ))}

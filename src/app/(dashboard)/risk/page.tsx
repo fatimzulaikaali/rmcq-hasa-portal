@@ -11,19 +11,19 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
-  RiskStatus, RiskLevel, RiskCategory, RiskRole,
+  RiskStatus, RiskLevel, RiskDomain, RiskRole,
 } from '@/lib/risk/types'
 import type { ActiveRole } from '@/lib/risk/activeRole'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
+  RISK_DOMAIN_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
 } from '@/lib/risk/scoring'
 import { exportRegisterXlsx, exportRegisterPdf } from '@/lib/risk/exports'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 
 type StatusFilter   = 'all' | RiskStatus
 type LevelFilter    = 'all' | RiskLevel
-type CategoryFilter = 'all' | RiskCategory
+type DomainFilter = 'all' | RiskDomain | 'unassigned'
 type DeptFilter     = 'all' | string
 
 /* Which statuses are "awaiting action" for each active role, and the prompt to show. */
@@ -51,7 +51,7 @@ export default function RiskListPage() {
   const [viewTouched, setViewTouched] = useState(false)
   const [statusF,   setStatusF]   = useState<StatusFilter>('all')
   const [levelF,    setLevelF]    = useState<LevelFilter>('all')
-  const [categoryF, setCategoryF] = useState<CategoryFilter>('all')
+  const [domainF, setDomainF] = useState<DomainFilter>('all')
   const [deptF,     setDeptF]     = useState<DeptFilter>('all')
 
   // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
@@ -192,19 +192,20 @@ export default function RiskListPage() {
   }, [attentionRows, viewTouched])
 
   const filtered = useMemo(() => viewRows.filter((r) => {
-    if (statusF   !== 'all' && r.risk.status        !== statusF)   return false
-    if (categoryF !== 'all' && r.risk.category      !== categoryF) return false
+    if (statusF !== 'all' && r.risk.status !== statusF) return false
+    if (domainF === 'unassigned' && r.risk.uitm_domain !== null) return false
+    if (domainF !== 'all' && domainF !== 'unassigned' && r.risk.uitm_domain !== domainF) return false
     if (deptF     !== 'all' && r.risk.dept_code     !== deptF)     return false
     if (levelF    !== 'all' && r.latest?.risk_level !== levelF)    return false
     return true
-  }), [viewRows, statusF, categoryF, deptF, levelF])
+  }), [viewRows, statusF, domainF, deptF, levelF])
 
   const activeFilters =
     (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) +
-    (categoryF !== 'all' ? 1 : 0) + (deptF !== 'all' ? 1 : 0)
+    (domainF !== 'all' ? 1 : 0) + (deptF !== 'all' ? 1 : 0)
 
   function resetFilters() {
-    setStatusF('all'); setLevelF('all'); setCategoryF('all'); setDeptF('all')
+    setStatusF('all'); setLevelF('all'); setDomainF('all'); setDeptF('all')
   }
 
   // Switching tabs clears the status filter (its valid options differ per tab).
@@ -325,10 +326,11 @@ export default function RiskListPage() {
                     <option key={l} value={l}>{RISK_LEVEL_LABEL[l]}</option>
                   ))}
                 </select>
-                <select value={categoryF} onChange={(e) => setCategoryF(e.target.value as CategoryFilter)}>
-                  <option value="all">All categories</option>
-                  {(Object.keys(RISK_CATEGORY_LABEL) as RiskCategory[]).map((c) => (
-                    <option key={c} value={c}>{c} — {RISK_CATEGORY_LABEL[c]}</option>
+                <select value={domainF} onChange={(e) => setDomainF(e.target.value as DomainFilter)}>
+                  <option value="all">All domains</option>
+                  <option value="unassigned">— Unassigned —</option>
+                  {(Object.keys(RISK_DOMAIN_LABEL) as RiskDomain[]).map((d) => (
+                    <option key={d} value={d}>{RISK_DOMAIN_LABEL[d]}</option>
                   ))}
                 </select>
                 <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
@@ -348,7 +350,7 @@ export default function RiskListPage() {
                   disabled={filtered.length === 0}
                   title="Download the current view as Excel — full column set"
                   onClick={() => exportRegisterXlsx(filtered,
-                    { view, status: statusF, level: levelF, category: categoryF, deptCode: deptF }, depts)}>
+                    { view, status: statusF, level: levelF, domain: domainF, deptCode: deptF }, depts)}>
                   📊 Excel
                 </button>
                 <button type="button" className="signout-btn"
@@ -356,7 +358,7 @@ export default function RiskListPage() {
                   disabled={filtered.length === 0}
                   title="Print or save the current view as PDF"
                   onClick={() => exportRegisterPdf(filtered,
-                    { view, status: statusF, level: levelF, category: categoryF, deptCode: deptF }, depts)}>
+                    { view, status: statusF, level: levelF, domain: domainF, deptCode: deptF }, depts)}>
                   🖨 PDF
                 </button>
               </div>
@@ -403,7 +405,7 @@ export default function RiskListPage() {
                         <tr>
                           <th>Risk ID</th>
                           <th>Department</th>
-                          <th>Category</th>
+                          <th>Domain</th>
                           <th>Description</th>
                           <th style={{ textAlign: 'center' }}>Level</th>
                           <th style={{ textAlign: 'right' }}>Score</th>
@@ -426,8 +428,9 @@ export default function RiskListPage() {
                               </td>
                               <td style={{ fontSize: 11 }}>{dept?.name_en ?? risk.dept_code}</td>
                               <td style={{ fontSize: 11 }}>
-                                <b>{risk.category}</b>
-                                <span style={{ color: 'var(--muted)' }}> — {RISK_CATEGORY_LABEL[risk.category]}</span>
+                                {risk.uitm_domain
+                                  ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b>
+                                  : <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>Unassigned</span>}
                               </td>
                               <td style={{ maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                                   title={risk.description}>

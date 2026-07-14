@@ -9,17 +9,19 @@ import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
-import { Risk, RiskReview, RiskDept, RiskCategory, RiskScope, RiskRole } from '@/lib/risk/types'
+import { Risk, RiskReview, RiskDept, RiskNature, TreatmentOption, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { resolveActiveRole } from '@/lib/risk/activeRole'
 import {
-  computeRiskScore,
+  computeSeverityScore,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL, RISK_STATUS_LABEL,
+  RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL, RISK_SCOPE_LABEL, RISK_STATUS_LABEL,
 } from '@/lib/risk/scoring'
 
 interface FormState {
-  category: RiskCategory | ''
+  context: string
+  risk_nature: RiskNature | ''
+  treatment_option: TreatmentOption | ''
   scope: RiskScope | ''
   description: string
   cause_description: string
@@ -30,22 +32,22 @@ interface FormState {
   implementation_period: string
   notes: string
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
+  severity: number
+  residual_likelihood: number
+  residual_severity: number
 }
 
 /* Human labels for the editable fields, used to describe an amendment in the
  * audit log (so it reads "updated risk description, controls" rather than the
  * old hard-coded "scoring updated"). */
 const FIELD_LABEL: Partial<Record<keyof FormState, string>> = {
-  category: 'category',
+  context: 'context',
+  risk_nature: 'nature',
+  treatment_option: 'treatment option',
   scope: 'scope',
   description: 'risk description',
   cause_description: 'cause',
-  impact_description: 'impact',
+  impact_description: 'consequence',
   existing_controls: 'existing controls',
   additional_controls: 'additional controls',
   action_owner_depts: 'action owner',
@@ -53,7 +55,7 @@ const FIELD_LABEL: Partial<Record<keyof FormState, string>> = {
   notes: 'notes',
 }
 const SCORE_KEYS: (keyof FormState)[] = [
-  'likelihood', 'impact_manusia', 'impact_reputasi', 'impact_kewangan', 'impact_operasi', 'impact_objektif',
+  'likelihood', 'severity', 'residual_likelihood', 'residual_severity',
 ]
 
 function sameVal(a: unknown, b: unknown): boolean {
@@ -93,12 +95,11 @@ export default function EditRiskPage() {
   const [orig, setOrig] = useState<FormState | null>(null)
 
   const [form, setForm] = useState<FormState>({
-    category: '', scope: '',
+    context: '', risk_nature: '', treatment_option: '', scope: '',
     description: '', cause_description: '', impact_description: '',
     existing_controls: '', additional_controls: '',
     action_owner_depts: [], implementation_period: '', notes: '',
-    likelihood: 0, impact_manusia: 0, impact_reputasi: 0,
-    impact_kewangan: 0, impact_operasi: 0, impact_objektif: 0,
+    likelihood: 0, severity: 0, residual_likelihood: 0, residual_severity: 0,
   })
 
   useEffect(() => { void load() }, [riskRowId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -153,7 +154,9 @@ export default function EditRiskPage() {
       setLatestCycle(latest?.cycle_number ?? 1)
 
       const initial: FormState = {
-        category: r.category,
+        context: r.context ?? '',
+        risk_nature: r.risk_nature ?? '',
+        treatment_option: r.treatment_option ?? '',
         scope: r.scope,
         description: r.description,
         cause_description: r.cause_description,
@@ -163,12 +166,10 @@ export default function EditRiskPage() {
         action_owner_depts: r.action_owner_depts ?? [],
         implementation_period: r.implementation_period ?? '',
         notes: r.notes ?? '',
-        likelihood:      latest?.likelihood ?? 0,
-        impact_manusia:  latest?.impact_manusia ?? 0,
-        impact_reputasi: latest?.impact_reputasi ?? 0,
-        impact_kewangan: latest?.impact_kewangan ?? 0,
-        impact_operasi:  latest?.impact_operasi ?? 0,
-        impact_objektif: latest?.impact_objektif ?? 0,
+        likelihood:          latest?.likelihood ?? 0,
+        severity:            latest?.severity ?? 0,
+        residual_likelihood: latest?.residual_likelihood ?? 0,
+        residual_severity:   latest?.residual_severity ?? 0,
       }
       setForm(initial)
       setOrig(initial)
@@ -181,22 +182,23 @@ export default function EditRiskPage() {
 
   async function signOut() { await supabase.auth.signOut(); router.push('/login') }
 
-  const scoreInputs = form.likelihood > 0 &&
-    form.impact_manusia > 0 && form.impact_reputasi > 0 && form.impact_kewangan > 0 &&
-    form.impact_operasi > 0 && form.impact_objektif > 0
+  const scoreInputs = form.likelihood > 0 && form.severity > 0
   const computed = scoreInputs
-    ? computeRiskScore(form.likelihood, [
-        form.impact_manusia, form.impact_reputasi, form.impact_kewangan,
-        form.impact_operasi, form.impact_objektif])
+    ? computeSeverityScore(form.likelihood, form.severity)
+    : null
+  const hasResidual = form.residual_likelihood > 0 && form.residual_severity > 0
+  const residual = hasResidual
+    ? computeSeverityScore(form.residual_likelihood, form.residual_severity)
     : null
 
   const errors: string[] = []
-  if (!form.category) errors.push('Category is required')
+  if (!form.context.trim()) errors.push('Context is required')
+  if (!form.risk_nature) errors.push('Risk nature is required')
   if (!form.scope) errors.push('Scope is required')
   if (!form.description.trim()) errors.push('Risk description is required')
   if (!form.cause_description.trim()) errors.push('Cause is required')
-  if (!form.impact_description.trim()) errors.push('Impact is required')
-  if (!scoreInputs) errors.push('All scoring inputs must be 1-5')
+  if (!form.impact_description.trim()) errors.push('Consequence is required')
+  if (!scoreInputs) errors.push('Likelihood and Severity must both be 1-5')
   const canSave = !submitting && errors.length === 0 && risk !== null && riskUserId !== null
 
   async function handleSave() {
@@ -209,7 +211,9 @@ export default function EditRiskPage() {
       const scoringChanged = !orig || SCORE_KEYS.some((k) => form[k] !== orig[k])
 
       const { error: upErr } = await supabase.from('risks').update({
-        category: form.category,
+        context: form.context.trim(),
+        risk_nature: form.risk_nature || null,
+        treatment_option: form.treatment_option || null,
         scope: form.scope,
         description: form.description.trim(),
         cause_description: form.cause_description.trim(),
@@ -228,14 +232,13 @@ export default function EditRiskPage() {
       if (latestReviewId && scoringChanged) {
         const { error: rvErr } = await supabase.from('risk_reviews').update({
           likelihood: form.likelihood,
-          impact_manusia: form.impact_manusia,
-          impact_reputasi: form.impact_reputasi,
-          impact_kewangan: form.impact_kewangan,
-          impact_operasi: form.impact_operasi,
-          impact_objektif: form.impact_objektif,
-          avg_impact: computed.avgImpact,
+          severity: form.severity,
           risk_score: computed.riskScore,
           risk_level: computed.riskLevel,
+          residual_likelihood: hasResidual ? form.residual_likelihood : null,
+          residual_severity: hasResidual ? form.residual_severity : null,
+          residual_score: residual ? residual.riskScore : null,
+          residual_level: residual ? residual.riskLevel : null,
           reviewed_by: riskUserId,
           review_date: new Date().toISOString().slice(0, 10),
         }).eq('id', latestReviewId)
@@ -317,13 +320,19 @@ export default function EditRiskPage() {
               <div className="panel">
                 <div className="pf"><div><div className="pt">Risk Details</div><div className="psub">Department: {dept?.name_en ?? risk.dept_code} · risk ID stays {risk.risk_id}</div></div></div>
                 <div className="risk-form-grid">
-                  <Field label="Category" required>
-                    <select value={form.category} onChange={(e) => set('category', e.target.value as RiskCategory)}>
-                      <option value="">— pick a category —</option>
-                      {(Object.keys(RISK_CATEGORY_LABEL) as RiskCategory[]).map((c) => (
-                        <option key={c} value={c}>{c} — {RISK_CATEGORY_LABEL[c]}</option>
+                  <Field label="Context" required full hint="Free-text context as the department sees it. The Risk Coordinator maps this to a UiTM domain later.">
+                    <textarea rows={2} value={form.context} onChange={(e) => set('context', e.target.value)}
+                      placeholder="e.g. Patient safety during medication dispensing" />
+                  </Field>
+                  <Field label="Risk nature" required>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      {(Object.keys(RISK_NATURE_LABEL) as RiskNature[]).map((n) => (
+                        <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                          <input type="radio" name="risk_nature" value={n} checked={form.risk_nature === n} onChange={() => set('risk_nature', n)} />
+                          {RISK_NATURE_LABEL[n]}
+                        </label>
                       ))}
-                    </select>
+                    </div>
                   </Field>
                   <Field label="Scope" required>
                     <div style={{ display: 'flex', gap: 12 }}>
@@ -341,11 +350,19 @@ export default function EditRiskPage() {
                   <Field label="Cause" required full>
                     <textarea rows={3} value={form.cause_description} onChange={(e) => set('cause_description', e.target.value)} />
                   </Field>
-                  <Field label="Impact" required full>
+                  <Field label="Consequence" required full>
                     <textarea rows={3} value={form.impact_description} onChange={(e) => set('impact_description', e.target.value)} />
                   </Field>
                   <Field label="Existing controls" full>
                     <textarea rows={2} value={form.existing_controls} onChange={(e) => set('existing_controls', e.target.value)} />
+                  </Field>
+                  <Field label="Treatment option" hint="Avoid / Transfer / Control / Accept — the chosen response to this risk.">
+                    <select value={form.treatment_option} onChange={(e) => set('treatment_option', e.target.value as TreatmentOption)}>
+                      <option value="">— pick a treatment —</option>
+                      {(Object.keys(TREATMENT_OPTION_LABEL) as TreatmentOption[]).map((t) => (
+                        <option key={t} value={t}>{TREATMENT_OPTION_LABEL[t]}</option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Additional controls proposed" full>
                     <textarea rows={2} value={form.additional_controls} onChange={(e) => set('additional_controls', e.target.value)} />
@@ -365,20 +382,17 @@ export default function EditRiskPage() {
               </div>
 
               <div className="panel">
-                <div className="pf"><div><div className="pt">Risk Assessment (Cycle {latestCycle})</div><div className="psub">Re-score if needed. This overwrites the current cycle&apos;s scoring.</div></div></div>
+                <div className="pf"><div><div className="pt">Risk Assessment (Cycle {latestCycle})</div><div className="psub">Re-score if needed. Risk Rating = Likelihood × Severity. This overwrites the current cycle&apos;s scoring.</div></div></div>
                 <div className="risk-form-grid">
-                  <ScoreField label="Likelihood (Kebarangkalian)" value={form.likelihood} onChange={(v) => set('likelihood', v)} />
-                  <ScoreField label="Impact: Manusia" value={form.impact_manusia} onChange={(v) => set('impact_manusia', v)} />
-                  <ScoreField label="Impact: Reputasi" value={form.impact_reputasi} onChange={(v) => set('impact_reputasi', v)} />
-                  <ScoreField label="Impact: Kewangan" value={form.impact_kewangan} onChange={(v) => set('impact_kewangan', v)} />
-                  <ScoreField label="Impact: Operasi" value={form.impact_operasi} onChange={(v) => set('impact_operasi', v)} />
-                  <ScoreField label="Impact: Objektif" value={form.impact_objektif} onChange={(v) => set('impact_objektif', v)} />
+                  <ScoreField label="Likelihood" value={form.likelihood} onChange={(v) => set('likelihood', v)} />
+                  <ScoreField label="Severity" value={form.severity} onChange={(v) => set('severity', v)} />
                 </div>
                 <div className="risk-score-preview">
                   {computed ? (
                     <>
-                      <div className="rsp-block"><div className="rsp-label">Avg Impact</div><div className="rsp-value">{(Math.round(computed.avgImpact * 10) / 10).toFixed(1)}</div></div>
-                      <div className="rsp-block"><div className="rsp-label">Risk Score</div><div className="rsp-value">{(Math.round(computed.riskScore * 10) / 10).toFixed(1)}</div></div>
+                      <div className="rsp-block"><div className="rsp-label">Likelihood</div><div className="rsp-value">{form.likelihood}</div></div>
+                      <div className="rsp-block"><div className="rsp-label">Severity</div><div className="rsp-value">{form.severity}</div></div>
+                      <div className="rsp-block"><div className="rsp-label">Risk Score</div><div className="rsp-value">{computed.riskScore}</div></div>
                       <div className="rsp-block"><div className="rsp-label">Risk Level</div>
                         <div className="rsp-value">
                           <span style={{ display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 14, fontWeight: 700,
@@ -387,8 +401,28 @@ export default function EditRiskPage() {
                         </div>
                       </div>
                     </>
-                  ) : <div style={{ color: 'var(--muted)', fontSize: 13, fontStyle: 'italic' }}>Pick all 6 scoring inputs.</div>}
+                  ) : <div style={{ color: 'var(--muted)', fontSize: 13, fontStyle: 'italic' }}>Pick both Likelihood and Severity.</div>}
                 </div>
+              </div>
+
+              <div className="panel">
+                <div className="pf"><div><div className="pt">Residual Risk (optional)</div><div className="psub">Expected rating after the proposed controls are in place. Leave blank if not yet assessed.</div></div></div>
+                <div className="risk-form-grid">
+                  <ScoreFieldOptional label="Residual Likelihood" value={form.residual_likelihood} onChange={(v) => set('residual_likelihood', v)} />
+                  <ScoreFieldOptional label="Residual Severity" value={form.residual_severity} onChange={(v) => set('residual_severity', v)} />
+                </div>
+                {residual && (
+                  <div className="risk-score-preview">
+                    <div className="rsp-block"><div className="rsp-label">Residual Score</div><div className="rsp-value">{residual.riskScore}</div></div>
+                    <div className="rsp-block"><div className="rsp-label">Residual Level</div>
+                      <div className="rsp-value">
+                        <span style={{ display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 14, fontWeight: 700,
+                          color: RISK_LEVEL_COLOR[residual.riskLevel], background: RISK_LEVEL_BG[residual.riskLevel] }}>
+                          {RISK_LEVEL_LABEL[residual.riskLevel]}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="panel">
@@ -439,6 +473,20 @@ function ScoreField({ label, value, onChange }: { label: string; value: number; 
       <div className="score-pills">
         {[1, 2, 3, 4, 5].map((n) => (
           <button key={n} type="button" className={`score-pill ${value === n ? 'active' : ''}`} onClick={() => onChange(n)}>{n}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ScoreFieldOptional({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="risk-field">
+      <label>{label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+      <div className="score-pills">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" className={`score-pill ${value === n ? 'active' : ''}`}
+            onClick={() => onChange(value === n ? 0 : n)}>{n}</button>
         ))}
       </div>
     </div>

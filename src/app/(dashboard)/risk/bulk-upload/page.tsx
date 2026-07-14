@@ -23,13 +23,13 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
-import { RiskDept, RiskCategory, RiskScope } from '@/lib/risk/types'
+import { RiskDept, RiskNature, TreatmentOption, RiskScope } from '@/lib/risk/types'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
 import {
-  computeRiskScore, formatRiskId,
+  computeSeverityScore, formatRiskId,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL,
+  RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
 
 type Triage = 'valid' | 'out_of_scope' | 'incomplete'
@@ -37,7 +37,9 @@ type Triage = 'valid' | 'out_of_scope' | 'incomplete'
 interface DraftRow {
   triage: Triage
   dept_code: string
-  category: RiskCategory | ''
+  context: string
+  risk_nature: RiskNature | ''
+  treatment_option: TreatmentOption | ''
   scope: RiskScope | ''
   description: string
   cause: string
@@ -47,11 +49,9 @@ interface DraftRow {
   action_owner_depts: string[]
   implementation_period: string
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
+  severity: number
+  residual_likelihood: number
+  residual_severity: number
   out_of_scope_reason: string
   clarification_note: string
   source_note: string
@@ -62,18 +62,18 @@ interface ParsedFromApi {
   description?: string
   cause?: string
   impact?: string
-  category?: string
+  context?: string
+  risk_nature?: string
+  treatment_option?: string
   scope?: string
   existing_controls?: string
   additional_controls?: string
   action_owner_dept_names?: string[]
   implementation_period?: string
   likelihood?: number | null
-  impact_manusia?: number | null
-  impact_reputasi?: number | null
-  impact_kewangan?: number | null
-  impact_operasi?: number | null
-  impact_objektif?: number | null
+  severity?: number | null
+  residual_likelihood?: number | null
+  residual_severity?: number | null
   _source_note?: string
 }
 
@@ -85,7 +85,8 @@ interface PaperSource {
   reference: string
 }
 
-const VALID_CATEGORIES: RiskCategory[] = ['OPS', 'KEW', 'REP', 'PER', 'STR', 'PRJ']
+const VALID_NATURES: RiskNature[] = ['ACTUAL', 'POTENTIAL']
+const VALID_TREATMENTS: TreatmentOption[] = ['AVOID', 'TRANSFER', 'CONTROL', 'ACCEPT']
 const VALID_SCOPES: RiskScope[] = ['INSTITUSI', 'UNIT']
 
 function blankSource(): PaperSource {
@@ -93,7 +94,8 @@ function blankSource(): PaperSource {
 }
 
 function draftFromApi(p: ParsedFromApi): DraftRow {
-  const cat = VALID_CATEGORIES.includes((p.category ?? '') as RiskCategory) ? (p.category as RiskCategory) : ''
+  const nat = VALID_NATURES.includes((p.risk_nature ?? '') as RiskNature) ? (p.risk_nature as RiskNature) : ''
+  const trt = VALID_TREATMENTS.includes((p.treatment_option ?? '') as TreatmentOption) ? (p.treatment_option as TreatmentOption) : ''
   const sc = VALID_SCOPES.includes((p.scope ?? '') as RiskScope) ? (p.scope as RiskScope) : ''
   const clamp = (n: number | null | undefined): number => {
     if (typeof n !== 'number' || !Number.isFinite(n)) return 0
@@ -102,7 +104,9 @@ function draftFromApi(p: ParsedFromApi): DraftRow {
   return {
     triage: 'valid',
     dept_code: '',
-    category: cat,
+    context: p.context ?? '',
+    risk_nature: nat,
+    treatment_option: trt,
     scope: sc,
     description: p.description ?? '',
     cause: p.cause ?? '',
@@ -112,11 +116,9 @@ function draftFromApi(p: ParsedFromApi): DraftRow {
     action_owner_depts: [],
     implementation_period: p.implementation_period ?? '',
     likelihood: clamp(p.likelihood),
-    impact_manusia: clamp(p.impact_manusia),
-    impact_reputasi: clamp(p.impact_reputasi),
-    impact_kewangan: clamp(p.impact_kewangan),
-    impact_operasi: clamp(p.impact_operasi),
-    impact_objektif: clamp(p.impact_objektif),
+    severity: clamp(p.severity),
+    residual_likelihood: clamp(p.residual_likelihood),
+    residual_severity: clamp(p.residual_severity),
     out_of_scope_reason: '',
     clarification_note: '',
     source_note: p._source_note ?? '',
@@ -239,14 +241,14 @@ export default function BulkUploadPage() {
   function rowErrors(d: DraftRow): string[] {
     const errs: string[] = []
     if (!d.dept_code) errs.push('dept')
-    if (!d.category) errs.push('category')
+    if (!d.context.trim()) errs.push('context')
     if (!d.scope) errs.push('scope')
     if (!d.description.trim()) errs.push('description')
     if (d.triage === 'valid') {
+      if (!d.risk_nature) errs.push('nature')
       if (!d.cause.trim()) errs.push('cause')
-      if (!d.impact.trim()) errs.push('impact')
-      const ss = [d.likelihood, d.impact_manusia, d.impact_reputasi, d.impact_kewangan, d.impact_operasi, d.impact_objektif]
-      if (ss.some((v) => v < 1 || v > 5)) errs.push('scoring')
+      if (!d.impact.trim()) errs.push('consequence')
+      if (d.likelihood < 1 || d.likelihood > 5 || d.severity < 1 || d.severity > 5) errs.push('scoring')
     }
     if (d.triage === 'out_of_scope' && !d.out_of_scope_reason.trim()) errs.push('reason')
     if (d.triage === 'incomplete' && !d.clarification_note.trim()) errs.push('clarification')
@@ -312,7 +314,9 @@ export default function BulkUploadPage() {
           risk_id,
           dept_code: d.dept_code,
           created_by: riskUserId,
-          category: d.category,
+          context: d.context.trim(),
+          risk_nature: d.risk_nature || null,
+          treatment_option: d.treatment_option || null,
           scope: d.scope,
           description: d.description.trim(),
           cause_description: d.cause.trim() || '(awaiting clarification)',
@@ -339,24 +343,24 @@ export default function BulkUploadPage() {
         const newRiskRowId = insertedRisk.id as number
 
         if (d.triage === 'valid') {
-          const computed = computeRiskScore(d.likelihood, [
-            d.impact_manusia, d.impact_reputasi, d.impact_kewangan,
-            d.impact_operasi, d.impact_objektif,
-          ])
+          const computed = computeSeverityScore(d.likelihood, d.severity)
+          const hasResidual = d.residual_likelihood > 0 && d.residual_severity > 0
+          const residual = hasResidual
+            ? computeSeverityScore(d.residual_likelihood, d.residual_severity)
+            : null
           const { error: reviewErr } = await supabase.from('risk_reviews').insert({
             risk_id: newRiskRowId,
             cycle_number: 1,
             reviewed_by: riskUserId,
             review_date: new Date().toISOString().slice(0, 10),
             likelihood: d.likelihood,
-            impact_manusia: d.impact_manusia,
-            impact_reputasi: d.impact_reputasi,
-            impact_kewangan: d.impact_kewangan,
-            impact_operasi: d.impact_operasi,
-            impact_objektif: d.impact_objektif,
-            avg_impact: computed.avgImpact,
+            severity: d.severity,
             risk_score: computed.riskScore,
             risk_level: computed.riskLevel,
+            residual_likelihood: hasResidual ? d.residual_likelihood : null,
+            residual_severity: hasResidual ? d.residual_severity : null,
+            residual_score: residual ? residual.riskScore : null,
+            residual_level: residual ? residual.riskLevel : null,
             paper_reviewed_by: paper.submitted_by.trim() || null,
             paper_review_date: paper.submission_date || null,
             paper_endorsed_by: paper.endorsed_by.trim() || null,
@@ -483,7 +487,7 @@ export default function BulkUploadPage() {
               <div className="panel">
                 <div className="pf"><div>
                   <div className="pt">2. Upload &amp; parse</div>
-                  <div className="psub">Excel (.xlsx) — the parser matches columns by header name (English or Malay). Headers it recognises: <i>Description / Huraian Risiko · Cause / Punca · Impact / Kesan · Category · Scope · Existing/Additional Controls · Action Owner · Implementation Period · Likelihood · Manusia · Reputasi · Kewangan · Operasi · Objektif</i>.</div>
+                  <div className="psub">Excel (.xlsx) — the parser matches columns by header name (English or Malay). Headers it recognises: <i>Context / Konteks · Description / Huraian Risiko · Cause / Punca · Consequence / Kesan · Nature / Actual-Potential · Scope · Existing/Additional Controls · Treatment / Rawatan · Action Owner · Implementation Period · Likelihood / Kebarangkalian · Severity / Keterukan · Residual Likelihood · Residual Severity</i>.</div>
                 </div></div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <input type="file" accept=".xlsx,.xls"
@@ -630,10 +634,8 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
   onRemove: () => void
 }) {
   const triageAccent = d.triage === 'valid' ? '#1D4ED8' : d.triage === 'out_of_scope' ? '#B91C1C' : '#92400E'
-  const computed = (d.likelihood > 0 && d.impact_manusia > 0 && d.impact_reputasi > 0 &&
-    d.impact_kewangan > 0 && d.impact_operasi > 0 && d.impact_objektif > 0)
-    ? computeRiskScore(d.likelihood,
-        [d.impact_manusia, d.impact_reputasi, d.impact_kewangan, d.impact_operasi, d.impact_objektif])
+  const computed = (d.likelihood > 0 && d.severity > 0)
+    ? computeSeverityScore(d.likelihood, d.severity)
     : null
 
   return (
@@ -656,10 +658,10 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
           <option value="">— department —</option>
           {sortDeptsAlpha(depts).map((dx) => <option key={dx.code} value={dx.code}>{dx.name_en}</option>)}
         </select>
-        <select value={d.category} onChange={(e) => onChange({ category: e.target.value as RiskCategory | '' })}
+        <select value={d.risk_nature} onChange={(e) => onChange({ risk_nature: e.target.value as RiskNature | '' })}
           style={{ fontSize: 11, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4 }}>
-          <option value="">— category —</option>
-          {VALID_CATEGORIES.map((c) => <option key={c} value={c}>{c} · {RISK_CATEGORY_LABEL[c]}</option>)}
+          <option value="">— nature —</option>
+          {VALID_NATURES.map((n) => <option key={n} value={n}>{RISK_NATURE_LABEL[n]}</option>)}
         </select>
         <select value={d.scope} onChange={(e) => onChange({ scope: e.target.value as RiskScope | '' })}
           style={{ fontSize: 11, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4 }}>
@@ -671,7 +673,7 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
             display: 'inline-block', padding: '2px 8px', borderRadius: 4,
             fontSize: 10, fontWeight: 700,
             color: RISK_LEVEL_COLOR[computed.riskLevel], background: RISK_LEVEL_BG[computed.riskLevel],
-          }}>{RISK_LEVEL_LABEL[computed.riskLevel]} · {(Math.round(computed.riskScore * 10) / 10).toFixed(1)}</span>
+          }}>{RISK_LEVEL_LABEL[computed.riskLevel]} · {computed.riskScore}</span>
         )}
         <div style={{ flex: 1 }} />
         <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '3px 8px' }}
@@ -680,6 +682,17 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
         </button>
         <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '3px 8px', color: 'var(--red)', borderColor: 'var(--red)' }}
           onClick={onRemove}>Remove</button>
+      </div>
+
+      {/* Context (always visible, required) */}
+      <div style={{ marginTop: 8 }}>
+        <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>
+          Context<span style={{ color: 'var(--red)' }}> *</span>
+        </label>
+        <input type="text" value={d.context}
+          onChange={(e) => onChange({ context: e.target.value })}
+          placeholder="Free-text context (Coordinator maps to a UiTM domain later)"
+          style={{ width: '100%', padding: 6, border: '1px solid var(--border)', borderRadius: 4, fontSize: 12 }} />
       </div>
 
       {/* Description (always visible) */}
@@ -700,19 +713,25 @@ function DraftCard({ idx, d, depts, errors, onChange, onRemove }: {
       {/* Expanded edit: cause/impact, controls, scoring */}
       {d.expanded && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Two label="Cause" valLabel="Impact"
+          <Two label="Cause" valLabel="Consequence"
             v1={d.cause} v2={d.impact}
             on1={(v) => onChange({ cause: v })} on2={(v) => onChange({ impact: v })} />
           <Two label="Existing controls" valLabel="Additional controls"
             v1={d.existing_controls} v2={d.additional_controls}
             on1={(v) => onChange({ existing_controls: v })} on2={(v) => onChange({ additional_controls: v })} />
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <ScoreInline label="L" value={d.likelihood} onChange={(v) => onChange({ likelihood: v })} />
-            <ScoreInline label="Manusia" value={d.impact_manusia} onChange={(v) => onChange({ impact_manusia: v })} />
-            <ScoreInline label="Reputasi" value={d.impact_reputasi} onChange={(v) => onChange({ impact_reputasi: v })} />
-            <ScoreInline label="Kewangan" value={d.impact_kewangan} onChange={(v) => onChange({ impact_kewangan: v })} />
-            <ScoreInline label="Operasi" value={d.impact_operasi} onChange={(v) => onChange({ impact_operasi: v })} />
-            <ScoreInline label="Objektif" value={d.impact_objektif} onChange={(v) => onChange({ impact_objektif: v })} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <ScoreInline label="Likelihood" value={d.likelihood} onChange={(v) => onChange({ likelihood: v })} />
+            <ScoreInline label="Severity" value={d.severity} onChange={(v) => onChange({ severity: v })} />
+            <ScoreInline label="Residual L" value={d.residual_likelihood} onChange={(v) => onChange({ residual_likelihood: v })} />
+            <ScoreInline label="Residual S" value={d.residual_severity} onChange={(v) => onChange({ residual_severity: v })} />
+            <div style={{ minWidth: 140 }}>
+              <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Treatment</label>
+              <select value={d.treatment_option} onChange={(e) => onChange({ treatment_option: e.target.value as TreatmentOption | '' })}
+                style={{ width: '100%', fontSize: 11, padding: '4px 6px', border: '1px solid var(--border)', borderRadius: 4 }}>
+                <option value="">— treatment —</option>
+                {VALID_TREATMENTS.map((t) => <option key={t} value={t}>{TREATMENT_OPTION_LABEL[t]}</option>)}
+              </select>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>

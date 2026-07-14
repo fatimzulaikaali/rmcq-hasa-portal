@@ -17,7 +17,8 @@ import {
 } from '@/lib/risk/types'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_CATEGORY_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
+  RISK_DOMAIN_LABEL, RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL,
+  RISK_STATUS_LABEL, RISK_STATUS_BADGE,
   RISK_SCOPE_LABEL, RISK_ROLE_LABEL,
   COMMITTEE_OUTCOME_LABEL, ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
 } from '@/lib/risk/scoring'
@@ -441,7 +442,7 @@ export default function RiskDetailPage() {
                   <div className="risk-hero-id">{risk.risk_id}</div>
                   <div className="risk-hero-meta">
                     <span>{dept?.name_en ?? risk.dept_code}</span>
-                    <span>· <b>{risk.category}</b> {RISK_CATEGORY_LABEL[risk.category]}</span>
+                    <span>· {risk.uitm_domain ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b> : <i style={{ color: 'var(--muted)' }}>Domain unassigned</i>}</span>
                     <span>· {RISK_SCOPE_LABEL[risk.scope]}</span>
                   </div>
                   <div className="risk-hero-chips">
@@ -760,10 +761,20 @@ export default function RiskDetailPage() {
                 <div className="risk-detail-grid">
                   <DefLine label="Risk ID" mono>{risk.risk_id}</DefLine>
                   <DefLine label="Department">{dept ? `${dept.name_en}` : risk.dept_code} <span style={{ color: 'var(--muted)' }}>({risk.dept_code})</span></DefLine>
-                  <DefLine label="Category">
-                    <b>{risk.category}</b> <span style={{ color: 'var(--muted)' }}>— {RISK_CATEGORY_LABEL[risk.category]}</span>
+                  <DefLine label="UiTM Domain">
+                    {risk.uitm_domain
+                      ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b>
+                      : <em style={{ color: 'var(--muted)' }}>Unassigned</em>}
+                  </DefLine>
+                  <DefLine label="Nature">
+                    {risk.risk_nature
+                      ? RISK_NATURE_LABEL[risk.risk_nature]
+                      : <em style={{ color: 'var(--muted)' }}>—</em>}
                   </DefLine>
                   <DefLine label="Scope">{RISK_SCOPE_LABEL[risk.scope]}</DefLine>
+                  <DefLine label="Context" full>
+                    {risk.context || <em style={{ color: 'var(--muted)' }}>—</em>}
+                  </DefLine>
                   <DefLine label="Risk owner">{dept?.name_en ?? risk.dept_code}</DefLine>
                   <DefLine label="Created by">{nameOf(risk.created_by)}</DefLine>
                   <DefLine label="Date opened">{fmtDate(risk.date_opened)}</DefLine>
@@ -799,7 +810,7 @@ export default function RiskDetailPage() {
                 <div className="pf"><div><div className="pt">📝 2. Risk Description</div></div></div>
                 <DefBlock label="Risk description">{risk.description}</DefBlock>
                 <DefBlock label="Cause">{risk.cause_description}</DefBlock>
-                <DefBlock label="Impact">{risk.impact_description}</DefBlock>
+                <DefBlock label="Consequence">{risk.impact_description}</DefBlock>
               </div>
 
               {/* Section 3 — Controls */}
@@ -808,6 +819,11 @@ export default function RiskDetailPage() {
                 <DefBlock label="Existing controls">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <DefBlock label="Additional controls proposed">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
                 <div className="risk-detail-grid">
+                  <DefLine label="Treatment option">
+                    {risk.treatment_option
+                      ? TREATMENT_OPTION_LABEL[risk.treatment_option]
+                      : <em style={{ color: 'var(--muted)' }}>—</em>}
+                  </DefLine>
                   <DefLine label="Action owner">
                     {(risk.action_owner_depts && risk.action_owner_depts.length)
                       ? risk.action_owner_depts.map((c) => actionDeptNames.get(c) ?? c).join(', ')
@@ -831,8 +847,8 @@ export default function RiskDetailPage() {
                       <div className="rsp-value">{latest.likelihood}</div>
                     </div>
                     <div className="rsp-block">
-                      <div className="rsp-label">Avg Impact</div>
-                      <div className="rsp-value">{(Math.round(latest.avg_impact * 10) / 10).toFixed(1)}</div>
+                      <div className="rsp-label">Severity</div>
+                      <div className="rsp-value">{latest.severity ?? (latest.avg_impact != null ? (Math.round(latest.avg_impact * 10) / 10).toFixed(1) : '—')}</div>
                     </div>
                     <div className="rsp-block">
                       <div className="rsp-label">Risk Score</div>
@@ -853,16 +869,17 @@ export default function RiskDetailPage() {
                   <table className="risk-table" style={{ marginTop: 10 }}>
                     <thead>
                       <tr>
-                        <th>Manusia</th><th>Reputasi</th><th>Kewangan</th><th>Operasi</th><th>Objektif</th>
+                        <th>Likelihood</th><th>Severity</th>
+                        <th>Residual L</th><th>Residual S</th><th>Residual Score</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.impact_manusia}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.impact_reputasi}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.impact_kewangan}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.impact_operasi}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.impact_objektif}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.likelihood}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.severity ?? (latest.avg_impact != null ? (Math.round(latest.avg_impact * 10) / 10).toFixed(1) : '—')}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_likelihood ?? '—'}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_severity ?? '—'}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_score != null ? (Math.round(latest.residual_score * 10) / 10).toFixed(1) : '—'}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -882,12 +899,11 @@ export default function RiskDetailPage() {
                         <tr>
                           <th>Cycle</th><th>Date</th><th>Reviewer</th>
                           <th style={{ textAlign: 'center' }}>L</th>
-                          <th style={{ textAlign: 'center' }}>M</th>
-                          <th style={{ textAlign: 'center' }}>R</th>
-                          <th style={{ textAlign: 'center' }}>K</th>
-                          <th style={{ textAlign: 'center' }}>O</th>
-                          <th style={{ textAlign: 'center' }}>Obj</th>
+                          <th style={{ textAlign: 'center' }}>S</th>
                           <th style={{ textAlign: 'right' }}>Score</th>
+                          <th style={{ textAlign: 'center' }}>Res L</th>
+                          <th style={{ textAlign: 'center' }}>Res S</th>
+                          <th style={{ textAlign: 'right' }}>Res Score</th>
                           <th style={{ textAlign: 'center' }}>Level</th>
                         </tr>
                       </thead>
@@ -898,12 +914,11 @@ export default function RiskDetailPage() {
                             <td>{fmtDate(rv.review_date)}</td>
                             <td>{nameOf(rv.reviewed_by)}</td>
                             <td style={{ textAlign: 'center' }}>{rv.likelihood}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.impact_manusia}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.impact_reputasi}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.impact_kewangan}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.impact_operasi}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.impact_objektif}</td>
+                            <td style={{ textAlign: 'center' }}>{rv.severity ?? (rv.avg_impact != null ? (Math.round(rv.avg_impact * 10) / 10).toFixed(1) : '—')}</td>
                             <td style={{ textAlign: 'right', fontWeight: 700 }}>{(Math.round(rv.risk_score * 10) / 10).toFixed(1)}</td>
+                            <td style={{ textAlign: 'center' }}>{rv.residual_likelihood ?? '—'}</td>
+                            <td style={{ textAlign: 'center' }}>{rv.residual_severity ?? '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{rv.residual_score != null ? (Math.round(rv.residual_score * 10) / 10).toFixed(1) : '—'}</td>
                             <td style={{ textAlign: 'center' }}>
                               <span style={{
                                 display: 'inline-block', padding: '2px 8px', borderRadius: 4,

@@ -1,7 +1,14 @@
 /* Risk Management module types — mirror the Supabase schema */
 
 export type RiskRole       = 'RLO' | 'HOD' | 'RC' | 'ROC_MEMBER' | 'RTC_MEMBER' | 'DIRECTOR' | 'ADMIN'
-export type RiskCategory   = 'OPS' | 'KEW' | 'REP' | 'PER' | 'STR' | 'PRJ'
+/* ERMS: the 12 UiTM risk domains — assigned by the Risk Coordinator for
+ * presentation / UiTM submission. Departments enter open `context` instead. */
+export type RiskDomain     =
+  | 'STRATEGIC' | 'OPERATIONAL' | 'FINANCIAL' | 'LEGAL_COMPLIANCE' | 'REPUTATIONAL'
+  | 'CLINICAL' | 'HEALTH_SAFETY' | 'ENVIRONMENTAL' | 'SECURITY_IT' | 'HR'
+  | 'PROJECT' | 'SUPPLY_CHAIN'
+export type RiskNature     = 'ACTUAL' | 'POTENTIAL'
+export type TreatmentOption = 'AVOID' | 'TRANSFER' | 'CONTROL' | 'ACCEPT'
 export type RiskScope      = 'INSTITUSI' | 'UNIT'
 export type RiskStatus     = 'DRAFT' | 'PENDING_HOD' | 'PENDING_RC' | 'TABLED_RTC' | 'TABLED_ROC' | 'ACTIVE' | 'MONITORING' | 'REJECTED' | 'RETURNED' | 'OUT_OF_SCOPE' | 'PENDING_CLOSURE' | 'CLOSED'
 export type RiskLevel      = 'RENDAH' | 'SEDERHANA' | 'TINGGI' | 'EKSTREM'
@@ -46,11 +53,15 @@ export interface Risk {
   risk_id: string
   dept_code: string
   created_by: number
-  category: RiskCategory
+  /* ERMS register (Form 0044) fields */
+  context: string                        // open text — department's own framing (required)
+  uitm_domain: RiskDomain | null         // Coordinator-assigned, for UiTM submission
+  risk_nature: RiskNature | null         // Actual vs Potential
+  treatment_option: TreatmentOption | null
   scope: RiskScope
   description: string
   cause_description: string
-  impact_description: string
+  impact_description: string             // "Consequence of Risk" on Form 0044
   existing_controls: string | null
   additional_controls: string | null
   control_classification: string | null
@@ -90,14 +101,22 @@ export interface RiskReview {
   reviewed_by: number
   review_date: string
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
-  avg_impact: number
+  /* ERMS single severity (1-5) — the current model. */
+  severity: number | null
+  /* Legacy 5-impact-average fields — nullable; kept for pre-revamp rows. */
+  impact_manusia: number | null
+  impact_reputasi: number | null
+  impact_kewangan: number | null
+  impact_operasi: number | null
+  impact_objektif: number | null
+  avg_impact: number | null
   risk_score: number
   risk_level: RiskLevel
+  /* Residual risk (re-scored after treatment) */
+  residual_likelihood: number | null
+  residual_severity: number | null
+  residual_score: number | null
+  residual_level: RiskLevel | null
   treatment_status: TreatmentStatus | null
   treatment_update: string | null
   endorsed_by: number | null
@@ -175,12 +194,13 @@ export interface RiskMeetingAttendee {
 
 export interface PreMeetingScoring {
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
-  avg_impact: number
+  severity?: number | null
+  impact_manusia?: number | null
+  impact_reputasi?: number | null
+  impact_kewangan?: number | null
+  impact_operasi?: number | null
+  impact_objektif?: number | null
+  avg_impact?: number | null
   risk_score: number
   risk_level: RiskLevel
   cycle_number: number

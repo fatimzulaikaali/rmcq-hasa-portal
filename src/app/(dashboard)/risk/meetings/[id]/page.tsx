@@ -15,11 +15,11 @@ import type {
   PreMeetingScoring,
 } from '@/lib/risk/types'
 import {
-  computeRiskScore, outcomeToStatus, allowedOutcomes,
+  computeSeverityScore, outcomeToStatus, allowedOutcomes,
   COMMITTEE_OUTCOME_LABEL, MEETING_TYPE_LABEL, MEETING_STATUS_LABEL,
   ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
-  RISK_CATEGORY_LABEL, RISK_SCOPE_LABEL,
+  RISK_DOMAIN_LABEL, RISK_NATURE_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
 import { exportMeetingMinutesPdf, exportMeetingMinutesXlsx, type MeetingExportData } from '@/lib/risk/exports'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
@@ -338,9 +338,10 @@ export default function RiskMeetingDetailPage() {
       // than creating a new one. The pre-meeting scoring is snapshotted (only
       // the first time) so the minutes can show both.
       if (opts.rescore) {
-        const computed = computeRiskScore(opts.rescore.likelihood, [
-          opts.rescore.impact_manusia, opts.rescore.impact_reputasi, opts.rescore.impact_kewangan,
-          opts.rescore.impact_operasi, opts.rescore.impact_objektif])
+        const computed = computeSeverityScore(opts.rescore.likelihood, opts.rescore.severity)
+        const residual = (opts.rescore.residual_likelihood > 0 && opts.rescore.residual_severity > 0)
+          ? computeSeverityScore(opts.rescore.residual_likelihood, opts.rescore.residual_severity)
+          : null
         const latest = latestReviewByRisk.get(risk.id)
         if (!latest) {
           // Edge case — no prior cycle to refine. Fall back to creating one as cycle 1.
@@ -350,14 +351,13 @@ export default function RiskMeetingDetailPage() {
             reviewed_by: currentUserId,
             review_date: new Date().toISOString().slice(0, 10),
             likelihood: opts.rescore.likelihood,
-            impact_manusia: opts.rescore.impact_manusia,
-            impact_reputasi: opts.rescore.impact_reputasi,
-            impact_kewangan: opts.rescore.impact_kewangan,
-            impact_operasi: opts.rescore.impact_operasi,
-            impact_objektif: opts.rescore.impact_objektif,
-            avg_impact: computed.avgImpact,
+            severity: opts.rescore.severity,
             risk_score: computed.riskScore,
             risk_level: computed.riskLevel,
+            residual_likelihood: opts.rescore.residual_likelihood || null,
+            residual_severity: opts.rescore.residual_severity || null,
+            residual_score: residual?.riskScore ?? null,
+            residual_level: residual?.riskLevel ?? null,
           }).select('id').single()
           if (rvErr) throw new Error(`Re-score (initial): ${rvErr.code ?? ''} ${rvErr.message}`)
           reviewId = rv.id as number
@@ -368,12 +368,7 @@ export default function RiskMeetingDetailPage() {
           if (!preMeetingSnapshot) {
             preMeetingSnapshot = {
               likelihood: latest.likelihood,
-              impact_manusia: latest.impact_manusia,
-              impact_reputasi: latest.impact_reputasi,
-              impact_kewangan: latest.impact_kewangan,
-              impact_operasi: latest.impact_operasi,
-              impact_objektif: latest.impact_objektif,
-              avg_impact: latest.avg_impact,
+              severity: latest.severity,
               risk_score: latest.risk_score,
               risk_level: latest.risk_level,
               cycle_number: latest.cycle_number,
@@ -382,14 +377,13 @@ export default function RiskMeetingDetailPage() {
           // Refine the current cycle in place — same cycle_number.
           const { error: rvErr } = await supabase.from('risk_reviews').update({
             likelihood: opts.rescore.likelihood,
-            impact_manusia: opts.rescore.impact_manusia,
-            impact_reputasi: opts.rescore.impact_reputasi,
-            impact_kewangan: opts.rescore.impact_kewangan,
-            impact_operasi: opts.rescore.impact_operasi,
-            impact_objektif: opts.rescore.impact_objektif,
-            avg_impact: computed.avgImpact,
+            severity: opts.rescore.severity,
             risk_score: computed.riskScore,
             risk_level: computed.riskLevel,
+            residual_likelihood: opts.rescore.residual_likelihood || null,
+            residual_severity: opts.rescore.residual_severity || null,
+            residual_score: residual?.riskScore ?? null,
+            residual_level: residual?.riskLevel ?? null,
             review_date: new Date().toISOString().slice(0, 10),
           }).eq('id', latest.id)
           if (rvErr) throw new Error(`Re-score (refine): ${rvErr.code ?? ''} ${rvErr.message}`)
@@ -461,9 +455,21 @@ export default function RiskMeetingDetailPage() {
       let reviewId: number | null = item.review_id
       let preMeetingSnapshot: PreMeetingScoring | null = item.pre_meeting_scoring
       if (opts.rescore) {
-        const computed = computeRiskScore(opts.rescore.likelihood, [
-          opts.rescore.impact_manusia, opts.rescore.impact_reputasi, opts.rescore.impact_kewangan,
-          opts.rescore.impact_operasi, opts.rescore.impact_objektif])
+        const computed = computeSeverityScore(opts.rescore.likelihood, opts.rescore.severity)
+        const residual = (opts.rescore.residual_likelihood > 0 && opts.rescore.residual_severity > 0)
+          ? computeSeverityScore(opts.rescore.residual_likelihood, opts.rescore.residual_severity)
+          : null
+        const reviewPatch = {
+          likelihood: opts.rescore.likelihood,
+          severity: opts.rescore.severity,
+          risk_score: computed.riskScore,
+          risk_level: computed.riskLevel,
+          residual_likelihood: opts.rescore.residual_likelihood || null,
+          residual_severity: opts.rescore.residual_severity || null,
+          residual_score: residual?.riskScore ?? null,
+          residual_level: residual?.riskLevel ?? null,
+          review_date: new Date().toISOString().slice(0, 10),
+        }
         const latest = latestReviewByRisk.get(risk.id)
         if (reviewId) {
           // The item already has a review attached — keep refining the SAME
@@ -471,29 +477,13 @@ export default function RiskMeetingDetailPage() {
           if (!preMeetingSnapshot && latest) {
             preMeetingSnapshot = {
               likelihood: latest.likelihood,
-              impact_manusia: latest.impact_manusia,
-              impact_reputasi: latest.impact_reputasi,
-              impact_kewangan: latest.impact_kewangan,
-              impact_operasi: latest.impact_operasi,
-              impact_objektif: latest.impact_objektif,
-              avg_impact: latest.avg_impact,
+              severity: latest.severity,
               risk_score: latest.risk_score,
               risk_level: latest.risk_level,
               cycle_number: latest.cycle_number,
             }
           }
-          const { error: rvErr } = await supabase.from('risk_reviews').update({
-            likelihood: opts.rescore.likelihood,
-            impact_manusia: opts.rescore.impact_manusia,
-            impact_reputasi: opts.rescore.impact_reputasi,
-            impact_kewangan: opts.rescore.impact_kewangan,
-            impact_operasi: opts.rescore.impact_operasi,
-            impact_objektif: opts.rescore.impact_objektif,
-            avg_impact: computed.avgImpact,
-            risk_score: computed.riskScore,
-            risk_level: computed.riskLevel,
-            review_date: new Date().toISOString().slice(0, 10),
-          }).eq('id', reviewId)
+          const { error: rvErr } = await supabase.from('risk_reviews').update(reviewPatch).eq('id', reviewId)
           if (rvErr) throw new Error(`Re-score update: ${rvErr.code ?? ''} ${rvErr.message}`)
         } else if (latest) {
           // First time the committee touches scoring on this item — snapshot the
@@ -501,29 +491,13 @@ export default function RiskMeetingDetailPage() {
           if (!preMeetingSnapshot) {
             preMeetingSnapshot = {
               likelihood: latest.likelihood,
-              impact_manusia: latest.impact_manusia,
-              impact_reputasi: latest.impact_reputasi,
-              impact_kewangan: latest.impact_kewangan,
-              impact_operasi: latest.impact_operasi,
-              impact_objektif: latest.impact_objektif,
-              avg_impact: latest.avg_impact,
+              severity: latest.severity,
               risk_score: latest.risk_score,
               risk_level: latest.risk_level,
               cycle_number: latest.cycle_number,
             }
           }
-          const { error: rvErr } = await supabase.from('risk_reviews').update({
-            likelihood: opts.rescore.likelihood,
-            impact_manusia: opts.rescore.impact_manusia,
-            impact_reputasi: opts.rescore.impact_reputasi,
-            impact_kewangan: opts.rescore.impact_kewangan,
-            impact_operasi: opts.rescore.impact_operasi,
-            impact_objektif: opts.rescore.impact_objektif,
-            avg_impact: computed.avgImpact,
-            risk_score: computed.riskScore,
-            risk_level: computed.riskLevel,
-            review_date: new Date().toISOString().slice(0, 10),
-          }).eq('id', latest.id)
+          const { error: rvErr } = await supabase.from('risk_reviews').update(reviewPatch).eq('id', latest.id)
           if (rvErr) throw new Error(`Re-score (refine): ${rvErr.code ?? ''} ${rvErr.message}`)
           reviewId = latest.id
         } else {
@@ -532,16 +506,7 @@ export default function RiskMeetingDetailPage() {
             risk_id: risk.id,
             cycle_number: 1,
             reviewed_by: currentUserId,
-            review_date: new Date().toISOString().slice(0, 10),
-            likelihood: opts.rescore.likelihood,
-            impact_manusia: opts.rescore.impact_manusia,
-            impact_reputasi: opts.rescore.impact_reputasi,
-            impact_kewangan: opts.rescore.impact_kewangan,
-            impact_operasi: opts.rescore.impact_operasi,
-            impact_objektif: opts.rescore.impact_objektif,
-            avg_impact: computed.avgImpact,
-            risk_score: computed.riskScore,
-            risk_level: computed.riskLevel,
+            ...reviewPatch,
           }).select('id').single()
           if (rvErr) throw new Error(`Re-score (initial): ${rvErr.code ?? ''} ${rvErr.message}`)
           reviewId = rv.id as number
@@ -1392,7 +1357,7 @@ function RiskSlideContent({ risk, latest, deptLabel, outcome }: {
       <div className="present-dept">{deptLabel}</div>
       <div className="present-riskid">{risk.risk_id}</div>
       <div className="present-meta">
-        <span><b>{risk.category}</b> — {RISK_CATEGORY_LABEL[risk.category]}</span>
+        <span>{risk.uitm_domain ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b> : <em>Domain unassigned</em>}{risk.risk_nature ? ` — ${RISK_NATURE_LABEL[risk.risk_nature]}` : ''}</span>
         <span>{RISK_SCOPE_LABEL[risk.scope]}</span>
         <span className="present-status" style={{ color: RISK_STATUS_BADGE[risk.status].fg, background: RISK_STATUS_BADGE[risk.status].bg }}>
           {RISK_STATUS_LABEL[risk.status]}
@@ -1419,11 +1384,8 @@ function RiskSlideContent({ risk, latest, deptLabel, outcome }: {
             <div className="present-score">
               <div className="present-score-cells">
                 <Cell k="L" v={latest.likelihood} />
-                <Cell k="Man" v={latest.impact_manusia} />
-                <Cell k="Rep" v={latest.impact_reputasi} />
-                <Cell k="Kew" v={latest.impact_kewangan} />
-                <Cell k="Ops" v={latest.impact_operasi} />
-                <Cell k="Obj" v={latest.impact_objektif} />
+                <Cell k="S" v={latest.severity ?? (latest.avg_impact != null ? Math.round(latest.avg_impact) : null)} />
+                {latest.residual_score != null && <Cell k="Res" v={latest.residual_score} />}
               </div>
               <div className="present-score-final"
                 style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level] }}>
@@ -1618,11 +1580,11 @@ function PresentBlock({ label, children }: { label: string; children: React.Reac
   )
 }
 
-function Cell({ k, v }: { k: string; v: number }) {
+function Cell({ k, v }: { k: string; v: number | null }) {
   return (
     <div className="present-cell">
       <div className="present-cell-k">{k}</div>
-      <div className="present-cell-v">{v}</div>
+      <div className="present-cell-v">{v ?? '—'}</div>
     </div>
   )
 }
@@ -1643,11 +1605,9 @@ function CountPill({ label, n, strong }: { label: string; n: number; strong?: bo
 
 interface ScoreInputs {
   likelihood: number
-  impact_manusia: number
-  impact_reputasi: number
-  impact_kewangan: number
-  impact_operasi: number
-  impact_objektif: number
+  severity: number
+  residual_likelihood: number
+  residual_severity: number
 }
 
 function AgendaItemCard({
@@ -1697,20 +1657,17 @@ function AgendaItemCard({
   const [rescoreOpen, setRescoreOpen] = useState(false)
   const [scores, setScores] = useState<ScoreInputs>({
     likelihood: latest?.likelihood ?? 0,
-    impact_manusia: latest?.impact_manusia ?? 0,
-    impact_reputasi: latest?.impact_reputasi ?? 0,
-    impact_kewangan: latest?.impact_kewangan ?? 0,
-    impact_operasi: latest?.impact_operasi ?? 0,
-    impact_objektif: latest?.impact_objektif ?? 0,
+    severity: latest?.severity ?? 0,
+    residual_likelihood: latest?.residual_likelihood ?? 0,
+    residual_severity: latest?.residual_severity ?? 0,
   })
 
   const decided = !!item.outcome
   const opts = allowedOutcomes(meetingType)
 
-  const scoreComplete = scores.likelihood > 0 && scores.impact_manusia > 0 && scores.impact_reputasi > 0 &&
-    scores.impact_kewangan > 0 && scores.impact_operasi > 0 && scores.impact_objektif > 0
+  const scoreComplete = scores.likelihood > 0 && scores.severity > 0
   const computed = (rescoreOpen && scoreComplete)
-    ? computeRiskScore(scores.likelihood, [scores.impact_manusia, scores.impact_reputasi, scores.impact_kewangan, scores.impact_operasi, scores.impact_objektif])
+    ? computeSeverityScore(scores.likelihood, scores.severity)
     : null
 
   const canSave = !!outcome && !busy && (!rescoreOpen || scoreComplete)
@@ -1916,11 +1873,9 @@ function AgendaItemCard({
             <div style={{ marginTop: 10 }}>
               <div className="risk-form-grid">
                 <ScorePicker label="Likelihood" value={scores.likelihood} onChange={(v) => setScores({ ...scores, likelihood: v })} />
-                <ScorePicker label="Manusia" value={scores.impact_manusia} onChange={(v) => setScores({ ...scores, impact_manusia: v })} />
-                <ScorePicker label="Reputasi" value={scores.impact_reputasi} onChange={(v) => setScores({ ...scores, impact_reputasi: v })} />
-                <ScorePicker label="Kewangan" value={scores.impact_kewangan} onChange={(v) => setScores({ ...scores, impact_kewangan: v })} />
-                <ScorePicker label="Operasi" value={scores.impact_operasi} onChange={(v) => setScores({ ...scores, impact_operasi: v })} />
-                <ScorePicker label="Objektif" value={scores.impact_objektif} onChange={(v) => setScores({ ...scores, impact_objektif: v })} />
+                <ScorePicker label="Severity" value={scores.severity} onChange={(v) => setScores({ ...scores, severity: v })} />
+                <ScorePicker label="Residual L (opt)" value={scores.residual_likelihood} onChange={(v) => setScores({ ...scores, residual_likelihood: v })} />
+                <ScorePicker label="Residual S (opt)" value={scores.residual_severity} onChange={(v) => setScores({ ...scores, residual_severity: v })} />
               </div>
               {computed && (
                 <div style={{ fontSize: 12, marginTop: 6 }}>
