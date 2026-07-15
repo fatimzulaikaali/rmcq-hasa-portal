@@ -11,7 +11,7 @@ import type {
   AccService, AccTopic, AccSubStandard, AccCriterion, AccEvidenceItem, AccFolder, AccDriveFile,
 } from '@/lib/acc/types'
 import {
-  fillService, evidenceKey, criterionBadges, drivePreviewUrl, defaultYears,
+  fillService, evidenceKey, drivePreviewUrl, defaultYears,
 } from '@/lib/acc/helpers'
 
 type Filter = 'all' | 'core' | 'new'
@@ -279,7 +279,8 @@ function CriterionDetail({
     setAddYears((prev) => {
       const next = { ...prev }
       const s = new Set(next[evId] ?? [])
-      s.has(year) ? s.delete(year) : s.add(year)
+      if (s.has(year)) s.delete(year)
+      else s.add(year)
       next[evId] = s
       return next
     })

@@ -85,7 +85,12 @@ export async function POST(req: NextRequest) {
     .select('id, item_number, acc_criteria(code)')
     .in('id', ids)
   const evMap = new Map<string, { itemNumber: number; code: string }>()
-  for (const r of (evRows ?? []) as any[]) {
+  type EvRow = {
+    id: string
+    item_number: number
+    acc_criteria: { code: string } | { code: string }[] | null
+  }
+  for (const r of (evRows ?? []) as EvRow[]) {
     const code = Array.isArray(r.acc_criteria) ? r.acc_criteria[0]?.code : r.acc_criteria?.code
     if (code) evMap.set(r.id, { itemNumber: r.item_number, code })
   }
@@ -153,7 +158,18 @@ export async function POST(req: NextRequest) {
   // Map returned folders back to evidence item ids by evidenceKey.
   const keyToItem = new Map(payloadItems.map((p) => [p.evidenceKey, p._evidenceItemId]))
   const now = new Date().toISOString()
-  const rows: any[] = []
+  type FolderRow = {
+    service_id: string
+    evidence_item_id: string
+    folder_type: 'evidence' | 'year'
+    year: number
+    drive_folder_id: string
+    drive_folder_name: string
+    drive_url: string
+    parent_drive_folder_id: string
+    synced_at: string
+  }
+  const rows: FolderRow[] = []
   for (const f of waResp.folders ?? []) {
     const evId = keyToItem.get(f.evidenceKey)
     if (!evId) continue
