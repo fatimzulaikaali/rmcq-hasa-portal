@@ -172,6 +172,10 @@ export default function KpiPage() {
             <span className="nav-icon">⚠️</span>
             <span>Risk Register</span>
           </Link>
+          <Link href="/acc" className="nav-item">
+            <span className="nav-icon">📋</span>
+            <span>Accreditation</span>
+          </Link>
         </div>
 
         <div className="sb-filters">
