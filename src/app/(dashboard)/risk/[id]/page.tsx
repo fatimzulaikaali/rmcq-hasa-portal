@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskAttachments } from '@/components/RiskAttachments'
 import type { ActiveRole } from '@/lib/risk/activeRole'
 import type { RiskRole } from '@/lib/risk/types'
 import {
@@ -832,6 +833,17 @@ export default function RiskDetailPage() {
                   <DefLine label="Implementation period">{risk.implementation_period || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
                 </div>
                 {risk.notes && <DefBlock label="Notes">{risk.notes}</DefBlock>}
+              </div>
+
+              {/* Attachments — source risk-register PDF + RTP (file upload or Drive link) */}
+              <div className="panel">
+                <div className="pf"><div>
+                  <div className="pt">📎 Attachments</div>
+                  <div className="psub">Source risk register &amp; Risk Treatment Plan (RTP)</div>
+                </div></div>
+                <div style={{ padding: '4px 4px 8px' }}>
+                  <RiskAttachments riskId={risk.id} canEdit={hasRole(['RC', 'ADMIN', 'DIRECTOR'])} />
+                </div>
               </div>
 
               {/* Section 4 — Latest Review */}

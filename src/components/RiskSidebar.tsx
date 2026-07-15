@@ -18,7 +18,7 @@ import { getModuleAccess } from '@/lib/risk/auth'
  * The component resolves access itself so pages don't have to pass it in. */
 export function RiskSidebar({ onClose, active, children }: {
   onClose: () => void
-  active: 'risk' | 'committees' | 'actions' | 'quickadd' | 'bulkupload'
+  active: 'risk' | 'committees' | 'actions' | 'quickadd' | 'bulkupload' | 'rtp'
   children?: React.ReactNode
 }) {
   const supabase = useMemo(() => createClient(), [])
@@ -94,6 +94,12 @@ export function RiskSidebar({ onClose, active, children }: {
             <Link href="/risk/bulk-upload" className={`nav-item nav-sub ${active === 'bulkupload' ? 'active' : ''}`}
               title="Upload a paper register (PDF or Excel) and bulk-enter every risk in it">
               <span className="nav-icon">📤</span><span>Bulk Upload (paper)</span>
+            </Link>
+          )}
+          {showGlobal && (
+            <Link href="/risk/rtp" className={`nav-item nav-sub ${active === 'rtp' ? 'active' : ''}`}
+              title="Monitor whether departments have completed their Risk Treatment Plans">
+              <span className="nav-icon">🎯</span><span>RTP Monitoring</span>
             </Link>
           )}
           <Link href="/risk/actions" className={`nav-item nav-sub ${active === 'actions' ? 'active' : ''}`}>

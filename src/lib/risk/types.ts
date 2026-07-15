@@ -135,6 +135,25 @@ export interface RiskReview {
   created_at: string
 }
 
+/* Per-risk attachments — the source risk-register PDF a department submits and
+ * the Risk Treatment Plan (RTP), if any. Either an uploaded file (storage_path,
+ * held in the `risk-attachments` Storage bucket) or an external Drive link
+ * (external_url) — never both. */
+export type RiskAttachmentKind = 'register' | 'rtp' | 'other'
+
+export interface RiskAttachment {
+  id: string
+  risk_id: number
+  kind: RiskAttachmentKind
+  label: string | null
+  storage_path: string | null
+  external_url: string | null
+  file_name: string | null
+  byte_size: number | null
+  uploaded_by: number | null
+  created_at: string
+}
+
 export interface CrossCuttingTheme {
   id: number
   name: string
