@@ -160,6 +160,10 @@ export default function KpiPage() {
 
         <div className="nav-section">
           <div className="nav-lbl">Portal</div>
+          <Link href="/home" className="nav-item">
+            <span className="nav-icon">🏠</span>
+            <span>Home</span>
+          </Link>
           <Link href="/ir" className="nav-item">
             <span className="nav-icon">🩺</span>
             <span>IR Dashboard</span>

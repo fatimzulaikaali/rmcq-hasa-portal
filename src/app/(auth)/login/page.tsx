@@ -22,7 +22,7 @@ export default function LoginPage() {
     setError(null); setLoading(true)
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/risk` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/home` },
     })
     setLoading(false)
     if (otpError) { setError(otpError.message); return }
@@ -37,7 +37,7 @@ export default function LoginPage() {
     })
     setLoading(false)
     if (signInError) { setError(signInError.message); return }
-    router.push('/risk'); router.refresh()
+    router.push('/home'); router.refresh()
   }
 
   const inputCls =

@@ -197,6 +197,10 @@ export default function IrPage() {
         {/* Portal links — small section. View navigation lives in the top tab bar. */}
         <div className="nav-section">
           <div className="nav-lbl">Portal</div>
+          <Link href="/home" className="nav-item">
+            <span className="nav-icon">🏠</span>
+            <span>Home</span>
+          </Link>
           <Link href="/kpi" className="nav-item">
             <span className="nav-icon">📈</span>
             <span>KPI Monitor</span>
