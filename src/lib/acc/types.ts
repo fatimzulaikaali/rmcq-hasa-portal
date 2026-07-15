@@ -62,6 +62,16 @@ export interface AccFolder {
   synced_at: string | null
 }
 
+/** A reference link to the source of an evidence item — e.g. the department's
+ * full minutes-of-meeting folder, when only the latest few are uploaded. */
+export interface AccEvidenceLink {
+  id: string
+  evidence_item_id: string
+  label: string
+  url: string
+  created_at: string
+}
+
 /** A file returned by the Drive web app's `list` action. */
 export interface AccDriveFile {
   id: string

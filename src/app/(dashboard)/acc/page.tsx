@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import type {
-  AccService, AccTopic, AccSubStandard, AccCriterion, AccEvidenceItem, AccFolder, AccDriveFile,
+  AccService, AccTopic, AccSubStandard, AccCriterion, AccEvidenceItem, AccFolder, AccDriveFile, AccEvidenceLink,
 } from '@/lib/acc/types'
 import {
   fillService, evidenceKey, drivePreviewUrl, defaultYears,
@@ -36,6 +36,7 @@ export default function AccreditationPage() {
   const [criteria, setCriteria] = useState<AccCriterion[]>([])
   const [evidence, setEvidence] = useState<AccEvidenceItem[]>([])
   const [folders, setFolders] = useState<AccFolder[]>([])
+  const [links, setLinks] = useState<AccEvidenceLink[]>([])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -46,6 +47,11 @@ export default function AccreditationPage() {
     setFolders((data ?? []) as AccFolder[])
   }, [supabase])
 
+  const loadLinks = useCallback(async () => {
+    const { data } = await supabase.from('acc_evidence_links').select('*').order('created_at')
+    setLinks((data ?? []) as AccEvidenceLink[])
+  }, [supabase])
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -53,13 +59,14 @@ export default function AccreditationPage() {
         const access = await getModuleAccess(supabase)
         if (!access.allModules) { router.replace('/risk'); return }
 
-        const [svc, tp, sb, cr, ev, fl] = await Promise.all([
+        const [svc, tp, sb, cr, ev, fl, lk] = await Promise.all([
           supabase.from('acc_services').select('*').limit(1).maybeSingle(),
           supabase.from('acc_topics').select('*').order('sort_order'),
           supabase.from('acc_sub_standards').select('*').order('sort_order'),
           supabase.from('acc_criteria').select('*').order('sort_order'),
           supabase.from('acc_evidence_items').select('*').order('item_number'),
           supabase.from('acc_folders').select('*'),
+          supabase.from('acc_evidence_links').select('*').order('created_at'),
         ])
         if (cancelled) return
         setService((svc.data ?? null) as AccService | null)
@@ -68,6 +75,7 @@ export default function AccreditationPage() {
         setCriteria((cr.data ?? []) as AccCriterion[])
         setEvidence((ev.data ?? []) as AccEvidenceItem[])
         setFolders((fl.data ?? []) as AccFolder[])
+        setLinks((lk.data ?? []) as AccEvidenceLink[])
         setSelectedId((cr.data?.[0] as AccCriterion | undefined)?.id ?? null)
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Failed to load accreditation data')
@@ -99,6 +107,16 @@ export default function AccreditationPage() {
     }
     return m
   }, [folders])
+
+  // evidence item id -> reference links
+  const linksByItem = useMemo(() => {
+    const m = new Map<string, AccEvidenceLink[]>()
+    for (const l of links) {
+      if (!m.has(l.evidence_item_id)) m.set(l.evidence_item_id, [])
+      m.get(l.evidence_item_id)!.push(l)
+    }
+    return m
+  }, [links])
 
   // Which criteria have at least one synced folder (progress)
   const syncedCriteria = useMemo(() => {
@@ -257,7 +275,9 @@ export default function AccreditationPage() {
               service={service}
               evidenceItems={evByCriterion.get(selected.id) ?? []}
               foldersByItem={foldersByItem}
+              linksByItem={linksByItem}
               onSynced={loadFolders}
+              onLinksChanged={loadLinks}
             />
           ) : (
             <div className="text-sm text-[var(--muted)]">Select a criterion.</div>
@@ -311,7 +331,7 @@ function Badge({ tone, children }: { tone: 'red' | 'teal' | 'blue' | 'gray'; chi
 /* ---------------- Criterion detail ---------------- */
 
 function CriterionDetail({
-  criterion, sub, topic, service, evidenceItems, foldersByItem, onSynced,
+  criterion, sub, topic, service, evidenceItems, foldersByItem, linksByItem, onSynced, onLinksChanged,
 }: {
   criterion: AccCriterion
   sub: AccSubStandard | null
@@ -319,7 +339,9 @@ function CriterionDetail({
   service: AccService | null
   evidenceItems: AccEvidenceItem[]
   foldersByItem: Map<string, AccFolder[]>
+  linksByItem: Map<string, AccEvidenceLink[]>
   onSynced: () => Promise<void>
+  onLinksChanged: () => Promise<void>
 }) {
   const [syncing, setSyncing] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -494,6 +516,12 @@ function CriterionDetail({
                   </span>
                 )}
               </div>
+
+              <EvidenceLinks
+                evidenceItemId={e.id}
+                links={linksByItem.get(e.id) ?? []}
+                onChanged={onLinksChanged}
+              />
             </div>
           )
         })}
@@ -509,6 +537,124 @@ function CriterionDetail({
           onClose={() => setViewer(null)}
         />
       )}
+    </div>
+  )
+}
+
+/* ---------------- Reference links for an evidence item ---------------- */
+
+/* Points to the *source* of the evidence — e.g. the department's full
+ * minutes-of-meeting folder — when only the latest few files are uploaded
+ * into the evidence folder. Stored in acc_evidence_links (portal only). */
+function EvidenceLinks({
+  evidenceItemId, links, onChanged,
+}: {
+  evidenceItemId: string
+  links: AccEvidenceLink[]
+  onChanged: () => Promise<void>
+}) {
+  const supabase = useMemo(() => createClient(), [])
+  const [adding, setAdding] = useState(false)
+  const [label, setLabel] = useState('')
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const reset = () => { setAdding(false); setLabel(''); setUrl(''); setErr(null) }
+
+  const save = async () => {
+    const l = label.trim()
+    const u = url.trim()
+    if (!l) { setErr('Give the link a name.'); return }
+    if (!/^https?:\/\//i.test(u)) { setErr('Enter a full URL starting with http:// or https://'); return }
+    setBusy(true); setErr(null)
+    try {
+      const { error } = await supabase.from('acc_evidence_links')
+        .insert({ evidence_item_id: evidenceItemId, label: l, url: u })
+      if (error) { setErr(error.message); return }
+      reset()
+      await onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (id: string) => {
+    setBusy(true)
+    try {
+      await supabase.from('acc_evidence_links').delete().eq('id', id)
+      await onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 border-t border-[var(--border)] pt-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">🔗 Source links</span>
+        {links.length === 0 && !adding && (
+          <span className="text-[11px] text-[var(--muted)]">none yet</span>
+        )}
+        {links.map((l) => (
+          <span
+            key={l.id}
+            className="inline-flex items-center gap-1 rounded-full bg-[var(--blue-lt)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--blue)]"
+          >
+            <a href={l.url} target="_blank" rel="noreferrer" title={l.url} className="hover:underline">
+              {l.label} ↗
+            </a>
+            <button
+              onClick={() => remove(l.id)}
+              disabled={busy}
+              className="text-[var(--blue)] opacity-60 hover:opacity-100 disabled:opacity-30"
+              title="Remove link"
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-full border border-dashed border-[var(--border)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--text)]"
+          >
+            + Add link
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Name (e.g. Full minutes — ORL dept folder)"
+            className="min-w-[220px] flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--blue)]"
+          />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://drive.google.com/…"
+            className="min-w-[220px] flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--blue)]"
+          />
+          <button
+            onClick={save}
+            disabled={busy}
+            className="rounded-md bg-[var(--blue)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={reset}
+            disabled={busy}
+            className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] hover:text-[var(--text)]"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {err && <div className="mt-1 text-[11px] text-[var(--red)]">{err}</div>}
     </div>
   )
 }
