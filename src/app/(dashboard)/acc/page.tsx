@@ -314,9 +314,17 @@ function CriterionDetail({
     }
   }
 
-  const candidateYears = defaultYears()
-  const nextYear = new Date().getFullYear() + 1
-  const yearChoices = [...candidateYears, nextYear]
+  const [extraYears, setExtraYears] = useState<number[]>([])
+  const yearChoices = useMemo(() => {
+    const base = [...defaultYears(), new Date().getFullYear() + 1]
+    return Array.from(new Set([...base, ...extraYears])).sort((a, b) => a - b)
+  }, [extraYears])
+  const addNextYear = () => {
+    setExtraYears((prev) => {
+      const max = Math.max(...yearChoices, ...prev)
+      return [...prev, max + 1]
+    })
+  }
 
   return (
     <div>
@@ -348,13 +356,22 @@ function CriterionDetail({
 
       <div className="mb-2 mt-4 flex items-center justify-between">
         <div className="pt">Evidence of compliance ({evidenceItems.length})</div>
-        <button
-          onClick={sync}
-          disabled={syncing}
-          className="rounded-md bg-[var(--blue)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {syncing ? 'Syncing…' : 'Create / update Drive folders'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={addNextYear}
+            className="rounded-md border border-dashed border-[var(--border)] px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] hover:text-[var(--text)]"
+            title="Offer another year to create"
+          >
+            ＋ Add year
+          </button>
+          <button
+            onClick={sync}
+            disabled={syncing}
+            className="rounded-md bg-[var(--blue)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {syncing ? 'Syncing…' : 'Create / update Drive folders'}
+          </button>
+        </div>
       </div>
       {msg && <div className="mb-2 text-xs text-[var(--muted)]">{msg}</div>}
 
