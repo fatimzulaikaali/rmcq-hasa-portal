@@ -30,6 +30,7 @@ function doPost(e) {
     if (action === 'ping') return json({ ok: true, pong: true });
     if (action === 'sync') return json(handleSync(body));
     if (action === 'list') return json(handleList(body));
+    if (action === 'upload') return json(handleUpload(body));
     return json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return json({ ok: false, error: String(err) });
@@ -98,6 +99,24 @@ function handleList(body) {
     subfolders.push({ id: sf.getId(), name: sf.getName(), url: sf.getUrl() });
   }
   return { ok: true, files: files, subfolders: subfolders };
+}
+
+/**
+ * Upload a single file (sent base64-encoded) straight into a folder,
+ * so users can add evidence from the portal without opening Drive.
+ * Body: { folderId, name, mimeType, dataBase64 }
+ */
+function handleUpload(body) {
+  if (!body.folderId) return { ok: false, error: 'folderId is required' };
+  if (!body.dataBase64) return { ok: false, error: 'dataBase64 is required' };
+  var folder = DriveApp.getFolderById(body.folderId);
+  var bytes = Utilities.base64Decode(body.dataBase64);
+  var blob = Utilities.newBlob(bytes, body.mimeType || 'application/octet-stream', body.name || 'upload');
+  var file = folder.createFile(blob);
+  return {
+    ok: true,
+    file: { id: file.getId(), name: file.getName(), mimeType: file.getMimeType(), url: file.getUrl() }
+  };
 }
 
 /**

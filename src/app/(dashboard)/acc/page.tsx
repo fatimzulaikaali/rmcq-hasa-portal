@@ -2,7 +2,8 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import type { ChangeEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { AppShell, Topbar } from '@/components/AppShell'
@@ -480,6 +481,35 @@ function EvidenceViewer({
     if (activeFolderId) void loadFiles(activeFolderId)
   }, [activeFolderId, loadFiles])
 
+  const activeFolder =
+    yearFolders.find((f) => f.drive_folder_id === activeFolderId) ??
+    (parentFolder?.drive_folder_id === activeFolderId ? parentFolder : null)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null)
+
+  const onPickFile = async (ev: ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0]
+    ev.target.value = '' // allow re-picking the same file
+    if (!file || !activeFolderId) return
+    setUploading(true); setUploadMsg(null)
+    try {
+      const fd = new FormData()
+      fd.append('folderId', activeFolderId)
+      fd.append('file', file)
+      const res = await fetch('/api/acc/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!data.ok) { setUploadMsg(data.message || 'Upload failed.'); return }
+      await loadFiles(activeFolderId)
+      setUploadMsg(`Uploaded “${file.name}” ✓`)
+    } catch (e) {
+      setUploadMsg(e instanceof Error ? e.message : 'Upload failed.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
@@ -506,6 +536,33 @@ function EvidenceViewer({
               {f.year}
             </button>
           ))}
+
+          <div className="ml-auto flex items-center gap-2">
+            {uploadMsg && <span className="text-[11px] text-[var(--muted)]">{uploadMsg}</span>}
+            {activeFolder?.drive_url && (
+              <a
+                href={activeFolder.drive_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)]"
+              >
+                Open in Drive ↗
+              </a>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={onPickFile}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!activeFolderId || uploading}
+              className="rounded-md bg-[var(--blue)] px-3 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {uploading ? 'Uploading…' : '⬆ Upload file'}
+            </button>
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1">
