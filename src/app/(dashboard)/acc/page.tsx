@@ -784,6 +784,10 @@ function EvidenceViewer({
           </div>
         </div>
 
+        <div className="border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5 text-[11px] text-[var(--muted)]">
+          Each file must be smaller than 4&nbsp;MB. For larger files, click “Open in Drive ↗” and upload them directly into the Google&nbsp;Drive folder.
+        </div>
+
         <div className="flex min-h-0 flex-1">
           {/* file list */}
           <div className="w-56 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)]">
