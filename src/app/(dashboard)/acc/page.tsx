@@ -4,9 +4,9 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { AppShell, Topbar } from '@/components/AppShell'
 import { getModuleAccess } from '@/lib/risk/auth'
 import type {
   AccService, AccTopic, AccSubStandard, AccCriterion, AccEvidenceItem, AccFolder, AccDriveFile,
@@ -23,6 +23,12 @@ export default function AccreditationPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
 
   const [service, setService] = useState<AccService | null>(null)
   const [topics, setTopics] = useState<AccTopic[]>([])
@@ -134,10 +140,18 @@ export default function AccreditationPage() {
 
   if (loading) {
     return (
-      <AppShell>
-        <Topbar title="Accreditation" meta="MSQH 7th Edition — Standard 24" />
-        <div className="loader"><div className="loader-inner"><div className="spin" /><div>Loading standard…</div></div></div>
-      </AppShell>
+      <div className="shell">
+        <AccSidebar />
+        <div className="main">
+          <header className="topbar">
+            <div>
+              <div className="tb-title">Accreditation — MSQH Standard 24</div>
+              <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM</div>
+            </div>
+          </header>
+          <div className="loader"><div className="loader-inner"><div className="spin" /><div>Loading standard…</div></div></div>
+        </div>
+      </div>
     )
   }
 
@@ -146,24 +160,40 @@ export default function AccreditationPage() {
   const pct = total ? Math.round((done / total) * 100) : 0
 
   return (
-    <AppShell>
-      <Topbar
-        title="Accreditation — MSQH Standard 24"
-        meta={service ? `${service.name}` : 'Standards for General Application'}
-        right={
-          <div className="text-xs text-[var(--muted)]">
-            <span className="font-semibold text-[var(--text)]">{done}</span> / {total} criteria started · {pct}%
+    <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <AccSidebar onClose={() => setSidebarOpen(false)} />
+
+      <div className="main">
+        <header className="topbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="hamburger"
+              aria-label="Toggle navigation"
+              onClick={() => setSidebarOpen((v) => !v)}
+            >☰</button>
+            <div>
+              <div className="tb-title">Accreditation — MSQH Standard 24</div>
+              <div className="tb-meta">
+                {service ? service.name : 'Standards for General Application'}
+              </div>
+            </div>
           </div>
-        }
-      />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="rec-badge">
+              {done} / {total} criteria started · {pct}%
+            </div>
+            <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
+          </div>
+        </header>
 
-      {loadError && (
-        <div className="m-4 rounded-md border border-[var(--red)] bg-[var(--red-lt)] px-4 py-3 text-sm text-[var(--red)]">
-          {loadError}
-        </div>
-      )}
+        {loadError && (
+          <div className="m-4 rounded-md border border-[var(--red)] bg-[var(--red-lt)] px-4 py-3 text-sm text-[var(--red)]">
+            {loadError}
+          </div>
+        )}
 
-      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1">
         {/* Criteria browser */}
         <div className="w-[340px] shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface)]">
           <div className="sticky top-0 z-10 space-y-2 border-b border-[var(--border)] bg-[var(--surface)] p-3">
@@ -233,8 +263,34 @@ export default function AccreditationPage() {
             <div className="text-sm text-[var(--muted)]">Select a criterion.</div>
           )}
         </div>
+        </div>
       </div>
-    </AppShell>
+    </div>
+  )
+}
+
+/* Dark sidebar shared with the rest of the portal (IR / KPI / Safety Culture /
+ * Risk). Accreditation is a hospital-wide (global-role) module, so the Portal
+ * links here always show the full set with Accreditation marked active. */
+function AccSidebar({ onClose }: { onClose?: () => void }) {
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <aside className="sidebar">
+        <div className="sb-head">
+          <div className="sb-logo">📋 Accreditation</div>
+          <div className="sb-sub">MSQH 7th Edition · Standard 24</div>
+        </div>
+        <div className="nav-section">
+          <div className="nav-lbl">Portal</div>
+          <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
+          <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
+          <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
+          <Link href="/risk" className="nav-item"><span className="nav-icon">⚠️</span><span>Risk Register</span></Link>
+          <Link href="/acc" className="nav-item active"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
+        </div>
+      </aside>
+    </>
   )
 }
 
