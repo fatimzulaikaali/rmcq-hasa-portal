@@ -17,6 +17,19 @@ import {
 
 type Filter = 'all' | 'core' | 'new'
 
+/* Compare dotted criterion codes numerically (e.g. "24.2.1.1" < "24.2.2.1"),
+ * so the list reads in natural order regardless of stored sort_order. */
+function compareCode(a: string, b: string) {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0)
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 export default function AccreditationPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -76,7 +89,8 @@ export default function AccreditationPage() {
         setEvidence((ev.data ?? []) as AccEvidenceItem[])
         setFolders((fl.data ?? []) as AccFolder[])
         setLinks((lk.data ?? []) as AccEvidenceLink[])
-        setSelectedId((cr.data?.[0] as AccCriterion | undefined)?.id ?? null)
+        // Default selection is set from the grouped (display-ordered) list below,
+        // so the page always opens on the first criterion shown (24.1.1.1).
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Failed to load accreditation data')
       } finally {
@@ -147,9 +161,19 @@ export default function AccreditationPage() {
       byTopic.get(c.topic_id)!.push(c)
     }
     return topics
-      .map((t) => ({ topic: t, items: byTopic.get(t.id) ?? [] }))
+      .map((t) => ({
+        topic: t,
+        items: (byTopic.get(t.id) ?? []).slice().sort((x, y) => compareCode(x.code, y.code)),
+      }))
       .filter((g) => g.items.length > 0)
   }, [filtered, topics])
+
+  // Open on the first criterion in display order once data has loaded.
+  useEffect(() => {
+    if (selectedId == null && grouped.length > 0) {
+      setSelectedId(grouped[0].items[0]?.id ?? null)
+    }
+  }, [grouped, selectedId])
 
   const selected = useMemo(
     () => criteria.find((c) => c.id === selectedId) ?? null,
