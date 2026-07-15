@@ -9,6 +9,7 @@ const NAV = [
   { href: '/kpi',  label: 'KPI Monitor',        icon: '📈' },
   { href: '/pscs', label: 'Patient Safety Survey', icon: '🛡️' },
   { href: '/risk', label: 'Risk Register',      icon: '⚠️' },
+  { href: '/acc',  label: 'Accreditation',      icon: '📋' },
   { href: '/upload', label: 'Upload IR Database', icon: '⬆' },
 ] as const
 
