@@ -793,11 +793,19 @@ body{counter-reset:rcpage;}
 .audit-comment{font-size:11px;color:var(--muted);font-style:italic;margin-top:3px;padding-left:6px;border-left:2px solid var(--border);}
 
 /* Risk Register — table on /risk */
-.risk-table{width:100%;border-collapse:collapse;font-size:12px;}
-.risk-table thead th{background:#F3F4F6;color:#374151;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:7px 10px;border-bottom:2px solid var(--border);text-align:left;}
-.risk-table tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
-.risk-table tbody tr:hover{background:#F9FAFB;}
+.risk-table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--surface);}
+.risk-table thead th{background:#F3F1EB;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:9px 11px;border-bottom:1px solid var(--border);white-space:nowrap;text-align:left;}
+.risk-table tbody td{padding:9px 11px;border-bottom:1px solid #F0EEE8;vertical-align:middle;}
+.risk-table tbody tr:hover{background:var(--bg);}
 .risk-table tbody tr:last-child td{border-bottom:none;}
+
+/* Dept-group panel — mirrors the prototype's blue header bar over a full-bleed
+ * table. Applied only to grouped department panels (register + RTP monitoring),
+ * so standalone cards on the detail page keep their plain white header. */
+.risk-skin .risk-dept-panel{padding:0;overflow:hidden;}
+.risk-skin .risk-dept-panel > .pf{margin:0;padding:10px 15px;background:var(--blue-lt);border-bottom:1px solid #CFE3F7;border-radius:14px 14px 0 0;}
+.risk-skin .risk-dept-panel > .pf .pt{color:var(--blue);}
+.risk-skin .risk-dept-panel > .pf .psub{color:#4E7AA6;}
 
 /* Filter field */
 .filter-field{margin-bottom:8px;}

@@ -349,10 +349,10 @@ export default function RiskListPage() {
                 grouped.map(({ dept, code, rows: deptRows }) => {
                   const extreme = deptRows.filter((r) => r.latest?.risk_level === 'EKSTREM').length
                   return (
-                    <div key={code} className="panel" style={{ marginTop: 14 }}>
+                    <div key={code} className="panel risk-dept-panel" style={{ marginTop: 14 }}>
                       <div className="pf">
                         <div>
-                          <div className="pt">{dept?.name_en ?? code}</div>
+                          <div className="pt">🏥 {dept?.name_en ?? code}</div>
                           <div className="psub">
                             {deptRows.length} risk{deptRows.length === 1 ? '' : 's'}
                             {extreme > 0 ? ` · ${extreme} extreme` : ''}

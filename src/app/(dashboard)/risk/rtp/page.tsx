@@ -319,7 +319,7 @@ export default function RtpMonitorPage() {
                 groups.map((g) => {
                   const gOverdue = g.rows.reduce((s, r) => s + r.overdueCount, 0)
                   return (
-                    <div key={g.code} className="panel" style={{ marginTop: 14 }}>
+                    <div key={g.code} className="panel risk-dept-panel" style={{ marginTop: 14 }}>
                       <div className="pf"><div>
                         <div className="pt">🏥 {g.name}</div>
                         <div className="psub">
