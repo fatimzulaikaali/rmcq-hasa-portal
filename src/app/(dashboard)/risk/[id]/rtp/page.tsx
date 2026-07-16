@@ -14,6 +14,8 @@ import {
   RtpAdequacy, RtpOverallStatus, RtpTaskStatus,
 } from '@/lib/risk/types'
 import { TREATMENT_OPTION_LABEL } from '@/lib/risk/scoring'
+import { RiskPdfImport } from '@/components/RiskPdfImport'
+import type { ParsedRtp } from '@/lib/risk/pdfImport'
 
 const OVERALL_STATUS: RtpOverallStatus[] = ['NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'VERIFIED']
 const OVERALL_LABEL: Record<RtpOverallStatus, string> = {
@@ -299,6 +301,32 @@ export default function RtpEditorPage() {
     }
   }
 
+  /* Apply a PDF-parsed RTP (Form 0045): fill control/ownership/approval fields
+   * and append any detected task lines. Only non-empty values overwrite. */
+  function applyParsedRtp(p: ParsedRtp) {
+    if (p.newControl) setNewControl(p.newControl)
+    if (p.adequacy) setAdequacy(p.adequacy)
+    if (p.riskOwner) setRiskOwner(p.riskOwner)
+    if (p.monitoredBy) setMonitoredBy(p.monitoredBy)
+    if (p.participatingDepts) setParticipatingDepts(p.participatingDepts)
+    if (p.preparedName) setPreparedName(p.preparedName)
+    if (p.hodName) setHodName(p.hodName)
+    if (p.rtcName) setRtcName(p.rtcName)
+    if (p.rocName) setRocName(p.rocName)
+    if (p.tasks.length) {
+      setTasks((prev) => {
+        const base = prev.filter((t) => t.task.trim() || t.pic.trim())
+        return [
+          ...base,
+          ...p.tasks.map((t, i) => ({
+            id: null, seq: base.length + i + 1, task: t.task, pic: t.pic,
+            due_date: t.due, status: t.status, updated_at: null,
+          })),
+        ]
+      })
+    }
+  }
+
   function updateTask(i: number, patch: Partial<TaskEdit>) {
     setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)))
   }
@@ -424,11 +452,11 @@ export default function RtpEditorPage() {
                 )}
               </div>
 
-              <div className="ac blue" style={{ marginTop: 14 }}>
-                <div className="ai">🤖</div>
-                <div><div className="at">Received the RTP as a PDF?</div>
-                  <div className="as">PDF import to pre-fill this form is coming in a later update — for now, enter the details below.</div></div>
-              </div>
+              {canEdit && (
+                <div style={{ marginTop: 14 }}>
+                  <RiskPdfImport mode="rtp" onParsed={applyParsedRtp} disabled={!canEdit} />
+                </div>
+              )}
 
               {/* 1 · Control */}
               <div className="panel" style={{ marginTop: 14 }}>

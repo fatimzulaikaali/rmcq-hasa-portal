@@ -26,6 +26,8 @@ import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
+import { RiskPdfImport } from '@/components/RiskPdfImport'
+import type { ParsedRegister } from '@/lib/risk/pdfImport'
 import {
   RiskDept, RiskNature, TreatmentOption, RiskStatus,
   RtpAdequacy, RtpTaskStatus,
@@ -176,6 +178,30 @@ export default function LogRiskPage() {
   }
   function addRisk() { setRisks((prev) => [...prev, emptyRisk()]) }
   function removeRisk(i: number) { setRisks((prev) => prev.filter((_, idx) => idx !== i)) }
+
+  /* Apply a PDF-parsed register: fill the header + the first risk block with
+   * whatever the parser detected. Only non-empty values overwrite, so a bad
+   * parse never wipes something the Coordinator already typed. */
+  function applyParsedRegister(p: ParsedRegister) {
+    if (p.reviewDate) setReviewDate(p.reviewDate)
+    if (p.registerRef) setRegisterRef(p.registerRef)
+    if (p.preparedName) setPreparedName(p.preparedName)
+    if (p.approvedName) setApprovedName(p.approvedName)
+    const r = p.risk
+    const patch: Partial<RiskBlock> = {}
+    if (r.context) patch.context = r.context
+    if (r.risk_nature) patch.risk_nature = r.risk_nature
+    if (r.description) patch.description = r.description
+    if (r.impact_description) patch.impact_description = r.impact_description
+    if (r.existing_controls) patch.existing_controls = r.existing_controls
+    if (r.treatment_option) patch.treatment_option = r.treatment_option
+    if (r.additional_controls) patch.additional_controls = r.additional_controls
+    if (r.likelihood) patch.likelihood = r.likelihood
+    if (r.severity) patch.severity = r.severity
+    if (r.residual_likelihood) patch.residual_likelihood = r.residual_likelihood
+    if (r.residual_severity) patch.residual_severity = r.residual_severity
+    if (Object.keys(patch).length) updateRisk(0, patch)
+  }
 
   // Validation
   const errors: string[] = []
@@ -356,6 +382,9 @@ export default function LogRiskPage() {
               <div className="banner blue">
                 📄 One register = one department, many risks. Add each risk below, then attach the source PDF on each risk after saving.
               </div>
+
+              {/* Free PDF import — pre-fills the header + first risk block */}
+              <RiskPdfImport mode="register" onParsed={applyParsedRegister} />
 
               {/* Register header */}
               <div className="card">
