@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
-import Link from 'next/link'
+import { PortalNav } from '@/components/PortalNav'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
@@ -321,19 +321,7 @@ function AccSidebar({ onClose }: { onClose?: () => void }) {
     <>
       <div className="scrim" onClick={onClose} />
       <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">📋 Accreditation</div>
-          <div className="sb-sub">MSQH 7th Edition · Standard 24</div>
-        </div>
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          <Link href="/home" className="nav-item"><span className="nav-icon">🏠</span><span>Home</span></Link>
-          <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
-          <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
-          <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
-          <Link href="/risk" className="nav-item"><span className="nav-icon">⚠️</span><span>Risk Register</span></Link>
-          <Link href="/acc" className="nav-item active"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
-        </div>
+        <PortalNav active="acc" />
       </aside>
     </>
   )

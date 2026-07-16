@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import Link from 'next/link'
+import { PortalNav } from '@/components/PortalNav'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -345,34 +345,7 @@ export default function PscsPage() {
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
 
       <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">🛡️ Safety Culture</div>
-          <div className="sb-sub">Patient Safety Culture Survey · {campaign?.code ?? '—'}</div>
-        </div>
-
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          <Link href="/home" className="nav-item">
-            <span className="nav-icon">🏠</span>
-            <span>Home</span>
-          </Link>
-          <Link href="/ir" className="nav-item">
-            <span className="nav-icon">🩺</span>
-            <span>IR Dashboard</span>
-          </Link>
-          <Link href="/kpi" className="nav-item">
-            <span className="nav-icon">📈</span>
-            <span>KPI Monitor</span>
-          </Link>
-          <Link href="/risk" className="nav-item">
-            <span className="nav-icon">⚠️</span>
-            <span>Risk Register</span>
-          </Link>
-          <Link href="/acc" className="nav-item">
-            <span className="nav-icon">📋</span>
-            <span>Accreditation</span>
-          </Link>
-        </div>
+        <PortalNav active="pscs" />
 
         <div className="sb-filters">
           <div className="sf-lbl">🔎 Filters</div>

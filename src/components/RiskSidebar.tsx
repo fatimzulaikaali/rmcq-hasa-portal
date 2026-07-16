@@ -62,8 +62,8 @@ export function RiskSidebar({ onClose, active, children }: {
       <div className="scrim" onClick={onClose} />
       <aside className="sidebar">
         <div className="sb-head">
-          <div className="sb-logo">⚠️ RMCQ Portal</div>
-          <div className="sb-sub">Risk Management, Compliance &amp; Quality</div>
+          <div className="sb-logo">🛡️ RMCQ HASA Portal</div>
+          <div className="sb-sub">Hospital Al-Sultan Abdullah UiTM</div>
         </div>
         <div className="nav-section">
           <div className="nav-lbl">Portal</div>

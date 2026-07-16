@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import Link from 'next/link'
+import { PortalNav } from '@/components/PortalNav'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -153,34 +153,7 @@ export default function KpiPage() {
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <div className="scrim" onClick={() => setSidebarOpen(false)} />
       <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-logo">📊 KPI Monitor</div>
-          <div className="sb-sub">Performance Indicators 2026</div>
-        </div>
-
-        <div className="nav-section">
-          <div className="nav-lbl">Portal</div>
-          <Link href="/home" className="nav-item">
-            <span className="nav-icon">🏠</span>
-            <span>Home</span>
-          </Link>
-          <Link href="/ir" className="nav-item">
-            <span className="nav-icon">🩺</span>
-            <span>IR Dashboard</span>
-          </Link>
-          <Link href="/pscs" className="nav-item">
-            <span className="nav-icon">🛡️</span>
-            <span>Safety Culture</span>
-          </Link>
-          <Link href="/risk" className="nav-item">
-            <span className="nav-icon">⚠️</span>
-            <span>Risk Register</span>
-          </Link>
-          <Link href="/acc" className="nav-item">
-            <span className="nav-icon">📋</span>
-            <span>Accreditation</span>
-          </Link>
-        </div>
+        <PortalNav active="kpi" />
 
         <div className="sb-filters">
           <div className="sf-lbl">🔎 Filters</div>
