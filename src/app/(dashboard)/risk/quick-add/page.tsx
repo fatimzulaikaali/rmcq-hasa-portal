@@ -27,13 +27,13 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
 import {
-  RiskDept, RiskNature, TreatmentOption, RiskScope, RiskStatus,
+  RiskDept, RiskNature, TreatmentOption, RiskStatus,
   RtpAdequacy, RtpTaskStatus,
 } from '@/lib/risk/types'
 import {
   computeSeverityScore, formatRiskId,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL, RISK_SCOPE_LABEL,
+  RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL,
 } from '@/lib/risk/scoring'
 
 type CommitteeStage = 'NOT_TABLED' | 'TABLED_RTC' | 'ENDORSED_ROC' | 'SENT_BACK' | 'RECOMMEND_CLOSE'
@@ -62,7 +62,6 @@ interface TaskRow { task: string; pic: string; due: string; status: RtpTaskStatu
 interface RiskBlock {
   context: string
   risk_nature: RiskNature | ''
-  scope: RiskScope | ''
   description: string
   cause_description: string
   impact_description: string
@@ -89,7 +88,7 @@ interface RiskBlock {
 
 function emptyRisk(): RiskBlock {
   return {
-    context: '', risk_nature: '', scope: '', description: '',
+    context: '', risk_nature: '', description: '',
     cause_description: '', impact_description: '', existing_controls: '',
     treatment_option: '', additional_controls: '',
     likelihood: 0, severity: 0, residual_likelihood: 0, residual_severity: 0,
@@ -227,7 +226,7 @@ export default function LogRiskPage() {
             context: r.context.trim(),
             risk_nature: r.risk_nature || null,
             treatment_option: r.treatment_option || null,
-            scope: r.scope || null,
+            scope: 'UNIT',
             description: r.description.trim(),
             cause_description: r.cause_description.trim() || '',
             impact_description: r.impact_description.trim() || '',
@@ -496,17 +495,6 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
                 <input type="radio" name={`nature-${index}`} checked={block.risk_nature === n}
                   onChange={() => onChange({ risk_nature: n })} />
                 {RISK_NATURE_LABEL[n]}
-              </label>
-            ))}
-          </div>
-        </Field>
-        <Field label="Scope">
-          <div style={{ display: 'flex', gap: 12 }}>
-            {(Object.keys(RISK_SCOPE_LABEL) as RiskScope[]).map((s) => (
-              <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                <input type="radio" name={`scope-${index}`} checked={block.scope === s}
-                  onChange={() => onChange({ scope: s })} />
-                {RISK_SCOPE_LABEL[s]}
               </label>
             ))}
           </div>

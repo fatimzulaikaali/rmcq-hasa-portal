@@ -81,19 +81,13 @@ export function RiskSidebar({ onClose, active, children }: {
           </Link>
           {showGlobal && (
             <Link href="/risk/quick-add" className={`nav-item nav-sub ${active === 'quickadd' ? 'active' : ''}`}
-              title="Enter a paper-submitted risk on behalf of a department">
-              <span className="nav-icon">📝</span><span>Quick Add (paper)</span>
+              title="Record a risk from a department's Form 0044 submission">
+              <span className="nav-icon">📝</span><span>Log Risk</span>
               {draftCount > 0 && (
                 <span className="nav-badge" title={`${draftCount} draft${draftCount === 1 ? '' : 's'} awaiting clarification from dept`}>
                   {draftCount}
                 </span>
               )}
-            </Link>
-          )}
-          {showGlobal && (
-            <Link href="/risk/bulk-upload" className={`nav-item nav-sub ${active === 'bulkupload' ? 'active' : ''}`}
-              title="Upload a paper register (PDF or Excel) and bulk-enter every risk in it">
-              <span className="nav-icon">📤</span><span>Bulk Upload (paper)</span>
             </Link>
           )}
           {showGlobal && (
