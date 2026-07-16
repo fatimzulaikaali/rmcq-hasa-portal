@@ -41,14 +41,6 @@ import {
 type CommitteeStage = 'NOT_TABLED' | 'TABLED_RTC' | 'ENDORSED_ROC' | 'SENT_BACK' | 'RECOMMEND_CLOSE'
 type EscalationType = 'AUTO' | 'MANUAL' | 'NONE'
 
-const STAGE_LABEL: Record<CommitteeStage, string> = {
-  NOT_TABLED:      'Not yet tabled',
-  TABLED_RTC:      'Tabled at RTC',
-  ENDORSED_ROC:    'Endorsed at ROC → Active',
-  SENT_BACK:       'Sent back to department',
-  RECOMMEND_CLOSE: 'Recommend closure',
-}
-
 function stageToStatus(stage: CommitteeStage): RiskStatus {
   switch (stage) {
     case 'NOT_TABLED':      return 'TABLED_RTC'
@@ -651,22 +643,12 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
         computed={res}
         placeholder="Optional — pick Likelihood and Severity for the residual level." />
 
-      {/* Committee outcome */}
-      <SubHeading>Committee outcome <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— what RTC / ROC decided</span></SubHeading>
-      <div className="frow">
-        <Field label="Current stage">
-          <select value={block.committee_stage} onChange={(e) => onChange({ committee_stage: e.target.value as CommitteeStage })}>
-            {(Object.keys(STAGE_LABEL) as CommitteeStage[]).map((s) => (
-              <option key={s} value={s}>{STAGE_LABEL[s]}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Escalation">
-          <select value={block.escalation_type} onChange={(e) => onChange({ escalation_type: e.target.value as EscalationType })}>
-            <option value="AUTO">Auto (High / Extreme) → ROC</option>
-            <option value="MANUAL">Manual escalation (rare Moderate)</option>
-            <option value="NONE">Not escalated</option>
-          </select>
+      {/* Committee outcome — free-text record of what RTC / ROC decided */}
+      <SubHeading>Committee decision <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— what RTC / ROC decided</span></SubHeading>
+      <div className="frow one">
+        <Field label="Committee decision" hint="Free text — record the committee's decision in your own words.">
+          <textarea rows={3} value={block.committee_notes} onChange={(e) => onChange({ committee_notes: e.target.value })}
+            placeholder="e.g. Tabled at Jun RTC; endorsed at Q2 ROC on 30 Jun 2026 — risk accepted and now active." />
         </Field>
       </div>
       <div className="frow">
@@ -677,11 +659,6 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
         <Field label="ROC meeting & date">
           <input type="text" value={block.roc_ref} onChange={(e) => onChange({ roc_ref: e.target.value })}
             placeholder="e.g. Q2 ROC · 30 Jun 2026" />
-        </Field>
-      </div>
-      <div className="frow one">
-        <Field label="Decision / outcome notes">
-          <textarea rows={2} value={block.committee_notes} onChange={(e) => onChange({ committee_notes: e.target.value })} />
         </Field>
       </div>
       <div className="frow one">
