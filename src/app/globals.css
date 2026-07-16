@@ -649,6 +649,8 @@ body{counter-reset:rcpage;}
 .score-pill{flex:1;padding:8px 0;border:1px solid var(--border);border-radius:5px;background:#fff;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .12s;font-family:inherit;}
 .score-pill:hover{border-color:var(--blue);color:var(--blue);}
 .score-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.risk-scorebox{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:2px 0 6px;}
+.risk-scoreout{padding:7px 12px;border-radius:8px;background:var(--blue-lt);color:var(--blue);font-weight:700;font-size:13px;}
 .risk-score-preview{display:flex;gap:24px;margin-top:14px;padding:14px;background:#F9FAFB;border:1px solid var(--border);border-radius:6px;align-items:center;justify-content:space-around;flex-wrap:wrap;}
 .rsp-block{text-align:center;}
 .rsp-label{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}

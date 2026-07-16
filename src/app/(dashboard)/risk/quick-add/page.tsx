@@ -489,15 +489,17 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
           <textarea rows={2} value={block.context} onChange={(e) => onChange({ context: e.target.value })} />
         </Field>
         <Field label="Actual or potential" required>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <select value={block.risk_nature}
+            onChange={(e) => onChange({ risk_nature: e.target.value as RiskNature })}>
+            <option value="">— pick —</option>
             {(Object.keys(RISK_NATURE_LABEL) as RiskNature[]).map((n) => (
-              <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                <input type="radio" name={`nature-${index}`} checked={block.risk_nature === n}
-                  onChange={() => onChange({ risk_nature: n })} />
-                {RISK_NATURE_LABEL[n]}
-              </label>
+              <option key={n} value={n}>{RISK_NATURE_LABEL[n]}</option>
             ))}
-          </div>
+          </select>
+        </Field>
+        <Field label="Risk ID" hint="Auto-assigned from the department on save (e.g. ED-2026-004).">
+          <input type="text" value="Auto-assigned on save" disabled
+            style={{ color: 'var(--muted)', background: '#F3F1EB' }} />
         </Field>
         <Field label="Description of risk" required full>
           <textarea rows={2} value={block.description} onChange={(e) => onChange({ description: e.target.value })} />
@@ -512,11 +514,12 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
 
       {/* Current risk */}
       <SubHeading>Current Risk</SubHeading>
-      <div className="risk-form-grid">
-        <ScoreField label="Likelihood" value={block.likelihood} onChange={(v) => onChange({ likelihood: v })} />
-        <ScoreField label="Severity" value={block.severity} onChange={(v) => onChange({ severity: v })} />
-      </div>
-      <ScorePreview computed={cur} placeholder="Pick Likelihood and Severity to see the current level." />
+      <ScoreBox
+        likelihood={block.likelihood} severity={block.severity}
+        onLikelihood={(v) => onChange({ likelihood: v })}
+        onSeverity={(v) => onChange({ severity: v })}
+        computed={cur} required
+        placeholder="Pick Likelihood and Severity to see the current level." />
 
       {/* Treatment (after current risk) */}
       <SubHeading>Treatment option</SubHeading>
@@ -592,11 +595,12 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
 
       {/* Residual risk */}
       <SubHeading>Residual Risk <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— can be any value, independent of current</span></SubHeading>
-      <div className="risk-form-grid">
-        <ScoreFieldOptional label="Residual Likelihood" value={block.residual_likelihood} onChange={(v) => onChange({ residual_likelihood: v })} />
-        <ScoreFieldOptional label="Residual Severity" value={block.residual_severity} onChange={(v) => onChange({ residual_severity: v })} />
-      </div>
-      {res && <ScorePreview computed={res} placeholder="" />}
+      <ScoreBox
+        likelihood={block.residual_likelihood} severity={block.residual_severity}
+        onLikelihood={(v) => onChange({ residual_likelihood: v })}
+        onSeverity={(v) => onChange({ residual_severity: v })}
+        computed={res}
+        placeholder="Optional — pick Likelihood and Severity for the residual level." />
 
       {/* Committee outcome */}
       <SubHeading>Committee outcome <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— what RTC / ROC decided</span></SubHeading>
@@ -644,22 +648,41 @@ function SubHeading({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 13, fontWeight: 700, margin: '14px 0 6px' }}>{children}</div>
 }
 
-function ScorePreview({ computed, placeholder }: {
+/* Likelihood + Severity as two compact dropdowns with the computed score/level
+ * chip sitting inline to the right — mirrors Form 0044's scorebox layout. */
+function ScoreBox({ likelihood, severity, onLikelihood, onSeverity, computed, required, placeholder }: {
+  likelihood: number; severity: number
+  onLikelihood: (v: number) => void; onSeverity: (v: number) => void
   computed: { riskScore: number; riskLevel: keyof typeof RISK_LEVEL_LABEL } | null
-  placeholder: string
+  required?: boolean; placeholder: string
 }) {
-  if (!computed) {
-    return placeholder
-      ? <div style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>{placeholder}</div>
-      : null
-  }
   return (
-    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 13, color: 'var(--muted)' }}>Score {computed.riskScore}</span>
-      <span style={{
-        display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 13, fontWeight: 700,
-        color: RISK_LEVEL_COLOR[computed.riskLevel], background: RISK_LEVEL_BG[computed.riskLevel],
-      }}>{RISK_LEVEL_LABEL[computed.riskLevel]}</span>
+    <div className="risk-scorebox">
+      <div className="risk-field" style={{ maxWidth: 130 }}>
+        <label>Likelihood (1–5){required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
+        <select value={likelihood} onChange={(e) => onLikelihood(Number(e.target.value))}>
+          <option value={0}>—</option>
+          {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div>
+      <div className="risk-field" style={{ maxWidth: 130 }}>
+        <label>Severity (1–5){required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
+        <select value={severity} onChange={(e) => onSeverity(Number(e.target.value))}>
+          <option value={0}>—</option>
+          {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div>
+      {computed ? (
+        <div className="risk-scoreout">
+          Score {computed.riskScore} ·{' '}
+          <span style={{
+            display: 'inline-block', padding: '2px 9px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+            color: RISK_LEVEL_COLOR[computed.riskLevel], background: RISK_LEVEL_BG[computed.riskLevel],
+          }}>{RISK_LEVEL_LABEL[computed.riskLevel]}</span>
+        </div>
+      ) : (
+        <div style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic', paddingBottom: 8 }}>{placeholder}</div>
+      )}
     </div>
   )
 }
@@ -672,34 +695,6 @@ function Field({ label, required, hint, full, children }: {
       <label>{label}{required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
       {children}
       {hint && <div className="risk-field-hint">{hint}</div>}
-    </div>
-  )
-}
-
-function ScoreField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <div className="risk-field">
-      <label>{label}<span style={{ color: 'var(--red)' }}> *</span></label>
-      <div className="score-pills">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" className={`score-pill ${value === n ? 'active' : ''}`}
-            onClick={() => onChange(n)}>{n}</button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ScoreFieldOptional({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <div className="risk-field">
-      <label>{label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-      <div className="score-pills">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" className={`score-pill ${value === n ? 'active' : ''}`}
-            onClick={() => onChange(value === n ? 0 : n)}>{n}</button>
-        ))}
-      </div>
     </div>
   )
 }
