@@ -9,46 +9,78 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
-import { Risk, RiskReview, RiskDept, TreatmentStatus } from '@/lib/risk/types'
-import {
-  RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL, TREATMENT_OPTION_LABEL,
-} from '@/lib/risk/scoring'
+import { Risk, RiskDept, RiskRtp, RiskRtpTask, RtpOverallStatus, RtpAdequacy } from '@/lib/risk/types'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 
 /* RTP (Risk Treatment Plan) monitoring — the Risk Coordinator's day-to-day
- * view. Once a risk is logged with a treatment option, the department is
- * expected to carry out its treatment plan; this page tracks whether that
- * plan is done, grouped by department.
- *
- * The RTP status comes from the latest review cycle's `treatment_status`.
- * Risks whose treatment option is ACCEPT need no plan, so they're excluded. */
+ * view. For every live, non-accepted risk we track whether the department is
+ * actually carrying out its treatment plan: task progress, the next due date
+ * (flagged when overdue), where the plan sits in the approval chain, and its
+ * overall status. Data comes from the new `risk_rtp` / `risk_rtp_tasks` tables.
+ * Accepted risks need no plan and are excluded. */
 
-// Treatment status = "is the RTP done?"
-const TS_LABEL: Record<TreatmentStatus, string> = {
+const OVERALL_LABEL: Record<RtpOverallStatus, string> = {
   NOT_STARTED: 'Not started',
   IN_PROGRESS: 'In progress',
   COMPLETED:   'Completed',
   VERIFIED:    'Verified',
 }
-const TS_BADGE: Record<TreatmentStatus, { fg: string; bg: string }> = {
+const OVERALL_BADGE: Record<RtpOverallStatus, { fg: string; bg: string }> = {
   NOT_STARTED: { fg: '#A32D2D', bg: '#FCEBEB' },
   IN_PROGRESS: { fg: '#854F0B', bg: '#FBF1DD' },
   COMPLETED:   { fg: '#3B6D11', bg: '#EAF3E0' },
   VERIFIED:    { fg: '#0F6E56', bg: '#E3F5EF' },
 }
-// null treatment_status is treated as "Not started" for monitoring purposes.
-function tsOf(r: RiskReview | null): TreatmentStatus {
-  return (r?.treatment_status ?? 'NOT_STARTED') as TreatmentStatus
+const ADEQUACY_BADGE: Record<RtpAdequacy, { fg: string; bg: string }> = {
+  H: { fg: '#3B6D11', bg: '#EAF3E0' },
+  M: { fg: '#854F0B', bg: '#FBF1DD' },
+  L: { fg: '#A32D2D', bg: '#FCEBEB' },
 }
-const OUTSTANDING: TreatmentStatus[] = ['NOT_STARTED', 'IN_PROGRESS']
+const OUTSTANDING: RtpOverallStatus[] = ['NOT_STARTED', 'IN_PROGRESS']
 
-type RtpFilter = 'outstanding' | 'all' | TreatmentStatus
+type RtpFilter = 'outstanding' | 'all' | RtpOverallStatus | 'overdue'
 
 interface RtpRow {
   risk: Risk
   dept: RiskDept | null
-  latest: RiskReview | null
-  ts: TreatmentStatus
+  rtp: RiskRtp | null
+  tasks: RiskRtpTask[]
+  status: RtpOverallStatus
+  tasksDone: number
+  tasksTotal: number
+  nextDue: string | null      // ISO date of earliest incomplete task, or null
+  nextDueOverdue: boolean
+  overdueCount: number        // incomplete tasks past due
+  approval: string            // human-readable approval-chain position
+}
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso + 'T00:00:00')
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+/* Where does the plan sit in prepared → HOD → RTC → ROC? Show the last stage
+ * signed off, plus the next one still pending. */
+function approvalText(rtp: RiskRtp | null): string {
+  if (!rtp) return 'Not yet submitted'
+  const chain: [string, boolean][] = [
+    ['Prepared', !!rtp.prepared_by_name],
+    ['HOD',      !!rtp.approved_hod_name],
+    ['RTC',      !!rtp.reviewed_rtc_name],
+    ['ROC',      !!rtp.approved_roc_name],
+  ]
+  const done = chain.filter(([, ok]) => ok)
+  if (done.length === 0) return 'Not yet submitted'
+  const last = done[done.length - 1][0]
+  const next = chain.find(([, ok]) => !ok)
+  if (last === 'ROC') return 'ROC ✔ complete'
+  return next ? `${last} ✔ · ${next[0]} pending` : `${last} ✔`
 }
 
 export default function RtpMonitorPage() {
@@ -87,30 +119,57 @@ export default function RtpMonitorPage() {
       if (deptsErr) throw new Error(`Loading departments: ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
 
-      const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }] =
-        await Promise.all([
-          supabase.from('risks').select('*').order('created_at', { ascending: false }),
-          supabase.from('risk_reviews').select('*').order('cycle_number', { ascending: false }),
-        ])
+      const [
+        { data: risksData, error: risksErr },
+        { data: rtpData, error: rtpErr },
+        { data: taskData, error: taskErr },
+      ] = await Promise.all([
+        supabase.from('risks').select('*').order('created_at', { ascending: false }),
+        supabase.from('risk_rtp').select('*'),
+        supabase.from('risk_rtp_tasks').select('*').order('seq', { ascending: true }),
+      ])
       if (risksErr) throw new Error(`Loading risks: ${risksErr.message}`)
-      if (reviewsErr) throw new Error(`Loading reviews: ${reviewsErr.message}`)
+      if (rtpErr) throw new Error(`Loading RTPs: ${rtpErr.message}`)
+      if (taskErr) throw new Error(`Loading RTP tasks: ${taskErr.message}`)
 
-      const latestByRisk = new Map<number, RiskReview>()
-      for (const r of (reviewsData ?? []) as RiskReview[]) {
-        if (!latestByRisk.has(r.risk_id)) latestByRisk.set(r.risk_id, r)
+      const rtpByRisk = new Map<number, RiskRtp>()
+      for (const r of (rtpData ?? []) as RiskRtp[]) rtpByRisk.set(r.risk_id, r)
+
+      const tasksByRtp = new Map<string, RiskRtpTask[]>()
+      for (const t of (taskData ?? []) as RiskRtpTask[]) {
+        if (!tasksByRtp.has(t.rtp_id)) tasksByRtp.set(t.rtp_id, [])
+        tasksByRtp.get(t.rtp_id)!.push(t)
       }
       const deptByCode = new Map<string, RiskDept>()
       for (const d of (deptsData ?? []) as RiskDept[]) deptByCode.set(d.code, d)
 
-      // Only risks that actually need a treatment plan tracked:
-      //  - not ACCEPT (accepted risks need no RTP)
-      //  - live in the register (exclude draft / closed / rejected / out-of-scope)
+      const today = todayISO()
+      // Live risks that need a plan tracked: not ACCEPT, and in the register.
       const excludeStatus = new Set(['DRAFT', 'CLOSED', 'REJECTED', 'OUT_OF_SCOPE'])
       const built: RtpRow[] = ((risksData ?? []) as Risk[])
         .filter((risk) => risk.treatment_option !== 'ACCEPT' && !excludeStatus.has(risk.status))
         .map((risk) => {
-          const latest = latestByRisk.get(risk.id) ?? null
-          return { risk, dept: deptByCode.get(risk.dept_code) ?? null, latest, ts: tsOf(latest) }
+          const rtp = rtpByRisk.get(risk.id) ?? null
+          const tasks = rtp ? (tasksByRtp.get(rtp.id) ?? []) : []
+          const tasksTotal = tasks.length
+          const tasksDone = tasks.filter((t) => t.status === 'COMPLETED').length
+          const incomplete = tasks.filter((t) => t.status !== 'COMPLETED' && t.due_date)
+          incomplete.sort((a, b) => (a.due_date! < b.due_date! ? -1 : 1))
+          const nextDue = incomplete.length ? incomplete[0].due_date : null
+          const overdueCount = incomplete.filter((t) => t.due_date! < today).length
+          return {
+            risk,
+            dept: deptByCode.get(risk.dept_code) ?? null,
+            rtp,
+            tasks,
+            status: rtp ? rtp.overall_status : 'NOT_STARTED',
+            tasksDone,
+            tasksTotal,
+            nextDue,
+            nextDueOverdue: !!nextDue && nextDue < today,
+            overdueCount,
+            approval: approvalText(rtp),
+          }
         })
       setRows(built)
     } catch (e) {
@@ -130,17 +189,19 @@ export default function RtpMonitorPage() {
     [rows, allowedDepts])
 
   const counts = useMemo(() => {
-    const c: Record<TreatmentStatus, number> = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0, VERIFIED: 0 }
-    for (const r of scopedRows) c[r.ts]++
+    const c: Record<RtpOverallStatus, number> = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0, VERIFIED: 0 }
+    let overdueTasks = 0
+    for (const r of scopedRows) { c[r.status]++; overdueTasks += r.overdueCount }
     const outstanding = c.NOT_STARTED + c.IN_PROGRESS
-    return { ...c, outstanding, total: scopedRows.length }
+    return { ...c, outstanding, overdueTasks, total: scopedRows.length }
   }, [scopedRows])
 
   const filtered = useMemo(() => scopedRows.filter((r) => {
     if (deptF !== 'all' && r.risk.dept_code !== deptF) return false
     if (statusF === 'all') return true
-    if (statusF === 'outstanding') return OUTSTANDING.includes(r.ts)
-    return r.ts === statusF
+    if (statusF === 'outstanding') return OUTSTANDING.includes(r.status)
+    if (statusF === 'overdue') return r.overdueCount > 0
+    return r.status === statusF
   }), [scopedRows, statusF, deptF])
 
   // Group filtered rows by department for display.
@@ -156,7 +217,6 @@ export default function RtpMonitorPage() {
     const result = deptList.map((d) => ({
       code: d.code, name: d.name_en, rows: byDept.get(d.code)!,
     }))
-    // Any dept codes not present in the depts table (defensive).
     for (const [code, rws] of Array.from(byDept)) {
       if (!known.has(code)) result.push({ code, name: code, rows: rws })
     }
@@ -213,12 +273,11 @@ export default function RtpMonitorPage() {
 
           {!loading && !loadError && !notProvisioned && (
             <>
-              <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-                <div className="tile"><div className="tl">Outstanding</div><div className="tv" style={{ color: 'var(--red)' }}>{counts.outstanding}</div></div>
-                <div className="tile"><div className="tl">Not started</div><div className="tv" style={{ color: TS_BADGE.NOT_STARTED.fg }}>{counts.NOT_STARTED}</div></div>
-                <div className="tile"><div className="tl">In progress</div><div className="tv" style={{ color: TS_BADGE.IN_PROGRESS.fg }}>{counts.IN_PROGRESS}</div></div>
-                <div className="tile"><div className="tl">Completed</div><div className="tv" style={{ color: TS_BADGE.COMPLETED.fg }}>{counts.COMPLETED}</div></div>
-                <div className="tile"><div className="tl">Verified</div><div className="tv" style={{ color: TS_BADGE.VERIFIED.fg }}>{counts.VERIFIED}</div></div>
+              <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                <div className="tile"><div className="tl">Not started</div><div className="tv" style={{ color: OVERALL_BADGE.NOT_STARTED.fg }}>{counts.NOT_STARTED}</div></div>
+                <div className="tile"><div className="tl">In progress</div><div className="tv" style={{ color: OVERALL_BADGE.IN_PROGRESS.fg }}>{counts.IN_PROGRESS}</div></div>
+                <div className="tile"><div className="tl">Completed</div><div className="tv" style={{ color: OVERALL_BADGE.COMPLETED.fg }}>{counts.COMPLETED + counts.VERIFIED}</div></div>
+                <div className="tile"><div className="tl">Overdue tasks</div><div className="tv" style={{ color: 'var(--red)' }}>{counts.overdueTasks}</div></div>
               </div>
 
               <div className="risk-filterbar">
@@ -226,6 +285,7 @@ export default function RtpMonitorPage() {
                 <select value={statusF} onChange={(e) => setStatusF(e.target.value as RtpFilter)}>
                   <option value="outstanding">Outstanding (not done)</option>
                   <option value="all">All RTPs</option>
+                  <option value="overdue">Has overdue task</option>
                   <option value="NOT_STARTED">Not started</option>
                   <option value="IN_PROGRESS">In progress</option>
                   <option value="COMPLETED">Completed</option>
@@ -256,65 +316,72 @@ export default function RtpMonitorPage() {
                   </div>
                 </div>
               ) : (
-                groups.map((g) => (
-                  <div key={g.code} className="panel" style={{ marginTop: 14 }}>
-                    <div className="pf"><div>
-                      <div className="pt">🏥 {g.name}</div>
-                      <div className="psub">{g.rows.length} risk{g.rows.length === 1 ? '' : 's'} with a treatment plan</div>
-                    </div></div>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="risk-table">
-                        <thead>
-                          <tr>
-                            <th>Risk ID</th>
-                            <th>Description</th>
-                            <th style={{ textAlign: 'center' }}>Level</th>
-                            <th>Treatment</th>
-                            <th>Target period</th>
-                            <th style={{ textAlign: 'center' }}>RTP status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {g.rows.map(({ risk, latest, ts }) => {
-                            const tb = TS_BADGE[ts]
-                            return (
-                              <tr key={risk.id}>
-                                <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11, borderLeftColor: latest ? RISK_LEVEL_COLOR[latest.risk_level] : 'transparent' }}>
-                                  <Link href={`/risk/${risk.id}`} style={{ color: 'var(--blue)' }}>{risk.risk_id}</Link>
-                                </td>
-                                <td style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  title={risk.description}>{risk.description}</td>
-                                <td style={{ textAlign: 'center' }}>
-                                  {latest ? (
+                groups.map((g) => {
+                  const gOverdue = g.rows.reduce((s, r) => s + r.overdueCount, 0)
+                  return (
+                    <div key={g.code} className="panel" style={{ marginTop: 14 }}>
+                      <div className="pf"><div>
+                        <div className="pt">🏥 {g.name}</div>
+                        <div className="psub">
+                          {g.rows.length} RTP{g.rows.length === 1 ? '' : 's'}
+                          {gOverdue > 0 ? ` · ${gOverdue} overdue task${gOverdue === 1 ? '' : 's'}` : ''}
+                        </div>
+                      </div></div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="risk-table">
+                          <thead>
+                            <tr>
+                              <th>Risk</th>
+                              <th style={{ textAlign: 'center' }}>Adequacy</th>
+                              <th style={{ textAlign: 'center' }}>Tasks done</th>
+                              <th>Next due</th>
+                              <th>Approval</th>
+                              <th style={{ textAlign: 'center' }}>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.rows.map((row) => {
+                              const sb = OVERALL_BADGE[row.status]
+                              const adq = row.rtp?.adequacy ?? null
+                              return (
+                                <tr key={row.risk.id} className="clk"
+                                  onClick={() => router.push(`/risk/${row.risk.id}/rtp`)}
+                                  style={{ cursor: 'pointer' }}>
+                                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11 }}>
+                                    <Link href={`/risk/${row.risk.id}/rtp`} style={{ color: 'var(--blue)' }}
+                                      onClick={(e) => e.stopPropagation()}>{row.risk.risk_id}</Link>
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {adq ? (
+                                      <span style={{
+                                        display: 'inline-block', width: 20, height: 20, lineHeight: '20px',
+                                        borderRadius: 4, fontSize: 11, fontWeight: 700,
+                                        color: ADEQUACY_BADGE[adq].fg, background: ADEQUACY_BADGE[adq].bg,
+                                      }}>{adq}</span>
+                                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontSize: 11 }}>
+                                    {row.tasksTotal ? `${row.tasksDone} / ${row.tasksTotal}` : '—'}
+                                  </td>
+                                  <td style={{ fontSize: 11, color: row.nextDueOverdue ? 'var(--red)' : 'var(--muted)', fontWeight: row.nextDueOverdue ? 600 : 400 }}>
+                                    {row.nextDue ? `${fmtDate(row.nextDue)}${row.nextDueOverdue ? ' · overdue' : ''}` : '—'}
+                                  </td>
+                                  <td style={{ fontSize: 11 }}>{row.approval}</td>
+                                  <td style={{ textAlign: 'center' }}>
                                     <span style={{
                                       display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                                      fontSize: 10, fontWeight: 700,
-                                      color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level],
-                                    }}>{RISK_LEVEL_LABEL[latest.risk_level]}</span>
-                                  ) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                                </td>
-                                <td style={{ fontSize: 11 }}>
-                                  {risk.treatment_option
-                                    ? TREATMENT_OPTION_LABEL[risk.treatment_option]
-                                    : <span style={{ color: 'var(--muted)' }}>—</span>}
-                                </td>
-                                <td style={{ fontSize: 11, color: 'var(--muted)' }}>
-                                  {risk.implementation_period || '—'}
-                                </td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <span style={{
-                                    display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                                    fontSize: 10, fontWeight: 700, color: tb.fg, background: tb.bg,
-                                  }}>{TS_LABEL[ts]}</span>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
+                                      fontSize: 10, fontWeight: 700, color: sb.fg, background: sb.bg,
+                                    }}>{OVERALL_LABEL[row.status]}</span>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </>
           )}

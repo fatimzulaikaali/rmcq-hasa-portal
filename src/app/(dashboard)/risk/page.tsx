@@ -11,30 +11,44 @@ import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import {
   Risk, RiskReview, RiskDept, RiskListRow,
-  RiskStatus, RiskLevel, RiskDomain, RiskRole,
+  RiskStatus, RiskLevel, TreatmentOption, RtpOverallStatus,
 } from '@/lib/risk/types'
-import type { ActiveRole } from '@/lib/risk/activeRole'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
-  RISK_DOMAIN_LABEL, RISK_STATUS_LABEL, RISK_STATUS_BADGE,
+  RISK_STATUS_LABEL, RISK_STATUS_BADGE, TREATMENT_OPTION_LABEL,
 } from '@/lib/risk/scoring'
 import { exportRegisterXlsx, exportRegisterPdf } from '@/lib/risk/exports'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 
-type StatusFilter   = 'all' | RiskStatus
-type LevelFilter    = 'all' | RiskLevel
-type DomainFilter = 'all' | RiskDomain | 'unassigned'
-type DeptFilter     = 'all' | string
+type StatusFilter = 'all' | RiskStatus
+type LevelFilter  = 'all' | RiskLevel
+type DeptFilter   = 'all' | string
+type ViewTab      = 'active' | 'archive'
 
-/* Which statuses are "awaiting action" for each active role, and the prompt to show. */
-const ATTENTION_BY_ROLE: Record<RiskRole, RiskStatus[]> = {
-  RLO:        ['DRAFT', 'RETURNED', 'OUT_OF_SCOPE'],
-  HOD:        ['PENDING_HOD'],
-  RC:         ['PENDING_RC', 'TABLED_RTC', 'TABLED_ROC', 'PENDING_CLOSURE'],
-  ROC_MEMBER: [],
-  RTC_MEMBER: [],
-  DIRECTOR:   [],
-  ADMIN:      [],
+/* Short treatment codes + colours, matching the register prototype. */
+const TREATMENT_SHORT: Record<TreatmentOption, string> = {
+  AVOID: 'Av', TRANSFER: 'T', CONTROL: 'C', ACCEPT: 'Ac',
+}
+const TREATMENT_BADGE: Record<TreatmentOption, { bg: string; fg: string }> = {
+  AVOID:    { bg: '#EDE9FE', fg: '#5B21B6' },
+  TRANSFER: { bg: '#DBEAFE', fg: '#1E40AF' },
+  CONTROL:  { bg: '#E0E7FF', fg: '#3730A3' },
+  ACCEPT:   { bg: '#F3F4F6', fg: '#4B5563' },
+}
+
+/* RTP overall-status badge — mirrors the prototype's RTP column. */
+const RTP_BADGE: Record<RtpOverallStatus, { label: string; bg: string; fg: string }> = {
+  NOT_STARTED: { label: 'Not started', bg: '#FEE2E2', fg: '#991B1B' },
+  IN_PROGRESS: { label: 'In progress', bg: '#FEF3C7', fg: '#854D0E' },
+  COMPLETED:   { label: 'Completed',   bg: '#DCFCE7', fg: '#166534' },
+  VERIFIED:    { label: 'Verified',    bg: '#DCFCE7', fg: '#166534' },
+}
+
+/* An RTP still needs work while it isn't COMPLETED/VERIFIED. */
+function rtpOutstanding(treatment: TreatmentOption | null, status: RtpOverallStatus | null): boolean {
+  if (treatment === 'ACCEPT') return false
+  if (!status) return true
+  return status === 'NOT_STARTED' || status === 'IN_PROGRESS'
 }
 
 export default function RiskListPage() {
@@ -42,25 +56,20 @@ export default function RiskListPage() {
   const supabase = useMemo(() => createClient(), [])
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [loading, setLoading]   = useState(true)
+  const [loading, setLoading]     = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [rows, setRows]   = useState<RiskListRow[]>([])
   const [depts, setDepts] = useState<RiskDept[]>([])
+  const [rtpByRisk, setRtpByRisk] = useState<Map<number, RtpOverallStatus>>(new Map())
 
-  const [view,      setView]      = useState<'attention' | 'active' | 'archive'>('active')
-  const [viewTouched, setViewTouched] = useState(false)
-  const [statusF,   setStatusF]   = useState<StatusFilter>('all')
-  const [levelF,    setLevelF]    = useState<LevelFilter>('all')
-  const [domainF, setDomainF] = useState<DomainFilter>('all')
-  const [deptF,     setDeptF]     = useState<DeptFilter>('all')
+  const [view,    setView]    = useState<ViewTab>('active')
+  const [statusF, setStatusF] = useState<StatusFilter>('all')
+  const [levelF,  setLevelF]  = useState<LevelFilter>('all')
+  const [deptF,   setDeptF]   = useState<DeptFilter>('all')
 
-  // Dept access scope. null = hospital-wide / all data; array = restricted to these depts.
   const [allowedDepts, setAllowedDepts] = useState<string[] | null>(null)
   const [isAdminRole, setIsAdminRole]   = useState(false)
-  const [activeRole,  setActiveRole]    = useState<ActiveRole | null>(null)
   const [notProvisioned, setNotProvisioned] = useState(false)
-  const [openDirectives, setOpenDirectives] = useState<{ risk_id: number; depts: string[] }[]>([])
-  const [escalatedRiskIds, setEscalatedRiskIds] = useState<Set<number>>(new Set())
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -70,12 +79,10 @@ export default function RiskListPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      // Resolve the user's module access (admin-style vs dept-scoped)
       const access = await getModuleAccess(supabase)
       if (!access.riskUser) { setNotProvisioned(true); setLoading(false); return }
       setAllowedDepts(access.deptScopes)
       setIsAdminRole(access.activeRole?.role === 'ADMIN')
-      setActiveRole(access.activeRole)
 
       const { data: deptsData, error: deptsErr } = await supabase
         .from('pscs_departments')
@@ -85,22 +92,20 @@ export default function RiskListPage() {
       if (deptsErr) throw new Error(`Loading departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
 
-      const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }, { data: openActions }] = await Promise.all([
+      const [{ data: risksData, error: risksErr }, { data: reviewsData, error: reviewsErr }, { data: rtpData, error: rtpErr }] = await Promise.all([
         supabase.from('risks').select('*').order('created_at', { ascending: false }),
         supabase.from('risk_reviews').select('*').order('cycle_number', { ascending: false }),
-        supabase.from('risk_action_items').select('risk_id, assigned_depts, status').in('status', ['PENDING', 'OVERDUE', 'ESCALATED']),
+        supabase.from('risk_rtp').select('risk_id, overall_status'),
       ])
       if (risksErr) throw new Error(`Loading risks: ${risksErr.code ?? ''} ${risksErr.message}`)
       if (reviewsErr) throw new Error(`Loading reviews: ${reviewsErr.code ?? ''} ${reviewsErr.message}`)
+      if (rtpErr) throw new Error(`Loading RTPs: ${rtpErr.code ?? ''} ${rtpErr.message}`)
 
-      const actionRows = ((openActions ?? []) as { risk_id: number | null; assigned_depts: string[] | null; status: string }[])
-        .filter((a) => a.risk_id !== null)
-      // Directives awaiting the dept's feedback (PENDING/OVERDUE).
-      setOpenDirectives(actionRows
-        .filter((a) => a.status === 'PENDING' || a.status === 'OVERDUE')
-        .map((a) => ({ risk_id: a.risk_id as number, depts: a.assigned_depts ?? [] })))
-      // Directives the RC escalated — flagged for the RC to bring back to committee.
-      setEscalatedRiskIds(new Set(actionRows.filter((a) => a.status === 'ESCALATED').map((a) => a.risk_id as number)))
+      const rtpMap = new Map<number, RtpOverallStatus>()
+      for (const r of (rtpData ?? []) as { risk_id: number; overall_status: RtpOverallStatus }[]) {
+        rtpMap.set(r.risk_id, r.overall_status)
+      }
+      setRtpByRisk(rtpMap)
 
       const latestByRisk = new Map<number, RiskReview>()
       for (const r of (reviewsData ?? []) as RiskReview[]) {
@@ -129,101 +134,73 @@ export default function RiskListPage() {
     router.push('/login')
   }
 
-  // Rows this user is allowed to see (dept-scoped), before any UI filters.
-  // The summary tiles are computed from this set so they reflect the user's
-  // scope (e.g. their department only), not the whole hospital.
+  // Rows this user is allowed to see (dept-scoped).
   const scopedRows = useMemo(() =>
     allowedDepts === null ? rows : rows.filter((r) => allowedDepts.includes(r.risk.dept_code)),
     [rows, allowedDepts])
 
-  // Risks awaiting the current active role's action (dept-scoped via scopedRows).
-  // Out-of-scope only counts while it's still awaiting the RLO's acknowledgment.
-  const attentionRows = useMemo(() => {
-    if (!activeRole) return []
-    const statuses = ATTENTION_BY_ROLE[activeRole.role] ?? []
-    // The dept (RLO/HOD) also acts on risks with an open directive assigned to THEIR dept.
-    const myDept = (activeRole.role === 'RLO' || activeRole.role === 'HOD') ? activeRole.dept_code : null
-    const risksWithMyDirective = myDept
-      ? new Set(openDirectives.filter((o) => o.depts.includes(myDept)).map((o) => o.risk_id))
-      : new Set<number>()
-    // RC: risks with an escalated directive flagged to bring back to committee.
-    const isRC = activeRole.role === 'RC'
-    if (statuses.length === 0 && risksWithMyDirective.size === 0 && !(isRC && escalatedRiskIds.size > 0)) return []
-    return scopedRows.filter((r) =>
-      (statuses.includes(r.risk.status) && (r.risk.status !== 'OUT_OF_SCOPE' || r.risk.pending_ack)) ||
-      risksWithMyDirective.has(r.risk.id) ||
-      (isRC && escalatedRiskIds.has(r.risk.id)))
-  }, [scopedRows, activeRole, openDirectives, escalatedRiskIds])
-
-  // Terminal statuses. Out-of-scope is terminal only ONCE the RLO has acknowledged
-  // it; until then it lives solely in the attention tab (not active, not archive).
   const isArchiveRow = (r: RiskListRow) => {
     const s = r.risk.status
-    if (s === 'CLOSED' || s === 'REJECTED') return true
-    if (s === 'OUT_OF_SCOPE') return !r.risk.pending_ack
-    return false
+    return s === 'CLOSED' || s === 'REJECTED' || s === 'OUT_OF_SCOPE'
   }
-  // Active register = the live workflow; never closed/out-of-scope/rejected.
-  const isActiveRow = (r: RiskListRow) => {
-    const s = r.risk.status
-    return s !== 'CLOSED' && s !== 'REJECTED' && s !== 'OUT_OF_SCOPE'
-  }
-
-  // Rows belonging to the currently-selected tab.
-  const viewRows = useMemo(() => {
-    if (view === 'attention') return attentionRows
-    if (view === 'archive')   return scopedRows.filter(isArchiveRow)
-    return scopedRows.filter(isActiveRow)
-  }, [scopedRows, attentionRows, view])
-  const activeCount  = useMemo(() => scopedRows.filter(isActiveRow).length,  [scopedRows])
+  const viewRows = useMemo(() =>
+    scopedRows.filter((r) => (view === 'archive' ? isArchiveRow(r) : !isArchiveRow(r))),
+    [scopedRows, view])
+  const activeCount  = useMemo(() => scopedRows.filter((r) => !isArchiveRow(r)).length, [scopedRows])
   const archiveCount = useMemo(() => scopedRows.filter(isArchiveRow).length, [scopedRows])
 
-  // Status options offered in the filter, scoped to the current tab.
   const ARCHIVE_STATUSES: RiskStatus[] = ['CLOSED', 'OUT_OF_SCOPE', 'REJECTED']
-  const statusOptions = useMemo(() => {
-    if (view === 'attention') return activeRole ? (ATTENTION_BY_ROLE[activeRole.role] ?? []) : []
-    if (view === 'archive') return ARCHIVE_STATUSES
-    return (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => !ARCHIVE_STATUSES.includes(s))
-  }, [view, activeRole]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Land on the attention tab on first load when the user has items waiting.
-  useEffect(() => {
-    if (!viewTouched && attentionRows.length > 0) setView('attention')
-  }, [attentionRows, viewTouched])
+  const statusOptions = useMemo(() =>
+    view === 'archive'
+      ? ARCHIVE_STATUSES
+      : (Object.keys(RISK_STATUS_LABEL) as RiskStatus[]).filter((s) => !ARCHIVE_STATUSES.includes(s)),
+    [view]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => viewRows.filter((r) => {
     if (statusF !== 'all' && r.risk.status !== statusF) return false
-    if (domainF === 'unassigned' && r.risk.uitm_domain !== null) return false
-    if (domainF !== 'all' && domainF !== 'unassigned' && r.risk.uitm_domain !== domainF) return false
-    if (deptF     !== 'all' && r.risk.dept_code     !== deptF)     return false
-    if (levelF    !== 'all' && r.latest?.risk_level !== levelF)    return false
+    if (deptF   !== 'all' && r.risk.dept_code     !== deptF) return false
+    if (levelF  !== 'all' && r.latest?.risk_level !== levelF) return false
     return true
-  }), [viewRows, statusF, domainF, deptF, levelF])
+  }), [viewRows, statusF, deptF, levelF])
 
   const activeFilters =
-    (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) +
-    (domainF !== 'all' ? 1 : 0) + (deptF !== 'all' ? 1 : 0)
+    (statusF !== 'all' ? 1 : 0) + (levelF !== 'all' ? 1 : 0) + (deptF !== 'all' ? 1 : 0)
 
-  function resetFilters() {
-    setStatusF('all'); setLevelF('all'); setDomainF('all'); setDeptF('all')
-  }
+  function resetFilters() { setStatusF('all'); setLevelF('all'); setDeptF('all') }
 
-  // Switching tabs clears the status filter (its valid options differ per tab).
-  function switchView(v: 'attention' | 'active' | 'archive') {
-    setView(v)
-    setStatusF('all')
-    setViewTouched(true)
-  }
+  function switchView(v: ViewTab) { setView(v); setStatusF('all') }
 
+  // Summary tiles — computed across the current view (active vs archive).
   const counts = useMemo(() => {
     const byLevel: Record<RiskLevel, number> = { EKSTREM: 0, TINGGI: 0, SEDERHANA: 0, RENDAH: 0 }
-    let open = 0, closed = 0
-    for (const r of scopedRows) {
+    let rtpOut = 0
+    for (const r of viewRows) {
       if (r.latest) byLevel[r.latest.risk_level]++
-      if (r.risk.status === 'CLOSED' || r.risk.status === 'OUT_OF_SCOPE' || r.risk.status === 'REJECTED') closed++; else open++
+      if (rtpOutstanding(r.risk.treatment_option, rtpByRisk.get(r.risk.id) ?? null)) rtpOut++
     }
-    return { byLevel, open, closed, total: scopedRows.length }
-  }, [scopedRows])
+    return { byLevel, rtpOut }
+  }, [viewRows, rtpByRisk])
+
+  // Group the filtered rows by department, ordered like the dept picker.
+  const grouped = useMemo(() => {
+    const orderedDepts = sortDeptsAlpha(depts.filter((d) => d.kind === 'department'))
+    const byCode = new Map<string, RiskListRow[]>()
+    for (const r of filtered) {
+      const arr = byCode.get(r.risk.dept_code) ?? []
+      arr.push(r)
+      byCode.set(r.risk.dept_code, arr)
+    }
+    const out: { dept: RiskDept | null; code: string; rows: RiskListRow[] }[] = []
+    for (const d of orderedDepts) {
+      const rs = byCode.get(d.code)
+      if (rs && rs.length) { out.push({ dept: d, code: d.code, rows: rs }); byCode.delete(d.code) }
+    }
+    // Any rows whose dept isn't in the ordered list (safety net).
+    for (const [code, rs] of Array.from(byCode.entries())) {
+      out.push({ dept: null, code, rows: rs })
+    }
+    return out
+  }, [filtered, depts])
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -245,14 +222,13 @@ export default function RiskListPage() {
               {loading ? 'Loading…' : `${filtered.length.toLocaleString()} risk${filtered.length === 1 ? '' : 's'}`}
             </div>
             {isAdminRole && (
-              <Link href="/risk/users" className="signout-btn"
-                title="Risk module user management (admin)">
+              <Link href="/risk/users" className="signout-btn" title="Risk module user management (admin)">
                 👥 Users
               </Link>
             )}
-            <Link href="/risk/new" className="signout-btn"
+            <Link href="/risk/quick-add" className="signout-btn"
               style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
-              + New Risk
+              ＋ Log Risk
             </Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
@@ -286,22 +262,15 @@ export default function RiskListPage() {
 
           {!loading && !loadError && !notProvisioned && (
             <>
-              <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
-                <div className="tile"><div className="tl">Total risks</div><div className="tv" style={{ color: 'var(--blue)' }}>{counts.total}</div></div>
-                <div className="tile"><div className="tl">Open</div><div className="tv" style={{ color: '#0EA5E9' }}>{counts.open}</div></div>
-                <div className="tile"><div className="tl">Closed</div><div className="tv" style={{ color: '#6B7280' }}>{counts.closed}</div></div>
-                <div className="tile"><div className="tl">Ekstrem</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.EKSTREM }}>{counts.byLevel.EKSTREM}</div></div>
-                <div className="tile"><div className="tl">Tinggi</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.TINGGI }}>{counts.byLevel.TINGGI}</div></div>
-                <div className="tile"><div className="tl">Sederhana</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.SEDERHANA }}>{counts.byLevel.SEDERHANA}</div></div>
+              <div className="pscs-tiles" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+                <div className="tile"><div className="tl">Extreme</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.EKSTREM }}>{counts.byLevel.EKSTREM}</div></div>
+                <div className="tile"><div className="tl">High</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.TINGGI }}>{counts.byLevel.TINGGI}</div></div>
+                <div className="tile"><div className="tl">Moderate</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.SEDERHANA }}>{counts.byLevel.SEDERHANA}</div></div>
+                <div className="tile"><div className="tl">Low</div><div className="tv" style={{ color: RISK_LEVEL_COLOR.RENDAH }}>{counts.byLevel.RENDAH}</div></div>
+                <div className="tile"><div className="tl">RTP Outstanding</div><div className="tv" style={{ color: '#B45309' }}>{counts.rtpOut}</div></div>
               </div>
 
               <div className="risk-tabs">
-                {attentionRows.length > 0 && (
-                  <button type="button" className={`risk-tab risk-tab-attention ${view === 'attention' ? 'active' : ''}`}
-                    onClick={() => switchView('attention')}>
-                    ⚡ Needs your attention <span className="risk-tab-count">{attentionRows.length}</span>
-                  </button>
-                )}
                 <button type="button" className={`risk-tab ${view === 'active' ? 'active' : ''}`}
                   onClick={() => switchView('active')}>
                   Active Register <span className="risk-tab-count">{activeCount}</span>
@@ -326,13 +295,6 @@ export default function RiskListPage() {
                     <option key={l} value={l}>{RISK_LEVEL_LABEL[l]}</option>
                   ))}
                 </select>
-                <select value={domainF} onChange={(e) => setDomainF(e.target.value as DomainFilter)}>
-                  <option value="all">All domains</option>
-                  <option value="unassigned">— Unassigned —</option>
-                  {(Object.keys(RISK_DOMAIN_LABEL) as RiskDomain[]).map((d) => (
-                    <option key={d} value={d}>{RISK_DOMAIN_LABEL[d]}</option>
-                  ))}
-                </select>
                 <select value={deptF} onChange={(e) => setDeptF(e.target.value as DeptFilter)}>
                   <option value="all">All departments</option>
                   {sortDeptsAlpha(depts.filter((d) => d.kind === 'department')).map((d) => (
@@ -350,7 +312,7 @@ export default function RiskListPage() {
                   disabled={filtered.length === 0}
                   title="Download the current view as Excel — full column set"
                   onClick={() => exportRegisterXlsx(filtered,
-                    { view, status: statusF, level: levelF, domain: domainF, deptCode: deptF }, depts)}>
+                    { view, status: statusF, level: levelF, domain: 'all', deptCode: deptF }, depts)}>
                   📊 Excel
                 </button>
                 <button type="button" className="signout-btn"
@@ -358,119 +320,137 @@ export default function RiskListPage() {
                   disabled={filtered.length === 0}
                   title="Print or save the current view as PDF"
                   onClick={() => exportRegisterPdf(filtered,
-                    { view, status: statusF, level: levelF, domain: domainF, deptCode: deptF }, depts)}>
+                    { view, status: statusF, level: levelF, domain: 'all', deptCode: deptF }, depts)}>
                   🖨 PDF
                 </button>
               </div>
 
-              <div className="panel" style={{ marginTop: 14 }}>
-                <div className="pf">
-                  <div>
-                    <div className="pt">{view === 'archive' ? 'Archive — Closed &amp; Out of Scope' : view === 'attention' ? 'Needs Your Attention' : 'Active Register'}</div>
-                    <div className="psub">
-                      {filtered.length} of {viewRows.length} {view === 'archive' ? 'archived risks' : view === 'attention' ? 'risks awaiting your action' : 'active risks'}
-                      {view === 'archive'
-                        ? ' · revising a returned risk moves it back to the Active Register'
-                        : view === 'attention'
-                          ? ' · these are waiting on your current role'
-                          : ' · use the filters above to narrow down'}
-                    </div>
-                  </div>
-                </div>
-
-                {filtered.length === 0 ? (
+              {filtered.length === 0 ? (
+                <div className="panel" style={{ marginTop: 14 }}>
                   <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--muted)' }}>
                     {viewRows.length === 0 ? (
                       <>
-                        <div style={{ fontSize: 28, marginBottom: 8 }}>{view === 'archive' ? '🗄️' : view === 'attention' ? '✅' : '📭'}</div>
+                        <div style={{ fontSize: 28, marginBottom: 8 }}>{view === 'archive' ? '🗄️' : '📭'}</div>
                         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-                          {view === 'archive' ? 'Nothing archived yet' : view === 'attention' ? 'Nothing waiting on you' : 'No active risks'}
+                          {view === 'archive' ? 'Nothing archived yet' : 'No risks logged yet'}
                         </div>
                         <div style={{ fontSize: 12 }}>
                           {view === 'archive'
                             ? 'Closed and out-of-scope risks will appear here.'
-                            : view === 'attention'
-                              ? 'You’re all caught up — no risks need your action right now.'
-                              : 'Risks move here as they progress through the workflow.'}
+                            : 'Use ＋ Log Risk to enter a department’s risk register.'}
                         </div>
                       </>
                     ) : (
                       <>No risks match the current filters. <button onClick={resetFilters} style={{ color: 'var(--blue)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}>Reset</button></>
                     )}
                   </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="risk-table">
-                      <thead>
-                        <tr>
-                          <th>Risk ID</th>
-                          <th>Department</th>
-                          <th>Domain</th>
-                          <th>Description</th>
-                          <th style={{ textAlign: 'center' }}>Level</th>
-                          <th style={{ textAlign: 'right' }}>Score</th>
-                          <th style={{ textAlign: 'center' }}>Cycle</th>
-                          <th style={{ textAlign: 'center' }}>Status</th>
-                          <th style={{ textAlign: 'right' }}>Opened</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map(({ risk, dept, latest }) => {
-                          const sb = RISK_STATUS_BADGE[risk.status]
-                          return (
-                            <tr key={risk.id}>
-                              <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11, borderLeftColor: latest ? RISK_LEVEL_COLOR[latest.risk_level] : 'transparent' }}>
-                                <Link href={`/risk/${risk.id}`} style={{ color: 'var(--blue)' }}>{risk.risk_id}</Link>
-                                {escalatedRiskIds.has(risk.id) && (
-                                  <span title="Escalated directive — bring back to committee"
-                                    style={{ marginLeft: 5, color: '#DC2626' }}>⚑</span>
-                                )}
-                              </td>
-                              <td style={{ fontSize: 11 }}>{dept?.name_en ?? risk.dept_code}</td>
-                              <td style={{ fontSize: 11 }}>
-                                {risk.uitm_domain
-                                  ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b>
-                                  : <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>Unassigned</span>}
-                              </td>
-                              <td style={{ maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  title={risk.description}>
-                                {risk.description}
-                              </td>
-                              <td style={{ textAlign: 'center' }}>
-                                {latest ? (
-                                  <span style={{
-                                    display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                                    fontSize: 10, fontWeight: 700,
-                                    color: RISK_LEVEL_COLOR[latest.risk_level],
-                                    background: RISK_LEVEL_BG[latest.risk_level],
-                                  }}>{RISK_LEVEL_LABEL[latest.risk_level]}</span>
-                                ) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                              </td>
-                              <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                                {latest ? Math.round(latest.risk_score * 10) / 10 : <span style={{ color: 'var(--muted)' }}>—</span>}
-                              </td>
-                              <td style={{ textAlign: 'center', fontSize: 11 }}>
-                                {latest ? latest.cycle_number : <span style={{ color: 'var(--muted)' }}>—</span>}
-                              </td>
-                              <td style={{ textAlign: 'center' }}>
-                                <span style={{
-                                  display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                                  fontSize: 10, fontWeight: 700,
-                                  color: sb.fg, background: sb.bg,
-                                }}>{RISK_STATUS_LABEL[risk.status]}</span>
-                              </td>
-                              <td style={{ textAlign: 'right', fontSize: 11, color: 'var(--muted)' }}>
-                                {risk.date_opened.slice(0, 10)}
-                              </td>
+                </div>
+              ) : (
+                grouped.map(({ dept, code, rows: deptRows }) => {
+                  const extreme = deptRows.filter((r) => r.latest?.risk_level === 'EKSTREM').length
+                  return (
+                    <div key={code} className="panel" style={{ marginTop: 14 }}>
+                      <div className="pf">
+                        <div>
+                          <div className="pt">{dept?.name_en ?? code}</div>
+                          <div className="psub">
+                            {deptRows.length} risk{deptRows.length === 1 ? '' : 's'}
+                            {extreme > 0 ? ` · ${extreme} extreme` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="risk-table">
+                          <thead>
+                            <tr>
+                              <th>Risk ID</th>
+                              <th>Nature</th>
+                              <th>Description</th>
+                              <th style={{ textAlign: 'center' }}>Current</th>
+                              <th style={{ textAlign: 'center' }}>Treatment</th>
+                              <th style={{ textAlign: 'center' }}>Residual</th>
+                              <th style={{ textAlign: 'center' }}>RTP</th>
+                              <th style={{ textAlign: 'center' }}>Status</th>
                             </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
+                          </thead>
+                          <tbody>
+                            {deptRows.map(({ risk, latest }) => {
+                              const sb = RISK_STATUS_BADGE[risk.status]
+                              const to = risk.treatment_option
+                              const rtp = rtpByRisk.get(risk.id) ?? null
+                              return (
+                                <tr key={risk.id} className="clk" style={{ cursor: 'pointer' }}
+                                  onClick={() => router.push(`/risk/${risk.id}`)}>
+                                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 11, borderLeftColor: latest ? RISK_LEVEL_COLOR[latest.risk_level] : 'transparent' }}>
+                                    <Link href={`/risk/${risk.id}`} style={{ color: 'var(--blue)' }} onClick={(e) => e.stopPropagation()}>{risk.risk_id}</Link>
+                                  </td>
+                                  <td style={{ fontSize: 11 }}>
+                                    {risk.risk_nature === 'ACTUAL'
+                                      ? <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: '#991B1B', background: '#FEE2E2' }}>Actual</span>
+                                      : risk.risk_nature === 'POTENTIAL'
+                                        ? <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: '#4B5563', background: '#F3F4F6' }}>Potential</span>
+                                        : <span style={{ color: 'var(--muted)' }}>—</span>}
+                                  </td>
+                                  <td style={{ maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                      title={risk.description}>
+                                    {risk.description}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {latest ? (
+                                      <>
+                                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RISK_LEVEL_COLOR[latest.risk_level], background: RISK_LEVEL_BG[latest.risk_level] }}>
+                                          {RISK_LEVEL_LABEL[latest.risk_level]}
+                                        </span>
+                                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                                          L{latest.likelihood} × S{latest.severity ?? '—'} = {Math.round(latest.risk_score)}
+                                        </div>
+                                      </>
+                                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {to ? (
+                                      <span title={TREATMENT_OPTION_LABEL[to]}
+                                        style={{ display: 'inline-block', minWidth: 22, padding: '2px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: TREATMENT_BADGE[to].fg, background: TREATMENT_BADGE[to].bg }}>
+                                        {TREATMENT_SHORT[to]}
+                                      </span>
+                                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {latest && latest.residual_level ? (
+                                      <>
+                                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RISK_LEVEL_COLOR[latest.residual_level], background: RISK_LEVEL_BG[latest.residual_level] }}>
+                                          {RISK_LEVEL_LABEL[latest.residual_level]}
+                                        </span>
+                                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                                          L{latest.residual_likelihood ?? '—'} × S{latest.residual_severity ?? '—'} = {latest.residual_score != null ? Math.round(latest.residual_score) : '—'}
+                                        </div>
+                                      </>
+                                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {to === 'ACCEPT' ? (
+                                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: '#4B5563', background: '#F3F4F6' }}>— Accepted</span>
+                                    ) : rtp ? (
+                                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RTP_BADGE[rtp].fg, background: RTP_BADGE[rtp].bg }}>{RTP_BADGE[rtp].label}</span>
+                                    ) : (
+                                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: '#991B1B', background: '#FEE2E2' }}>Not started</span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: sb.fg, background: sb.bg }}>
+                                      {RISK_STATUS_LABEL[risk.status]}
+                                    </span>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
             </>
           )}
         </main>

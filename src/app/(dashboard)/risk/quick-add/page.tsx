@@ -1,19 +1,20 @@
 'use client'
 
-/* RMCQ-mode quick-add — RC enters a paper-submitted risk on behalf of a
- * department. Gated to global-role users (Admin / RC / Director). Three
- * triage outcomes lead to three different save paths so EVERY paper that
- * crosses Fatim's desk gets a portal record with an outcome:
+/* Log Risk (paper) — the Coordinator records a department's paper/PDF risk
+ * register (Form 0044). One register = one department, MANY risks. Rebuilt
+ * 2026 to match Fatim's forms:
  *
- *   - Valid & complete     → status TABLED_RTC, cycle-1 review created.
- *   - Out of scope         → status OUT_OF_SCOPE with reason; archived.
- *   - Incomplete (paper)   → status DRAFT with clarification note; sits in
- *                            RC's intake queue until the dept supplies the
- *                            missing info on paper.
+ *   - Register header (dept + review date + reference) applies to every risk.
+ *   - Each risk block: context / nature / description / consequence / existing
+ *     control → Current Risk (L×S) → Treatment option → optional inline RTP
+ *     (Form 0045) → Residual Risk (independent L×S).
+ *   - Per-risk Committee outcome (stage, escalation, RTC/ROC refs, notes,
+ *     Submit-to-ERMS) since the Coordinator logs risks that already went to
+ *     committee on paper.
+ *   - Register-level sign-off (RLO prepared / HOD approved).
  *
- * All three carry entry_mode='rmcq_managed' and the paper-source metadata
- * (who submitted, who endorsed, dates, reference). Cycle-1 scoring is only
- * required for the Valid path. */
+ * Departments do NOT log in — the whole portal is the Coordinator's monitoring
+ * tool; departments communicate on paper / outside the portal. */
 
 export const dynamic = 'force-dynamic'
 
@@ -24,85 +25,109 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
-import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
-import { RiskDept, RiskNature, TreatmentOption, RiskScope } from '@/lib/risk/types'
+import {
+  RiskDept, RiskNature, TreatmentOption, RiskScope, RiskStatus,
+  RtpAdequacy, RtpTaskStatus,
+} from '@/lib/risk/types'
 import {
   computeSeverityScore, formatRiskId,
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
   RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL, RISK_SCOPE_LABEL,
 } from '@/lib/risk/scoring'
 
-type Triage = 'valid' | 'out_of_scope' | 'incomplete'
+type CommitteeStage = 'NOT_TABLED' | 'TABLED_RTC' | 'ENDORSED_ROC' | 'SENT_BACK' | 'RECOMMEND_CLOSE'
+type EscalationType = 'AUTO' | 'MANUAL' | 'NONE'
 
-interface FormState {
-  triage: Triage
-  // identification
-  dept_code: string
+const STAGE_LABEL: Record<CommitteeStage, string> = {
+  NOT_TABLED:      'Not yet tabled',
+  TABLED_RTC:      'Tabled at RTC',
+  ENDORSED_ROC:    'Endorsed at ROC → Active',
+  SENT_BACK:       'Sent back to department',
+  RECOMMEND_CLOSE: 'Recommend closure',
+}
+
+function stageToStatus(stage: CommitteeStage): RiskStatus {
+  switch (stage) {
+    case 'NOT_TABLED':      return 'TABLED_RTC'
+    case 'TABLED_RTC':      return 'TABLED_RTC'
+    case 'ENDORSED_ROC':    return 'ACTIVE'
+    case 'SENT_BACK':       return 'RETURNED'
+    case 'RECOMMEND_CLOSE': return 'PENDING_CLOSURE'
+  }
+}
+
+interface TaskRow { task: string; pic: string; due: string; status: RtpTaskStatus }
+
+interface RiskBlock {
   context: string
   risk_nature: RiskNature | ''
   scope: RiskScope | ''
-  // description
   description: string
   cause_description: string
   impact_description: string
-  // controls
   existing_controls: string
-  additional_controls: string
   treatment_option: TreatmentOption | ''
-  action_owner_depts: string[]
-  implementation_period: string
-  notes: string
-  // scoring (Valid only)
+  additional_controls: string          // brief control / refer to RTP #
   likelihood: number
   severity: number
   residual_likelihood: number
   residual_severity: number
-  // paper source
-  paper_submitted_by: string
-  paper_submission_date: string
-  paper_endorsed_by: string
-  paper_endorsement_date: string
-  paper_reference: string
-  // triage-specific
-  out_of_scope_reason: string
-  clarification_note: string
+  // inline RTP (Form 0045)
+  rtpOpen: boolean
+  rtp_new_control: string
+  rtp_adequacy: RtpAdequacy | ''
+  rtp_tasks: TaskRow[]
+  // committee outcome
+  committee_stage: CommitteeStage
+  escalation_type: EscalationType
+  rtc_ref: string
+  roc_ref: string
+  committee_notes: string
+  submit_to_erms: boolean
 }
 
-const EMPTY: FormState = {
-  triage: 'valid',
-  dept_code: '', context: '', risk_nature: '', scope: '',
-  description: '', cause_description: '', impact_description: '',
-  existing_controls: '', additional_controls: '', treatment_option: '',
-  action_owner_depts: [], implementation_period: '', notes: '',
-  likelihood: 0, severity: 0,
-  residual_likelihood: 0, residual_severity: 0,
-  paper_submitted_by: '', paper_submission_date: '',
-  paper_endorsed_by: '', paper_endorsement_date: '',
-  paper_reference: '',
-  out_of_scope_reason: '',
-  clarification_note: '',
+function emptyRisk(): RiskBlock {
+  return {
+    context: '', risk_nature: '', scope: '', description: '',
+    cause_description: '', impact_description: '', existing_controls: '',
+    treatment_option: '', additional_controls: '',
+    likelihood: 0, severity: 0, residual_likelihood: 0, residual_severity: 0,
+    rtpOpen: false, rtp_new_control: '', rtp_adequacy: '',
+    rtp_tasks: [{ task: '', pic: '', due: '', status: 'NOT_STARTED' }],
+    committee_stage: 'NOT_TABLED', escalation_type: 'NONE',
+    rtc_ref: '', roc_ref: '', committee_notes: '', submit_to_erms: false,
+  }
 }
 
-export default function QuickAddPage() {
+export default function LogRiskPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [loading, setLoading]   = useState(true)
+  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const [depts, setDepts]   = useState<RiskDept[]>([])
+  const [depts, setDepts] = useState<RiskDept[]>([])
   const [allDepts, setAllDepts] = useState<{ code: string; name_en: string }[]>([])
-  const [rlos, setRlos] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
-  const [hods, setHods] = useState<{ id: number; name: string; dept_code: string | null }[]>([])
   const [riskUserId, setRiskUserId] = useState<number | null>(null)
   const [riskUserName, setRiskUserName] = useState<string>('')
 
-  const [form, setForm] = useState<FormState>(EMPTY)
+  // register header + sign-off
+  const [deptCode, setDeptCode] = useState('')
+  const [reviewDate, setReviewDate] = useState('')
+  const [registerRef, setRegisterRef] = useState('')
+  const [preparedName, setPreparedName] = useState('')
+  const [preparedDesig, setPreparedDesig] = useState('')
+  const [preparedDate, setPreparedDate] = useState('')
+  const [approvedName, setApprovedName] = useState('')
+  const [approvedDesig, setApprovedDesig] = useState('')
+  const [approvedDate, setApprovedDate] = useState('')
+
+  const [risks, setRisks] = useState<RiskBlock[]>([emptyRisk()])
 
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,14 +138,11 @@ export default function QuickAddPage() {
       if (userErr) throw new Error(`Auth: ${userErr.message}`)
       if (!user) { router.push('/login'); return }
 
-      // Gate: quick-add is RMCQ-only — global-role users (Admin/RC/Director).
-      // getModuleAccess.allModules is the gate.
       const access = await getModuleAccess(supabase)
       if (!access.allModules || !access.riskUser) { setAccessDenied(true); return }
       setRiskUserId(access.riskUser.riskUserId)
       setRiskUserName(access.riskUser.name)
 
-      // Departments — unrestricted (RC may enter on behalf of any dept).
       const { data: deptsData, error: deptsErr } = await supabase
         .from('pscs_departments')
         .select('code,risk_code,name_en,name_ms,kind,parent_code,sort_order')
@@ -130,25 +152,6 @@ export default function QuickAddPage() {
       if (deptsErr) throw new Error(`Departments: ${deptsErr.code ?? ''} ${deptsErr.message}`)
       setDepts((deptsData ?? []) as RiskDept[])
       setAllDepts(((deptsData ?? []) as RiskDept[]).map((d) => ({ code: d.code, name_en: d.name_en })))
-
-      // RLO + HOD lists for the paper-source dropdowns.
-      const [{ data: users }, { data: roles }] = await Promise.all([
-        supabase.from('risk_users').select('id, name').eq('is_active', true).order('name'),
-        supabase.from('risk_user_roles')
-          .select('user_id, role, dept_code').eq('is_active', true)
-          .in('role', ['RLO', 'HOD']),
-      ])
-      const rloIds = new Set<number>()
-      const hodIds = new Set<number>()
-      const deptByUser = new Map<number, string>()
-      for (const r of ((roles ?? []) as { user_id: number; role: string; dept_code: string | null }[])) {
-        if (r.role === 'RLO') rloIds.add(r.user_id)
-        if (r.role === 'HOD') hodIds.add(r.user_id)
-        if (r.dept_code && !deptByUser.has(r.user_id)) deptByUser.set(r.user_id, r.dept_code)
-      }
-      const userRows = (users ?? []) as { id: number; name: string }[]
-      setRlos(userRows.filter((u) => rloIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
-      setHods(userRows.filter((u) => hodIds.has(u.id)).map((u) => ({ ...u, dept_code: deptByUser.get(u.id) ?? null })))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -158,190 +161,147 @@ export default function QuickAddPage() {
 
   async function signOut() { await supabase.auth.signOut(); router.push('/login') }
 
-  // Live risk-score preview (Valid path only)
-  const scoreInputs = form.triage === 'valid' &&
-    form.likelihood > 0 && form.severity > 0
-  const computed = scoreInputs
-    ? computeSeverityScore(form.likelihood, form.severity)
-    : null
-  const hasResidual = form.residual_likelihood > 0 && form.residual_severity > 0
-  const residual = hasResidual
-    ? computeSeverityScore(form.residual_likelihood, form.residual_severity)
-    : null
+  function updateRisk(i: number, patch: Partial<RiskBlock>) {
+    setRisks((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  }
+  function updateTask(ri: number, ti: number, patch: Partial<TaskRow>) {
+    setRisks((prev) => prev.map((r, idx) => {
+      if (idx !== ri) return r
+      return { ...r, rtp_tasks: r.rtp_tasks.map((t, tIdx) => (tIdx === ti ? { ...t, ...patch } : t)) }
+    }))
+  }
+  function addTask(ri: number) {
+    setRisks((prev) => prev.map((r, idx) => (idx === ri
+      ? { ...r, rtp_tasks: [...r.rtp_tasks, { task: '', pic: '', due: '', status: 'NOT_STARTED' }] }
+      : r)))
+  }
+  function addRisk() { setRisks((prev) => [...prev, emptyRisk()]) }
+  function removeRisk(i: number) { setRisks((prev) => prev.filter((_, idx) => idx !== i)) }
 
-  // Validation — adapts to triage choice. Common requirements first.
+  // Validation
   const errors: string[] = []
-  if (!form.dept_code) errors.push('Department is required')
-  if (!form.paper_submitted_by.trim()) errors.push('Paper: submitter name is required')
-  if (!form.paper_submission_date) errors.push('Paper: submission date is required')
-
-  // Common across triages: the dept's paper at minimum identifies the context.
-  if (!form.context.trim()) errors.push('Context is required')
-  if (!form.scope) errors.push('Scope is required')
-  if (!form.description.trim()) errors.push('Risk description is required')
-  if (form.triage === 'valid') {
-    if (!form.risk_nature) errors.push('Risk nature is required')
-    if (!form.cause_description.trim()) errors.push('Cause is required')
-    if (!form.impact_description.trim()) errors.push('Consequence is required')
-    if (!form.paper_endorsed_by.trim()) errors.push('Paper: HOD endorser is required')
-    if (!form.paper_endorsement_date) errors.push('Paper: HOD endorsement date is required')
-    if (!scoreInputs) errors.push('Likelihood and Severity must both be 1–5')
-  } else if (form.triage === 'out_of_scope') {
-    if (!form.out_of_scope_reason.trim()) errors.push('Reason for declining is required')
-  } else if (form.triage === 'incomplete') {
-    if (!form.clarification_note.trim()) errors.push('Clarification note is required (what to ask the dept for)')
-  }
-
+  if (!deptCode) errors.push('Department is required')
+  if (!reviewDate) errors.push('Date of review is required')
+  risks.forEach((r, i) => {
+    const n = i + 1
+    if (!r.context.trim()) errors.push(`Risk ${n}: context is required`)
+    if (!r.description.trim()) errors.push(`Risk ${n}: description is required`)
+    if (!r.impact_description.trim()) errors.push(`Risk ${n}: consequence is required`)
+    if (!r.risk_nature) errors.push(`Risk ${n}: actual/potential is required`)
+    if (!(r.likelihood > 0 && r.severity > 0)) errors.push(`Risk ${n}: current likelihood & severity (1–5)`)
+    if (!r.treatment_option) errors.push(`Risk ${n}: treatment option is required`)
+  })
   const canSubmit = !submitting && errors.length === 0 && riskUserId !== null
-
-  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  /* Build the paper-source object common to all three save paths. */
-  function paperSourceFields() {
-    return {
-      paper_submitted_by: form.paper_submitted_by.trim() || null,
-      paper_submission_date: form.paper_submission_date || null,
-      paper_endorsed_by: form.paper_endorsed_by.trim() || null,
-      paper_endorsement_date: form.paper_endorsement_date || null,
-      paper_reference: form.paper_reference.trim() || null,
-    }
-  }
-
-  function paperSummaryText(): string {
-    const parts: string[] = []
-    if (form.paper_submitted_by.trim()) parts.push(`submitted by ${form.paper_submitted_by.trim()}`)
-    if (form.paper_submission_date) parts.push(`on ${form.paper_submission_date}`)
-    if (form.paper_endorsed_by.trim()) parts.push(`HOD-endorsed by ${form.paper_endorsed_by.trim()}`)
-    if (form.paper_endorsement_date) parts.push(`on ${form.paper_endorsement_date}`)
-    if (form.paper_reference.trim()) parts.push(`ref: ${form.paper_reference.trim()}`)
-    return parts.length ? parts.join(' · ') : 'no paper-source metadata'
-  }
 
   async function handleSubmit() {
     if (!canSubmit || !riskUserId) return
     setSubmitting(true); setSubmitError(null)
     try {
-      const dept = depts.find((d) => d.code === form.dept_code)
+      const dept = depts.find((d) => d.code === deptCode)
       if (!dept || !dept.risk_code) throw new Error('Selected department has no risk_code mapping.')
       const year = new Date().getFullYear()
 
-      // Atomic risk_id allocation
-      const { data: seqData, error: seqErr } = await supabase
-        .rpc('next_risk_seq', { p_dept_code: form.dept_code, p_year: year })
-      if (seqErr) throw new Error(`Sequence allocation: ${seqErr.code ?? ''} ${seqErr.message}`)
-      const seq = seqData as number
-      const risk_id = formatRiskId(dept.risk_code, year, seq)
+      const preparedBy = preparedName.trim()
+        ? `${preparedName.trim()}${preparedDesig.trim() ? ` (${preparedDesig.trim()})` : ''}`
+        : null
+      const approvedBy = approvedName.trim()
+        ? `${approvedName.trim()}${approvedDesig.trim() ? ` (${approvedDesig.trim()})` : ''}`
+        : null
 
-      // Choose status + extras per triage
-      let status: 'TABLED_RTC' | 'OUT_OF_SCOPE' | 'DRAFT'
-      let triageExtras: Record<string, unknown> = {}
-      let actionType: string
-      let auditComment: string
-      const paperSummary = paperSummaryText()
+      let firstNewId: number | null = null
 
-      if (form.triage === 'valid') {
-        status = 'TABLED_RTC'
-        actionType = 'PAPER_SUBMISSION_ENTERED'
-        auditComment = `Paper submission entered by RC — ${paperSummary}; tabled for RTC`
-      } else if (form.triage === 'out_of_scope') {
-        status = 'OUT_OF_SCOPE'
-        triageExtras = {
-          rejection_reason: form.out_of_scope_reason.slice(0, 50),
-          rejection_comment: form.out_of_scope_reason,
-          rejected_by: riskUserId,
-          rejected_at: new Date().toISOString(),
-          // RMCQ-mode skips the in-portal RLO acknowledgment step; the dept is
-          // notified on paper.
-          pending_ack: false,
-        }
-        actionType = 'PAPER_SUBMISSION_OUT_OF_SCOPE'
-        auditComment = `Paper submission entered by RC — ${paperSummary}; declined as out of scope: ${form.out_of_scope_reason.trim()}`
-      } else {
-        status = 'DRAFT'
-        actionType = 'PAPER_SUBMISSION_INCOMPLETE'
-        auditComment = `Paper submission entered by RC — ${paperSummary}; held as DRAFT awaiting clarification: ${form.clarification_note.trim()}`
-      }
+      for (const r of risks) {
+        const { data: seqData, error: seqErr } = await supabase
+          .rpc('next_risk_seq', { p_dept_code: deptCode, p_year: year })
+        if (seqErr) throw new Error(`Sequence allocation: ${seqErr.code ?? ''} ${seqErr.message}`)
+        const risk_id = formatRiskId(dept.risk_code, year, seqData as number)
 
-      // Build the risk insert payload. Common fields + triage extras.
-      const insertPayload: Record<string, unknown> = {
-        risk_id,
-        dept_code: form.dept_code,
-        created_by: riskUserId,
-        context: form.context.trim(),
-        risk_nature: form.risk_nature || null,
-        treatment_option: form.treatment_option || null,
-        scope: form.scope || null,
-        description: form.description.trim(),
-        cause_description: form.cause_description.trim() || '',
-        impact_description: form.impact_description.trim() || '',
-        existing_controls: form.existing_controls.trim() || null,
-        additional_controls: form.additional_controls.trim() || null,
-        action_owner: null,
-        action_owner_depts: form.action_owner_depts.length ? form.action_owner_depts : null,
-        implementation_period: form.implementation_period.trim() || null,
-        notes: form.triage === 'incomplete'
-          ? `[Awaiting clarification — ${form.clarification_note.trim()}]${form.notes.trim() ? `\n${form.notes.trim()}` : ''}`
-          : (form.notes.trim() || null),
-        status,
-        entry_mode: 'rmcq_managed',
-        ...paperSourceFields(),
-        ...triageExtras,
-      }
+        const isAccept = r.treatment_option === 'ACCEPT'
+        const status = stageToStatus(r.committee_stage)
 
-      // NOT NULL fallbacks for incomplete entries (cause/impact may be blank
-      // when the dept only sent partial info). Category and scope are required
-      // up front in validation.
-      if (!form.cause_description.trim()) insertPayload.cause_description = '(awaiting clarification)'
-      if (!form.impact_description.trim()) insertPayload.impact_description = '(awaiting clarification)'
+        const { data: insertedRisk, error: riskErr } = await supabase
+          .from('risks').insert({
+            risk_id,
+            dept_code: deptCode,
+            created_by: riskUserId,
+            context: r.context.trim(),
+            risk_nature: r.risk_nature || null,
+            treatment_option: r.treatment_option || null,
+            scope: r.scope || null,
+            description: r.description.trim(),
+            cause_description: r.cause_description.trim() || '',
+            impact_description: r.impact_description.trim() || '',
+            existing_controls: r.existing_controls.trim() || null,
+            additional_controls: r.additional_controls.trim() || null,
+            status,
+            entry_mode: 'rmcq_managed',
+            register_review_date: reviewDate || null,
+            paper_reference: registerRef.trim() || null,
+            paper_submitted_by: preparedBy,
+            paper_submission_date: preparedDate || null,
+            paper_endorsed_by: approvedBy,
+            paper_endorsement_date: approvedDate || null,
+            committee_stage: r.committee_stage,
+            escalation_type: r.escalation_type,
+            rtc_ref: r.rtc_ref.trim() || null,
+            roc_ref: r.roc_ref.trim() || null,
+            committee_notes: r.committee_notes.trim() || null,
+            submit_to_erms: r.submit_to_erms,
+          }).select('id').single()
+        if (riskErr) throw new Error(`Insert risk: ${riskErr.code ?? ''} ${riskErr.message}`)
+        const newRiskRowId = insertedRisk.id as number
+        if (firstNewId === null) firstNewId = newRiskRowId
 
-      const { data: insertedRisk, error: riskErr } = await supabase
-        .from('risks').insert(insertPayload).select('id').single()
-      if (riskErr) throw new Error(`Insert risk: ${riskErr.code ?? ''} ${riskErr.message}`)
-      const newRiskRowId = insertedRisk.id as number
-
-      // Cycle-1 review — only for Valid (we have scoring). The other paths
-      // create their review when the dept supplies the data on paper.
-      if (form.triage === 'valid' && computed) {
-        const { error: reviewErr } = await supabase
-          .from('risk_reviews')
-          .insert({
-            risk_id: newRiskRowId,
-            cycle_number: 1,
-            reviewed_by: riskUserId,
-            review_date: new Date().toISOString().slice(0, 10),
-            likelihood: form.likelihood,
-            severity: form.severity,
-            risk_score: computed.riskScore,
-            risk_level: computed.riskLevel,
-            residual_likelihood: hasResidual ? form.residual_likelihood : null,
-            residual_severity: hasResidual ? form.residual_severity : null,
-            residual_score: residual ? residual.riskScore : null,
-            residual_level: residual ? residual.riskLevel : null,
-            // Cycle-1 paper source is the same as the original submission.
-            paper_reviewed_by: form.paper_submitted_by.trim() || null,
-            paper_review_date: form.paper_submission_date || null,
-            paper_endorsed_by: form.paper_endorsed_by.trim() || null,
-            paper_endorsement_date: form.paper_endorsement_date || null,
-            paper_reference: form.paper_reference.trim() || null,
-          })
+        // cycle-1 review with current + residual scoring
+        const cur = computeSeverityScore(r.likelihood, r.severity)
+        const hasResidual = r.residual_likelihood > 0 && r.residual_severity > 0
+        const res = hasResidual ? computeSeverityScore(r.residual_likelihood, r.residual_severity) : null
+        const { error: reviewErr } = await supabase.from('risk_reviews').insert({
+          risk_id: newRiskRowId,
+          cycle_number: 1,
+          reviewed_by: riskUserId,
+          review_date: new Date().toISOString().slice(0, 10),
+          likelihood: r.likelihood,
+          severity: r.severity,
+          risk_score: cur.riskScore,
+          risk_level: cur.riskLevel,
+          residual_likelihood: hasResidual ? r.residual_likelihood : null,
+          residual_severity: hasResidual ? r.residual_severity : null,
+          residual_score: res ? res.riskScore : null,
+          residual_level: res ? res.riskLevel : null,
+          paper_reviewed_by: preparedBy,
+          paper_review_date: preparedDate || null,
+        })
         if (reviewErr) throw new Error(`Insert review: ${reviewErr.code ?? ''} ${reviewErr.message}`)
+
+        // inline RTP (skip for ACCEPT)
+        if (!isAccept && r.rtpOpen && (r.rtp_new_control.trim() || r.rtp_tasks.some((t) => t.task.trim()))) {
+          const { data: rtpRow, error: rtpErr } = await supabase.from('risk_rtp').insert({
+            risk_id: newRiskRowId,
+            new_control: r.rtp_new_control.trim() || null,
+            adequacy: r.rtp_adequacy || null,
+            overall_status: 'NOT_STARTED',
+            last_reviewed: reviewDate || null,
+            created_by: riskUserId,
+          }).select('id').single()
+          if (rtpErr) throw new Error(`Insert RTP: ${rtpErr.code ?? ''} ${rtpErr.message}`)
+          const rtpId = rtpRow.id as string
+          const taskRows = r.rtp_tasks.filter((t) => t.task.trim()).map((t, seq) => ({
+            rtp_id: rtpId, seq, task: t.task.trim(), pic: t.pic.trim() || null,
+            due_date: t.due || null, status: t.status, updated_by: riskUserId,
+          }))
+          if (taskRows.length) {
+            const { error: tErr } = await supabase.from('risk_rtp_tasks').insert(taskRows)
+            if (tErr) throw new Error(`Insert RTP tasks: ${tErr.code ?? ''} ${tErr.message}`)
+          }
+          await supabase.from('risk_rtp_updates').insert({
+            rtp_id: rtpId, note: 'RTP created from register entry.',
+            status: 'NOT_STARTED', created_by: riskUserId,
+          })
+        }
       }
 
-      // Audit log
-      await supabase.from('risk_audit_logs').insert({
-        risk_id: newRiskRowId,
-        entity_type: 'risk',
-        entity_id: newRiskRowId,
-        action_type: actionType,
-        performed_by: riskUserId,
-        user_role: 'RC',
-        new_value: { risk_id, status, entry_mode: 'rmcq_managed', triage: form.triage, dept_code: form.dept_code },
-        comment: auditComment,
-      })
-
-      router.push(`/risk/${newRiskRowId}`)
+      router.push(firstNewId ? `/risk/${firstNewId}` : '/risk')
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -349,7 +309,6 @@ export default function QuickAddPage() {
     }
   }
 
-  /* UI ----------------------------------------------------------------- */
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <RiskSidebar onClose={() => setSidebarOpen(false)} active="quickadd" />
@@ -359,10 +318,8 @@ export default function QuickAddPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button type="button" className="hamburger" onClick={() => setSidebarOpen((v) => !v)}>☰</button>
             <div>
-              <div className="tb-title">Quick Add (Paper Submission)</div>
-              <div className="tb-meta">
-                Entering on behalf · RMCQ {riskUserName ? `· ${riskUserName}` : ''}
-              </div>
+              <div className="tb-title">Log Risk (paper)</div>
+              <div className="tb-meta">Coordinator entry · one register, many risks{riskUserName ? ` · ${riskUserName}` : ''}</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -375,8 +332,7 @@ export default function QuickAddPage() {
         <main className="tab-pane risk-skin">
           {loadError && (
             <div className="ac red"><div className="ai">⚠️</div>
-              <div><div className="at">Load error</div><div className="as">{loadError}</div></div>
-            </div>
+              <div><div className="at">Load error</div><div className="as">{loadError}</div></div></div>
           )}
           {loading && !loadError && (
             <div className="ac blue"><div className="ai">⏳</div><div><div className="at">Loading…</div></div></div>
@@ -384,9 +340,9 @@ export default function QuickAddPage() {
           {accessDenied && !loading && (
             <div className="panel" style={{ textAlign: 'center', padding: 32 }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
-              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Quick-add is RMCQ-only</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Coordinator only</div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Only hospital-wide roles (Admin, Risk Coordinator, Director) can enter paper submissions on behalf of departments.
+                Only hospital-wide roles (Admin, Risk Coordinator, Director) can log risks.
               </div>
               <div style={{ marginTop: 14 }}>
                 <Link href="/risk" className="signout-btn"
@@ -397,257 +353,68 @@ export default function QuickAddPage() {
 
           {!loading && !loadError && !accessDenied && (
             <form onSubmit={(e) => { e.preventDefault(); void handleSubmit() }}>
-              {/* Triage */}
+              {/* Register header */}
               <div className="panel">
                 <div className="pf"><div>
-                  <div className="pt">Triage — what does this paper look like?</div>
-                  <div className="psub">Picks the save path. All three are entered in the portal so the audit trail is complete.</div>
-                </div></div>
-                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <TriageOption v="valid" cur={form.triage} onSet={(t) => set('triage', t)}
-                    title="✓ Valid & complete"
-                    desc="Goes onto the next RTC agenda as Tabled for RTC."
-                    accent="#1D4ED8" />
-                  <TriageOption v="out_of_scope" cur={form.triage} onSet={(t) => set('triage', t)}
-                    title="✗ Out of scope"
-                    desc="Recorded with a reason and archived. RC can reopen later."
-                    accent="#B91C1C" />
-                  <TriageOption v="incomplete" cur={form.triage} onSet={(t) => set('triage', t)}
-                    title="… Incomplete — needs clarification"
-                    desc="Held as Draft with a clarification note. Waits for the dept to send the missing info."
-                    accent="#92400E" />
-                </div>
-              </div>
-
-              {/* Identification */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">1. Risk Identification</div>
-                  <div className="psub">Department, context, and scope as on the paper Borang. The Risk Coordinator maps context to a UiTM domain later.</div>
+                  <div className="pt">Register header</div>
+                  <div className="psub">Applies to every risk in this register. One register = one department.</div>
                 </div></div>
                 <div className="risk-form-grid">
                   <Field label="Department" required>
-                    <DeptSearchPicker depts={allDepts} value={form.dept_code}
-                      onChange={(code) => set('dept_code', code)}
-                      placeholder="Type to search a department…"
-                      allowEmpty />
+                    <DeptSearchPicker depts={allDepts} value={deptCode}
+                      onChange={setDeptCode} placeholder="Type to search a department…" allowEmpty />
                   </Field>
-                  <Field label="Context" required full
-                    hint="Free-text context as the department framed it on the Borang.">
-                    <textarea rows={2} value={form.context} onChange={(e) => set('context', e.target.value)}
-                      placeholder="e.g. Patient safety during medication dispensing" />
+                  <Field label="Date of review" required>
+                    <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
                   </Field>
-                  <Field label="Risk nature" required={form.triage === 'valid'}>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      {(Object.keys(RISK_NATURE_LABEL) as RiskNature[]).map((n) => (
-                        <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                          <input type="radio" name="risk_nature" value={n} checked={form.risk_nature === n}
-                            onChange={() => set('risk_nature', n)} />
-                          {RISK_NATURE_LABEL[n]}
-                        </label>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field label="Scope" required={form.triage === 'valid'}>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      {(Object.keys(RISK_SCOPE_LABEL) as RiskScope[]).map((s) => (
-                        <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                          <input type="radio" name="scope" value={s} checked={form.scope === s}
-                            onChange={() => set('scope', s)} />
-                          {RISK_SCOPE_LABEL[s]}
-                        </label>
-                      ))}
-                    </div>
+                  <Field label="Register reference" hint="Optional — e.g. 'ED register Q2 2026'.">
+                    <input type="text" value={registerRef} onChange={(e) => setRegisterRef(e.target.value)} />
                   </Field>
                 </div>
               </div>
 
-              {/* Description */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">2. Risk Description</div>
-                  <div className="psub">
-                    {form.triage === 'incomplete'
-                      ? 'Capture what the dept submitted so far — gaps are fine, you can fill them in when the dept replies.'
-                      : 'Transcribe what the dept wrote on the Borang.'}
-                  </div>
-                </div></div>
-                <div className="risk-form-grid">
-                  <Field label="Risk description" required full>
-                    <textarea rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} />
-                  </Field>
-                  <Field label="Cause" required={form.triage === 'valid'} full>
-                    <textarea rows={3} value={form.cause_description} onChange={(e) => set('cause_description', e.target.value)} />
-                  </Field>
-                  <Field label="Consequence" required={form.triage === 'valid'} full>
-                    <textarea rows={3} value={form.impact_description} onChange={(e) => set('impact_description', e.target.value)} />
-                  </Field>
-                </div>
+              {/* Risk blocks */}
+              {risks.map((r, i) => (
+                <RiskBlockCard key={i} index={i} total={risks.length} block={r}
+                  onChange={(patch) => updateRisk(i, patch)}
+                  onRemove={() => removeRisk(i)}
+                  onTaskChange={(ti, patch) => updateTask(i, ti, patch)}
+                  onAddTask={() => addTask(i)} />
+              ))}
+
+              <div className="panel" style={{ textAlign: 'center' }}>
+                <button type="button" className="signout-btn" onClick={addRisk}
+                  style={{ borderStyle: 'dashed' }}>＋ Add another risk to this register</button>
               </div>
 
-              {/* Controls — only for Valid path */}
-              {form.triage === 'valid' && (
-                <div className="panel">
-                  <div className="pf"><div>
-                    <div className="pt">3. Controls &amp; Treatment</div>
-                    <div className="psub">As proposed on the Borang. The action owner is the responsible department(s).</div>
-                  </div></div>
-                  <div className="risk-form-grid">
-                    <Field label="Existing controls" full>
-                      <textarea rows={2} value={form.existing_controls} onChange={(e) => set('existing_controls', e.target.value)} />
-                    </Field>
-                    <Field label="Treatment option" hint="Avoid / Transfer / Control / Accept — the chosen response on the Borang.">
-                      <select value={form.treatment_option} onChange={(e) => set('treatment_option', e.target.value as TreatmentOption)}>
-                        <option value="">— pick a treatment —</option>
-                        {(Object.keys(TREATMENT_OPTION_LABEL) as TreatmentOption[]).map((t) => (
-                          <option key={t} value={t}>{TREATMENT_OPTION_LABEL[t]}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Additional controls proposed" full>
-                      <textarea rows={2} value={form.additional_controls} onChange={(e) => set('additional_controls', e.target.value)} />
-                    </Field>
-                    <Field label="Action owner (department)" hint="One or more departments responsible for the action.">
-                      <DeptOwnerPicker depts={allDepts} value={form.action_owner_depts}
-                        onChange={(codes) => set('action_owner_depts', codes)} />
-                    </Field>
-                    <Field label="Implementation period" hint="Optional — e.g. Q3 2026, by 31 Dec 2026, Ongoing, Pending external party.">
-                      <input type="text" value={form.implementation_period} onChange={(e) => set('implementation_period', e.target.value)} />
-                    </Field>
-                    <Field label="Notes" full>
-                      <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-                    </Field>
-                  </div>
-                </div>
-              )}
-
-              {/* Initial scoring — only for Valid path */}
-              {form.triage === 'valid' && (
-                <div className="panel">
-                  <div className="pf"><div>
-                    <div className="pt">4. Initial Assessment (Cycle 1)</div>
-                    <div className="psub">From the dept&apos;s scoring on the Borang. Risk Rating = Likelihood × Severity. Score updates live below.</div>
-                  </div></div>
-                  <div className="risk-form-grid">
-                    <ScoreField label="Likelihood" value={form.likelihood}
-                      onChange={(v) => set('likelihood', v)} />
-                    <ScoreField label="Severity" value={form.severity}
-                      onChange={(v) => set('severity', v)} />
-                  </div>
-                  <div className="risk-score-preview">
-                    {computed ? (
-                      <>
-                        <div className="rsp-block">
-                          <div className="rsp-label">Likelihood × Severity</div>
-                          <div className="rsp-value">{form.likelihood} × {form.severity}</div>
-                        </div>
-                        <div className="rsp-block">
-                          <div className="rsp-label">Risk Score</div>
-                          <div className="rsp-value">{computed.riskScore}</div>
-                        </div>
-                        <div className="rsp-block">
-                          <div className="rsp-label">Risk Level</div>
-                          <div className="rsp-value">
-                            <span style={{
-                              display: 'inline-block', padding: '4px 14px', borderRadius: 4,
-                              fontSize: 14, fontWeight: 700,
-                              color: RISK_LEVEL_COLOR[computed.riskLevel],
-                              background: RISK_LEVEL_BG[computed.riskLevel],
-                            }}>{RISK_LEVEL_LABEL[computed.riskLevel]}</span>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{ color: 'var(--muted)', fontSize: 13, fontStyle: 'italic' }}>
-                        Pick both Likelihood and Severity to see the live risk score and band.
-                      </div>
-                    )}
-                  </div>
-                  <div className="risk-form-grid" style={{ marginTop: 10 }}>
-                    <ScoreFieldOptional label="Residual Likelihood" value={form.residual_likelihood}
-                      onChange={(v) => set('residual_likelihood', v)} />
-                    <ScoreFieldOptional label="Residual Severity" value={form.residual_severity}
-                      onChange={(v) => set('residual_severity', v)} />
-                  </div>
-                  {residual && (
-                    <div className="risk-score-preview">
-                      <div className="rsp-block"><div className="rsp-label">Residual Score</div><div className="rsp-value">{residual.riskScore}</div></div>
-                      <div className="rsp-block"><div className="rsp-label">Residual Level</div>
-                        <div className="rsp-value">
-                          <span style={{ display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 14, fontWeight: 700,
-                            color: RISK_LEVEL_COLOR[residual.riskLevel], background: RISK_LEVEL_BG[residual.riskLevel] }}>
-                            {RISK_LEVEL_LABEL[residual.riskLevel]}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Triage-specific inputs */}
-              {form.triage === 'out_of_scope' && (
-                <div className="panel">
-                  <div className="pf"><div>
-                    <div className="pt">Reason for declining</div>
-                    <div className="psub">Shown on the audit log and the archive entry. Required.</div>
-                  </div></div>
-                  <Field label="Why is this out of scope for the register?" required full>
-                    <textarea rows={3} value={form.out_of_scope_reason}
-                      onChange={(e) => set('out_of_scope_reason', e.target.value)} />
-                  </Field>
-                </div>
-              )}
-              {form.triage === 'incomplete' && (
-                <div className="panel">
-                  <div className="pf"><div>
-                    <div className="pt">Clarification needed</div>
-                    <div className="psub">What needs to come back from the dept on paper. Saved on the Draft so you remember why it&apos;s waiting.</div>
-                  </div></div>
-                  <Field label="Clarification note" required full>
-                    <textarea rows={3} value={form.clarification_note}
-                      onChange={(e) => set('clarification_note', e.target.value)}
-                      placeholder="e.g. Missing HOD endorsement signature; needs cycle-1 scoring." />
-                  </Field>
-                </div>
-              )}
-
-              {/* Paper source */}
+              {/* Sign-off */}
               <div className="panel">
                 <div className="pf"><div>
-                  <div className="pt">Paper Source · audit trail</div>
-                  <div className="psub">Who sent the form, who signed it, when. Stored on every record so the paper trail is reconstructable later.</div>
+                  <div className="pt">Sign-off (from the paper form)</div>
+                  <div className="psub">Recorded as it appears on the department&apos;s submitted register.</div>
                 </div></div>
                 <div className="risk-form-grid">
-                  <Field label="Submitted by (RLO name)" required>
-                    <input type="text" list="qa-rlos-list" value={form.paper_submitted_by}
-                      onChange={(e) => set('paper_submitted_by', e.target.value)}
-                      placeholder="Pick from list or type a name" />
-                    <datalist id="qa-rlos-list">
-                      {rlos.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
-                    </datalist>
+                  <Field label="Prepared / Updated by — RLO name">
+                    <input type="text" value={preparedName} onChange={(e) => setPreparedName(e.target.value)} />
                   </Field>
-                  <Field label="Submission date" required>
-                    <input type="date" value={form.paper_submission_date}
-                      onChange={(e) => set('paper_submission_date', e.target.value)} />
+                  <Field label="RLO designation">
+                    <input type="text" value={preparedDesig} onChange={(e) => setPreparedDesig(e.target.value)} />
                   </Field>
-                  <Field label="HOD endorser" required={form.triage === 'valid'}>
-                    <input type="text" list="qa-hods-list" value={form.paper_endorsed_by}
-                      onChange={(e) => set('paper_endorsed_by', e.target.value)}
-                      placeholder="Pick from list or type a name" />
-                    <datalist id="qa-hods-list">
-                      {hods.map((u) => <option key={u.id} value={u.name} label={u.dept_code ?? undefined} />)}
-                    </datalist>
+                  <Field label="RLO date">
+                    <input type="date" value={preparedDate} onChange={(e) => setPreparedDate(e.target.value)} />
                   </Field>
-                  <Field label="HOD endorsement date" required={form.triage === 'valid'}>
-                    <input type="date" value={form.paper_endorsement_date}
-                      onChange={(e) => set('paper_endorsement_date', e.target.value)} />
+                  <Field label="Reviewed / Approved by — HOD name">
+                    <input type="text" value={approvedName} onChange={(e) => setApprovedName(e.target.value)} />
                   </Field>
-                  <Field label="Paper reference" full
-                    hint="Optional — form number, scanned file location, or any note about where the physical paper lives.">
-                    <input type="text" value={form.paper_reference}
-                      onChange={(e) => set('paper_reference', e.target.value)}
-                      placeholder="e.g. Borang RMK-2026-018; filed in RMCQ cabinet" />
+                  <Field label="HOD designation">
+                    <input type="text" value={approvedDesig} onChange={(e) => setApprovedDesig(e.target.value)} />
                   </Field>
+                  <Field label="HOD date">
+                    <input type="date" value={approvedDate} onChange={(e) => setApprovedDate(e.target.value)} />
+                  </Field>
+                </div>
+                <div className="risk-field-hint" style={{ marginTop: 6 }}>
+                  📎 Attach the source register PDF / RTP on each risk&apos;s page after saving.
                 </div>
               </div>
 
@@ -656,12 +423,11 @@ export default function QuickAddPage() {
                 {errors.length > 0 && (
                   <div className="ac amber" style={{ marginBottom: 10 }}>
                     <div className="ai">!</div>
-                    <div>
-                      <div className="at">Form needs more info before you can save</div>
+                    <div><div className="at">Form needs more info before you can save</div>
                       <ul className="as" style={{ margin: '4px 0 0 16px' }}>
-                        {errors.map((e, i) => <li key={i}>{e}</li>)}
-                      </ul>
-                    </div>
+                        {errors.slice(0, 8).map((e, i) => <li key={i}>{e}</li>)}
+                        {errors.length > 8 && <li>…and {errors.length - 8} more</li>}
+                      </ul></div>
                   </div>
                 )}
                 {submitError && (
@@ -674,15 +440,12 @@ export default function QuickAddPage() {
                   <Link href="/risk" className="signout-btn">Cancel</Link>
                   <button type="submit" className="signout-btn"
                     style={{
-                      background: canSubmit ? 'var(--blue)' : '#9CA3AF',
-                      color: '#fff',
+                      background: canSubmit ? 'var(--blue)' : '#9CA3AF', color: '#fff',
                       borderColor: canSubmit ? 'var(--blue)' : '#9CA3AF',
                       cursor: canSubmit ? 'pointer' : 'not-allowed',
                     }}
                     disabled={!canSubmit}>
-                    {submitting ? 'Saving…' : form.triage === 'valid' ? '✓ Save & table for RTC'
-                      : form.triage === 'out_of_scope' ? '✗ Save & archive (out of scope)'
-                      : '… Save as Draft (awaiting clarification)'}
+                    {submitting ? 'Saving…' : `Save register (${risks.length} risk${risks.length === 1 ? '' : 's'})`}
                   </button>
                 </div>
               </div>
@@ -694,14 +457,227 @@ export default function QuickAddPage() {
   )
 }
 
-/* -------- Small form helpers (same shape as /risk/new) -------- */
+/* ---------------- Risk block ---------------- */
+
+function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, onAddTask }: {
+  index: number
+  total: number
+  block: RiskBlock
+  onChange: (patch: Partial<RiskBlock>) => void
+  onRemove: () => void
+  onTaskChange: (ti: number, patch: Partial<TaskRow>) => void
+  onAddTask: () => void
+}) {
+  const cur = block.likelihood > 0 && block.severity > 0
+    ? computeSeverityScore(block.likelihood, block.severity) : null
+  const res = block.residual_likelihood > 0 && block.residual_severity > 0
+    ? computeSeverityScore(block.residual_likelihood, block.residual_severity) : null
+  const isAccept = block.treatment_option === 'ACCEPT'
+
+  return (
+    <div className="panel" style={{ borderLeft: '4px solid var(--blue)' }}>
+      <div className="pf"><div>
+        <div className="pt">Risk {index + 1} <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12 }}>of this register</span></div>
+      </div>
+      {total > 1 && (
+        <button type="button" className="signout-btn" onClick={onRemove}
+          style={{ color: 'var(--red)' }}>✕ Remove</button>
+      )}</div>
+
+      <div className="risk-form-grid">
+        <Field label="Context" required full
+          hint="External / Internal / Needs of interested parties — the department's own framing.">
+          <textarea rows={2} value={block.context} onChange={(e) => onChange({ context: e.target.value })} />
+        </Field>
+        <Field label="Actual or potential" required>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {(Object.keys(RISK_NATURE_LABEL) as RiskNature[]).map((n) => (
+              <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <input type="radio" name={`nature-${index}`} checked={block.risk_nature === n}
+                  onChange={() => onChange({ risk_nature: n })} />
+                {RISK_NATURE_LABEL[n]}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <Field label="Scope">
+          <div style={{ display: 'flex', gap: 12 }}>
+            {(Object.keys(RISK_SCOPE_LABEL) as RiskScope[]).map((s) => (
+              <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <input type="radio" name={`scope-${index}`} checked={block.scope === s}
+                  onChange={() => onChange({ scope: s })} />
+                {RISK_SCOPE_LABEL[s]}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <Field label="Description of risk" required full>
+          <textarea rows={2} value={block.description} onChange={(e) => onChange({ description: e.target.value })} />
+        </Field>
+        <Field label="Consequence of risk" required full>
+          <textarea rows={2} value={block.impact_description} onChange={(e) => onChange({ impact_description: e.target.value })} />
+        </Field>
+        <Field label="Existing control (if any)" full>
+          <textarea rows={2} value={block.existing_controls} onChange={(e) => onChange({ existing_controls: e.target.value })} />
+        </Field>
+      </div>
+
+      {/* Current risk */}
+      <SubHeading>Current Risk</SubHeading>
+      <div className="risk-form-grid">
+        <ScoreField label="Likelihood" value={block.likelihood} onChange={(v) => onChange({ likelihood: v })} />
+        <ScoreField label="Severity" value={block.severity} onChange={(v) => onChange({ severity: v })} />
+      </div>
+      <ScorePreview computed={cur} placeholder="Pick Likelihood and Severity to see the current level." />
+
+      {/* Treatment (after current risk) */}
+      <SubHeading>Treatment option</SubHeading>
+      <div className="risk-form-grid">
+        <Field label="Option" required hint="Accept = no RTP required.">
+          <select value={block.treatment_option}
+            onChange={(e) => onChange({ treatment_option: e.target.value as TreatmentOption, rtpOpen: e.target.value === 'ACCEPT' ? false : block.rtpOpen })}>
+            <option value="">— pick a treatment —</option>
+            {(Object.keys(TREATMENT_OPTION_LABEL) as TreatmentOption[]).map((t) => (
+              <option key={t} value={t}>{TREATMENT_OPTION_LABEL[t]}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Describe control briefly / refer to RTP #">
+          <input type="text" value={block.additional_controls}
+            onChange={(e) => onChange({ additional_controls: e.target.value })}
+            placeholder="e.g. 'See RTP' or brief control description" />
+        </Field>
+      </div>
+
+      {!isAccept && (
+        <div style={{ marginTop: 4 }}>
+          {!block.rtpOpen ? (
+            <button type="button" className="signout-btn"
+              style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+              onClick={() => onChange({ rtpOpen: true })}>🎯 Fill RTP now →</button>
+          ) : (
+            <div style={{ border: '1px dashed var(--blue)', borderRadius: 10, padding: 12, background: 'var(--blue-lt)', marginTop: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <strong style={{ color: 'var(--blue)' }}>🎯 Risk Treatment Plan (Form 0045)</strong>
+                <button type="button" className="signout-btn" style={{ marginLeft: 'auto' }}
+                  onClick={() => onChange({ rtpOpen: false })}>✕ collapse</button>
+              </div>
+              <div className="risk-form-grid">
+                <Field label="New / additional control" full>
+                  <textarea rows={2} value={block.rtp_new_control} onChange={(e) => onChange({ rtp_new_control: e.target.value })} />
+                </Field>
+                <Field label="Adequacy of existing control">
+                  <select value={block.rtp_adequacy} onChange={(e) => onChange({ rtp_adequacy: e.target.value as RtpAdequacy })}>
+                    <option value="">—</option>
+                    <option value="H">H — High</option>
+                    <option value="M">M — Medium</option>
+                    <option value="L">L — Low</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="risk-field-hint" style={{ marginBottom: 4 }}>Task list</div>
+              {block.rtp_tasks.map((t, ti) => (
+                <div key={ti} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                  <input type="text" placeholder="Task" value={t.task}
+                    onChange={(e) => onTaskChange(ti, { task: e.target.value })}
+                    style={{ flex: '2 1 200px' }} />
+                  <input type="text" placeholder="PIC" value={t.pic}
+                    onChange={(e) => onTaskChange(ti, { pic: e.target.value })}
+                    style={{ flex: '1 1 120px' }} />
+                  <input type="date" value={t.due}
+                    onChange={(e) => onTaskChange(ti, { due: e.target.value })} />
+                  <select value={t.status} onChange={(e) => onTaskChange(ti, { status: e.target.value as RtpTaskStatus })}>
+                    <option value="NOT_STARTED">Not started</option>
+                    <option value="IN_PROGRESS">In progress</option>
+                    <option value="COMPLETED">Completed</option>
+                  </select>
+                </div>
+              ))}
+              <button type="button" className="signout-btn" onClick={onAddTask}>＋ Add task</button>
+              <div className="risk-field-hint" style={{ marginTop: 6 }}>
+                Full approval chain (RLO → HOD → RTC → ROC) is captured on the RTP page.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Residual risk */}
+      <SubHeading>Residual Risk <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— can be any value, independent of current</span></SubHeading>
+      <div className="risk-form-grid">
+        <ScoreFieldOptional label="Residual Likelihood" value={block.residual_likelihood} onChange={(v) => onChange({ residual_likelihood: v })} />
+        <ScoreFieldOptional label="Residual Severity" value={block.residual_severity} onChange={(v) => onChange({ residual_severity: v })} />
+      </div>
+      {res && <ScorePreview computed={res} placeholder="" />}
+
+      {/* Committee outcome */}
+      <SubHeading>Committee outcome <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— what RTC / ROC decided</span></SubHeading>
+      <div className="risk-form-grid">
+        <Field label="Current stage">
+          <select value={block.committee_stage} onChange={(e) => onChange({ committee_stage: e.target.value as CommitteeStage })}>
+            {(Object.keys(STAGE_LABEL) as CommitteeStage[]).map((s) => (
+              <option key={s} value={s}>{STAGE_LABEL[s]}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Escalation">
+          <select value={block.escalation_type} onChange={(e) => onChange({ escalation_type: e.target.value as EscalationType })}>
+            <option value="AUTO">Auto (High / Extreme) → ROC</option>
+            <option value="MANUAL">Manual escalation (rare Moderate)</option>
+            <option value="NONE">Not escalated</option>
+          </select>
+        </Field>
+        <Field label="RTC meeting & date">
+          <input type="text" value={block.rtc_ref} onChange={(e) => onChange({ rtc_ref: e.target.value })}
+            placeholder="e.g. Jun Technical Review · 18 Jun 2026" />
+        </Field>
+        <Field label="ROC meeting & date">
+          <input type="text" value={block.roc_ref} onChange={(e) => onChange({ roc_ref: e.target.value })}
+            placeholder="e.g. Q2 ROC · 30 Jun 2026" />
+        </Field>
+        <Field label="Decision / outcome notes" full>
+          <textarea rows={2} value={block.committee_notes} onChange={(e) => onChange({ committee_notes: e.target.value })} />
+        </Field>
+        <Field label="Submit to ERMS UiTM" hint="Set at ROC only — ROC is terminal and decides what goes to ERMS.">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <input type="checkbox" checked={block.submit_to_erms}
+              onChange={(e) => onChange({ submit_to_erms: e.target.checked })} />
+            Include in ERMS UiTM submission
+          </label>
+        </Field>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- small helpers ---------------- */
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 13, fontWeight: 700, margin: '14px 0 6px' }}>{children}</div>
+}
+
+function ScorePreview({ computed, placeholder }: {
+  computed: { riskScore: number; riskLevel: keyof typeof RISK_LEVEL_LABEL } | null
+  placeholder: string
+}) {
+  if (!computed) {
+    return placeholder
+      ? <div style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>{placeholder}</div>
+      : null
+  }
+  return (
+    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 13, color: 'var(--muted)' }}>Score {computed.riskScore}</span>
+      <span style={{
+        display: 'inline-block', padding: '4px 14px', borderRadius: 4, fontSize: 13, fontWeight: 700,
+        color: RISK_LEVEL_COLOR[computed.riskLevel], background: RISK_LEVEL_BG[computed.riskLevel],
+      }}>{RISK_LEVEL_LABEL[computed.riskLevel]}</span>
+    </div>
+  )
+}
 
 function Field({ label, required, hint, full, children }: {
-  label: string
-  required?: boolean
-  hint?: string
-  full?: boolean
-  children: React.ReactNode
+  label: string; required?: boolean; hint?: string; full?: boolean; children: React.ReactNode
 }) {
   return (
     <div className={`risk-field ${full ? 'full' : ''}`}>
@@ -737,29 +713,5 @@ function ScoreFieldOptional({ label, value, onChange }: { label: string; value: 
         ))}
       </div>
     </div>
-  )
-}
-
-function TriageOption({ v, cur, onSet, title, desc, accent }: {
-  v: Triage; cur: Triage; onSet: (t: Triage) => void
-  title: string; desc: string; accent: string
-}) {
-  const active = cur === v
-  return (
-    <label style={{
-      flex: '1 1 240px', minWidth: 220, cursor: 'pointer',
-      border: `2px solid ${active ? accent : 'var(--border)'}`,
-      background: active ? `${accent}10` : '#fff',
-      borderRadius: 10, padding: '12px 14px',
-      transition: 'border-color .12s ease, background .12s ease',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <input type="radio" name="triage" checked={active} onChange={() => onSet(v)} style={{ marginTop: 3 }} />
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: active ? accent : 'var(--text)' }}>{title}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{desc}</div>
-        </div>
-      </div>
-    </label>
   )
 }

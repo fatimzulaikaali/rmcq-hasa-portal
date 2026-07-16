@@ -10,24 +10,16 @@ import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
 import { RiskAttachments } from '@/components/RiskAttachments'
-import type { ActiveRole } from '@/lib/risk/activeRole'
-import type { RiskRole } from '@/lib/risk/types'
 import {
-  Risk, RiskReview, RiskDept, RiskUser, CrossCuttingTheme,
-  RiskMeeting, RiskMeetingAgenda, RiskActionItem, CommitteeOutcome, ActionStatus,
+  Risk, RiskReview, RiskDept, RiskUser,
+  RiskRtp, RiskRtpTask, RiskDeptResponse, RtpOverallStatus,
 } from '@/lib/risk/types'
 import {
   RISK_LEVEL_COLOR, RISK_LEVEL_BG, RISK_LEVEL_LABEL,
   RISK_DOMAIN_LABEL, RISK_NATURE_LABEL, TREATMENT_OPTION_LABEL,
   RISK_STATUS_LABEL, RISK_STATUS_BADGE,
   RISK_SCOPE_LABEL, RISK_ROLE_LABEL,
-  COMMITTEE_OUTCOME_LABEL, ACTION_TYPE_LABEL, ACTION_STATUS_LABEL,
 } from '@/lib/risk/scoring'
-
-/* An agenda decision joined with its meeting (for the Committee Reviews section). */
-interface CommitteeReview extends RiskMeetingAgenda {
-  risk_meetings: RiskMeeting | null
-}
 
 interface AuditLog {
   id: number
@@ -42,6 +34,30 @@ interface AuditLog {
   comment: string | null
   performed_at: string
 }
+
+/* Committee stage labels for the trail. */
+const STAGE_LABEL: Record<NonNullable<Risk['committee_stage']>, string> = {
+  NOT_TABLED:      'Not yet tabled',
+  TABLED_RTC:      'Tabled at Risk Technical Committee (RTC)',
+  ENDORSED_ROC:    'Endorsed at Risk Owner Committee (ROC)',
+  SENT_BACK:       'Sent back to department',
+  RECOMMEND_CLOSE: 'Recommended for closure',
+}
+
+const RTP_STATUS_LABEL: Record<RtpOverallStatus, string> = {
+  NOT_STARTED: 'Not started',
+  IN_PROGRESS: 'In progress',
+  COMPLETED:   'Completed',
+  VERIFIED:    'Verified',
+}
+const RTP_STATUS_BADGE: Record<RtpOverallStatus, { bg: string; fg: string }> = {
+  NOT_STARTED: { bg: '#FEE2E2', fg: '#991B1B' },
+  IN_PROGRESS: { bg: '#FEF3C7', fg: '#854D0E' },
+  COMPLETED:   { bg: '#DCFCE7', fg: '#166534' },
+  VERIFIED:    { bg: '#DCFCE7', fg: '#166534' },
+}
+
+const RECEIVED_VIA = ['Email', 'Meeting', 'WhatsApp / call', 'Paper', 'Other'] as const
 
 export default function RiskDetailPage() {
   const router = useRouter()
@@ -59,14 +75,20 @@ export default function RiskDetailPage() {
   const [reviews, setReviews] = useState<RiskReview[]>([])
   const [logs, setLogs]       = useState<AuditLog[]>([])
   const [users, setUsers]     = useState<Map<number, RiskUser>>(new Map())
-  const [themes, setThemes]   = useState<CrossCuttingTheme[]>([])
-  const [committeeReviews, setCommitteeReviews] = useState<CommitteeReview[]>([])
-  const [actionItems, setActionItems] = useState<RiskActionItem[]>([])
-  const [actionDeptNames, setActionDeptNames] = useState<Map<string, string>>(new Map())
+  const [rtp, setRtp]         = useState<RiskRtp | null>(null)
+  const [rtpTasks, setRtpTasks] = useState<RiskRtpTask[]>([])
+  const [responses, setResponses] = useState<RiskDeptResponse[]>([])
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
-  const [activeRole, setActiveRole] = useState<ActiveRole | null>(null)
+  const [canEdit, setCanEdit] = useState(false)
   const [transitioning, setTransitioning] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
+
+  // Department-response form state.
+  const [respDirective, setRespDirective] = useState('')
+  const [respText, setRespText] = useState('')
+  const [respOn, setRespOn] = useState('')
+  const [respVia, setRespVia] = useState<string>('Email')
+  const [savingResp, setSavingResp] = useState(false)
 
   useEffect(() => { void load() }, [riskRowId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -82,30 +104,26 @@ export default function RiskDetailPage() {
       if (riskErr) throw new Error(`Risk: ${riskErr.code ?? ''} ${riskErr.message}`)
       if (!riskData) { setNotFound(true); return }
 
-      // Dept-scope guard — dept-restricted users can't see risks outside their dept
       const access = await getModuleAccess(supabase)
-      setActiveRole(access.activeRole)
       if (access.deptScopes !== null && !access.deptScopes.includes((riskData as Risk).dept_code)) {
         setNotFound(true)
         return
       }
+      const role = access.activeRole?.role
+      setCanEdit(role === 'RC' || role === 'ADMIN' || role === 'DIRECTOR')
 
       setRisk(riskData as Risk)
 
-      // Resolve the current Risk-module user id for audit-log attribution
       const ruRes = await resolveCurrentRiskUser(supabase)
-      if (ruRes.ok) {
-        setCurrentUserId(ruRes.user.riskUserId)
-      }
+      if (ruRes.ok) setCurrentUserId(ruRes.user.riskUserId)
 
       const [
         { data: deptData, error: deptErr },
         { data: reviewsData, error: reviewsErr },
         { data: logsData, error: logsErr },
         { data: usersData, error: usersErr },
-        { data: tagsData, error: tagsErr },
-        { data: agendaData, error: agendaErr },
-        { data: actionData, error: actionErr },
+        { data: rtpData, error: rtpErr },
+        { data: respData, error: respErr },
       ] = await Promise.all([
         supabase.from('pscs_departments')
           .select('code,risk_code,name_en,name_ms,kind,parent_code,sort_order')
@@ -115,55 +133,34 @@ export default function RiskDetailPage() {
         supabase.from('risk_audit_logs').select('*')
           .eq('risk_id', riskRowId).order('performed_at', { ascending: false }),
         supabase.from('risk_users').select('id,auth_user_id,name,email,is_active,created_at,last_login'),
-        supabase.from('risk_theme_tags').select('theme_id, cross_cutting_themes(*)').eq('risk_id', riskRowId),
-        supabase.from('risk_meeting_agenda').select('*, risk_meetings(*)')
+        supabase.from('risk_rtp').select('*').eq('risk_id', riskRowId).maybeSingle(),
+        supabase.from('risk_dept_responses').select('*')
           .eq('risk_id', riskRowId).order('created_at', { ascending: false }),
-        supabase.from('risk_action_items').select('*')
-          .eq('risk_id', riskRowId).order('id', { ascending: false }),
       ])
       if (deptErr)    throw new Error(`Department: ${deptErr.code ?? ''} ${deptErr.message}`)
       if (reviewsErr) throw new Error(`Reviews: ${reviewsErr.code ?? ''} ${reviewsErr.message}`)
       if (logsErr)    throw new Error(`Audit logs: ${logsErr.code ?? ''} ${logsErr.message}`)
       if (usersErr)   throw new Error(`Users: ${usersErr.code ?? ''} ${usersErr.message}`)
-      if (tagsErr)    throw new Error(`Theme tags: ${tagsErr.code ?? ''} ${tagsErr.message}`)
-      if (agendaErr)  throw new Error(`Committee reviews: ${agendaErr.code ?? ''} ${agendaErr.message}`)
-      if (actionErr)  throw new Error(`Action items: ${actionErr.code ?? ''} ${actionErr.message}`)
+      if (rtpErr)     throw new Error(`RTP: ${rtpErr.code ?? ''} ${rtpErr.message}`)
+      if (respErr)    throw new Error(`Responses: ${respErr.code ?? ''} ${respErr.message}`)
 
       setDept(deptData as RiskDept | null)
       setReviews((reviewsData ?? []) as RiskReview[])
       setLogs((logsData ?? []) as AuditLog[])
+      setResponses((respData ?? []) as RiskDeptResponse[])
 
       const m = new Map<number, RiskUser>()
       for (const u of (usersData ?? []) as RiskUser[]) m.set(u.id, u)
       setUsers(m)
 
-      // unwrap nested cross_cutting_themes from the join
-      const themeRows = (tagsData ?? []) as { theme_id: number; cross_cutting_themes: CrossCuttingTheme | CrossCuttingTheme[] | null }[]
-      const ts: CrossCuttingTheme[] = []
-      for (const t of themeRows) {
-        const cct = Array.isArray(t.cross_cutting_themes) ? t.cross_cutting_themes[0] : t.cross_cutting_themes
-        if (cct) ts.push(cct)
-      }
-      setThemes(ts)
-
-      // committee decisions (only those that have actually been decided) + action items
-      const reviews = ((agendaData ?? []) as CommitteeReview[]).filter((a) => a.outcome)
-      setCommitteeReviews(reviews)
-      const actions = (actionData ?? []) as RiskActionItem[]
-      setActionItems(actions)
-
-      // Names for the departments these action items are assigned to, plus the
-      // risk's own action-owner department(s).
-      const ownerDepts = (riskData as Risk).action_owner_depts ?? []
-      const actionDeptCodes = Array.from(new Set([
-        ...actions.flatMap((a) => a.assigned_depts ?? []),
-        ...ownerDepts,
-      ]))
-      if (actionDeptCodes.length) {
-        const { data: adepts } = await supabase.from('pscs_departments').select('code,name_en').in('code', actionDeptCodes)
-        const adm = new Map<string, string>()
-        for (const d of (adepts ?? []) as { code: string; name_en: string }[]) adm.set(d.code, d.name_en)
-        setActionDeptNames(adm)
+      const rtpRow = (rtpData ?? null) as RiskRtp | null
+      setRtp(rtpRow)
+      if (rtpRow) {
+        const { data: taskData } = await supabase.from('risk_rtp_tasks')
+          .select('*').eq('rtp_id', rtpRow.id).order('seq', { ascending: true })
+        setRtpTasks((taskData ?? []) as RiskRtpTask[])
+      } else {
+        setRtpTasks([])
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
@@ -177,40 +174,31 @@ export default function RiskDetailPage() {
     router.push('/login')
   }
 
-  /* Transition the risk to a new status + write an audit log entry. */
+  /* Update the risk status + write an audit-log entry. */
   async function transition(opts: {
     newStatus: Risk['status']
-    action: string                    // audit action_type
-    role?: 'RLO' | 'HOD' | 'RC' | 'ADMIN'
+    action: string
     comment?: string
-    extras?: Partial<Risk>             // additional fields to update (e.g. rejection_* on reject)
+    extras?: Partial<Risk>
   }) {
     if (!risk || !currentUserId) return
     setTransitioning(true); setTransitionError(null)
     try {
-      const payload: Partial<Risk> = {
-        status: opts.newStatus,
-        ...(opts.extras ?? {}),
-      }
+      const payload: Partial<Risk> = { status: opts.newStatus, ...(opts.extras ?? {}) }
       const { data: updated, error: upErr } = await supabase.from('risks')
         .update(payload).eq('id', risk.id).select('*').single()
       if (upErr) throw new Error(`Status update: ${upErr.code ?? ''} ${upErr.message}`)
       setRisk(updated as Risk)
 
       const { error: auditErr } = await supabase.from('risk_audit_logs').insert({
-        risk_id: risk.id,
-        entity_type: 'risk',
-        entity_id: risk.id,
-        action_type: opts.action,
-        performed_by: currentUserId,
-        user_role: opts.role ?? 'ADMIN',
+        risk_id: risk.id, entity_type: 'risk', entity_id: risk.id,
+        action_type: opts.action, performed_by: currentUserId, user_role: 'RC',
         old_value: { status: risk.status },
         new_value: { status: opts.newStatus, ...(opts.extras ?? {}) },
         comment: opts.comment ?? null,
       })
       if (auditErr) console.warn('Audit log insert failed:', auditErr)
 
-      // Refresh logs locally so timeline updates immediately
       const { data: logsData } = await supabase.from('risk_audit_logs')
         .select('*').eq('risk_id', risk.id).order('performed_at', { ascending: false })
       setLogs((logsData ?? []) as AuditLog[])
@@ -221,114 +209,47 @@ export default function RiskDetailPage() {
     }
   }
 
-  /* HOD / committee returns the risk to the RLO to amend — NOT terminal.
-   * Stays in the Active register; the RLO revises and resubmits. */
-  async function handleReturn(role: 'HOD' | 'RC') {
-    const text = window.prompt('What needs amending? (this note will be shown to the RLO):', '')?.trim()
-    if (!text) return
-    await transition({
-      newStatus: 'RETURNED',
-      action: 'RETURN_FOR_AMENDMENT',
-      role,
-      comment: `Returned for amendment: ${text}`,
-      extras: {
-        // rejection_* columns are reused as the amendment note (reason is varchar(50)).
-        rejection_reason: text.slice(0, 50),
-        rejection_comment: text,
-        rejected_by: currentUserId ?? undefined,
-        rejected_at: new Date().toISOString(),
-      },
-    })
-  }
-
-  /* RC declines the risk — it doesn't meet the criteria for the register.
-   * Terminal: lands in the Archive. The RC can reopen it later. */
-  async function handleOutOfScope() {
-    const text = window.prompt('Why is this out of scope for the risk register? (this note will be recorded):', '')?.trim()
-    if (!text) return
-    await transition({
-      newStatus: 'OUT_OF_SCOPE',
-      action: 'MARK_OUT_OF_SCOPE',
-      role: 'RC',
-      comment: `Out of scope: ${text}`,
-      extras: {
-        rejection_reason: text.slice(0, 50),
-        rejection_comment: text,
-        rejected_by: currentUserId ?? undefined,
-        rejected_at: new Date().toISOString(),
-        // Waits in the RLO's attention queue until they acknowledge it.
-        pending_ack: true,
-      },
-    })
-  }
-
-  /* RLO acknowledges the RC's out-of-scope decision — it then moves to the Archive. */
-  async function handleAcknowledgeOutOfScope() {
-    if (!risk) return
-    await transition({
-      newStatus: 'OUT_OF_SCOPE',
-      action: 'ACK_OUT_OF_SCOPE',
-      role: 'RLO',
-      comment: 'Acknowledged out-of-scope decision',
-      extras: { pending_ack: false },
-    })
-  }
-
-  async function handleReviseResubmit() {
-    if (!risk) return
-    if (!window.confirm('Reopen this risk for amendment? It goes back to DRAFT so you can revise it and resubmit to the HOD. The reviewer\'s note stays visible to guide you.')) return
-    await transition({
-      newStatus: 'DRAFT',
-      action: 'REVISE_REOPEN',
-      role: 'RLO',
-      comment: 'Reopened for amendment',
-      // keep rejection_* fields so the DRAFT shows the reviewer's note
-    })
-  }
-
   async function handleClose() {
-    const closingNote = window.prompt('Closing note (optional):', '')
-    if (closingNote === null) return  // cancel
+    const note = window.prompt('Closing note (optional):', '')
+    if (note === null) return
     await transition({
-      newStatus: 'CLOSED',
-      action: 'CLOSE',
-      role: 'RC',
-      comment: closingNote.trim() || 'Risk closed',
-      extras: {
-        date_closed: new Date().toISOString(),
-        closed_by: currentUserId ?? undefined,
-      },
+      newStatus: 'CLOSED', action: 'CLOSE', comment: note.trim() || 'Risk closed',
+      extras: { date_closed: new Date().toISOString(), closed_by: currentUserId ?? undefined },
     })
   }
 
-  /* RLO/HOD records feedback against a committee directive. */
-  async function respondToAction(item: RiskActionItem, text: string) {
-    if (!text.trim()) return
-    setTransitionError(null)
-    try {
-      const { error } = await supabase.from('risk_action_items')
-        .update({ response: text.trim(), status: 'RESPONDED', updated_at: new Date().toISOString() })
-        .eq('id', item.id)
-      if (error) throw new Error(`Respond: ${error.code ?? ''} ${error.message}`)
+  async function handleEscalate() {
+    if (!window.confirm('Manually escalate this risk to the Risk Owner Committee (ROC)?')) return
+    await transition({
+      newStatus: 'TABLED_ROC', action: 'ESCALATE_MANUAL', comment: 'Manually escalated to ROC',
+      extras: { escalation_type: 'MANUAL', committee_stage: 'TABLED_RTC' },
+    })
+  }
 
-      // Record the department's feedback in the audit trail.
-      if (item.risk_id) {
-        await supabase.from('risk_audit_logs').insert({
-          risk_id: item.risk_id, entity_type: 'action_item', entity_id: item.id,
-          action_type: 'ACTION_RESPONDED',
-          performed_by: currentUserId, user_role: activeRole?.role ?? 'RLO',
-          comment: `Feedback on directive: ${text.trim()}`,
-        })
-      }
-      const { data } = await supabase.from('risk_action_items')
-        .select('*').eq('risk_id', riskRowId).order('id', { ascending: false })
-      setActionItems((data ?? []) as RiskActionItem[])
-      // refresh the audit log too
-      const { data: logsData } = await supabase.from('risk_audit_logs')
-        .select('*').eq('risk_id', riskRowId).order('performed_at', { ascending: false })
-      setLogs((logsData ?? []) as AuditLog[])
+  /* Record a department's response to a committee directive (the Coordinator
+   * enters what the department communicated outside the portal). */
+  async function saveResponse() {
+    if (!risk || !currentUserId) return
+    if (!respText.trim() && !respDirective.trim()) return
+    setSavingResp(true); setTransitionError(null)
+    try {
+      const { error } = await supabase.from('risk_dept_responses').insert({
+        risk_id: risk.id,
+        directive: respDirective.trim() || null,
+        response: respText.trim() || null,
+        received_on: respOn || null,
+        received_via: respVia,
+        recorded_by: currentUserId,
+      })
+      if (error) throw new Error(`Save response: ${error.code ?? ''} ${error.message}`)
+      setRespDirective(''); setRespText(''); setRespOn(''); setRespVia('Email')
+      const { data } = await supabase.from('risk_dept_responses').select('*')
+        .eq('risk_id', risk.id).order('created_at', { ascending: false })
+      setResponses((data ?? []) as RiskDeptResponse[])
     } catch (e) {
       setTransitionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingResp(false)
     }
   }
 
@@ -339,10 +260,7 @@ export default function RiskDetailPage() {
 
   function fmtDate(s: string | null | undefined): string {
     if (!s) return '—'
-    // Date-only values (YYYY-MM-DD) have no time/zone — show as-is.
     if (s.length <= 10) return s
-    // Timestamps are stored in UTC; render them in Malaysia time (MYT, UTC+8)
-    // so the audit log matches the wall clock people actually saw.
     const d = new Date(s)
     if (isNaN(d.getTime())) return s.slice(0, 10)
     return new Intl.DateTimeFormat('en-CA', {
@@ -353,28 +271,7 @@ export default function RiskDetailPage() {
   }
 
   const latest = reviews[0] ?? null
-
-  /* Role-based capability checks for the workflow buttons.
-   * Driven by the user's single ACTIVE role (the one chosen in the account
-   * switcher), NOT the union of every role they hold — acting as RC and acting
-   * as RLO are deliberately separate hats. The clinical workflow is STRICTLY
-   * role-based: ADMIN is a system-admin hat (user management) and does NOT act
-   * in the risk approval workflow. The active role qualifies if it matches one
-   * of the listed roles AND is either hospital-wide (dept_code null) or scoped
-   * to this risk's dept. */
-  function hasRole(roles: RiskRole[], deptCode?: string): boolean {
-    if (!activeRole) return false
-    return roles.includes(activeRole.role) &&
-      (activeRole.dept_code === null || !deptCode || activeRole.dept_code === deptCode)
-  }
-  const riskDept = risk?.dept_code
-  const canSubmit       = hasRole(['RLO'], riskDept)             // RLO of this dept
-  const canEndorse      = hasRole(['HOD'], riskDept)             // HOD of this dept
-  const canValidate     = hasRole(['RC'])                        // Risk Coordinator (hospital-wide)
-  const canManageActive = hasRole(['RC'])                        // monitoring / reactivate / reopen
-  const canRequestClose = hasRole(['RLO', 'HOD'], riskDept)      // RLO or HOD of this dept
-  const canClose        = hasRole(['RC'])                        // RC closes
-  const canRespond      = hasRole(['RLO', 'HOD'], riskDept)      // dept responds to committee directives
+  const rtpTasksDone = rtpTasks.filter((t) => t.status === 'COMPLETED').length
 
   return (
     <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -401,7 +298,7 @@ export default function RiskDetailPage() {
                 + New Review Cycle
               </Link>
             )}
-            <Link href="/risk" className="signout-btn">← Back to register</Link>
+            <Link href="/risk" className="signout-btn">← Register</Link>
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
@@ -420,7 +317,7 @@ export default function RiskDetailPage() {
               <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Risk not found</div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                No risk with id <code>{riskRowId}</code> exists. It may have been deleted or you typed the URL by hand.
+                No risk with id <code>{riskRowId}</code> exists.
               </div>
               <div style={{ marginTop: 14 }}>
                 <Link href="/risk" className="signout-btn"
@@ -433,7 +330,6 @@ export default function RiskDetailPage() {
 
           {!loading && !loadError && !notFound && risk && (
             <>
-              <div className="risk-detail-flow">
               {/* Hero header — anchored by severity */}
               <div className="risk-hero" style={{
                 ['--hero-accent' as string]: latest ? RISK_LEVEL_COLOR[latest.risk_level] : '#9CA3AF',
@@ -443,7 +339,8 @@ export default function RiskDetailPage() {
                   <div className="risk-hero-id">{risk.risk_id}</div>
                   <div className="risk-hero-meta">
                     <span>{dept?.name_en ?? risk.dept_code}</span>
-                    <span>· {risk.uitm_domain ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b> : <i style={{ color: 'var(--muted)' }}>Domain unassigned</i>}</span>
+                    <span>· {risk.risk_nature ? RISK_NATURE_LABEL[risk.risk_nature] : '—'}</span>
+                    <span>· {risk.treatment_option ? TREATMENT_OPTION_LABEL[risk.treatment_option] : 'No treatment'}</span>
                     <span>· {RISK_SCOPE_LABEL[risk.scope]}</span>
                   </div>
                   <div className="risk-hero-chips">
@@ -452,15 +349,14 @@ export default function RiskDetailPage() {
                     </span>
                     {risk.entry_mode === 'rmcq_managed' && (
                       <span className="risk-chip" style={{ color: '#92400E', background: '#FEF3C7' }}
-                        title="Paper submission entered by RC on behalf of the department">
-                        📝 Paper-submitted
-                      </span>
+                        title="Paper submission entered by the Coordinator">📝 Paper-logged</span>
+                    )}
+                    {risk.submit_to_erms && (
+                      <span className="risk-chip" style={{ color: '#166534', background: '#DCFCE7' }}
+                        title="Flagged for submission to ERMS UiTM">✔ ERMS UiTM</span>
                     )}
                     <span className="risk-chip" style={{ color: 'var(--muted)', background: '#fff', border: '1px solid var(--border)' }}>
                       Cycle {latest?.cycle_number ?? '—'}
-                    </span>
-                    <span className="risk-chip" style={{ color: 'var(--muted)', background: '#fff', border: '1px solid var(--border)' }}>
-                      {daysOpen(risk.date_opened, risk.date_closed)} days open
                     </span>
                   </div>
                 </div>
@@ -468,7 +364,7 @@ export default function RiskDetailPage() {
                   {latest ? (
                     <>
                       <div className="risk-hero-score-num" style={{ color: RISK_LEVEL_COLOR[latest.risk_level] }}>
-                        {(Math.round(latest.risk_score * 10) / 10).toFixed(1)}
+                        {Math.round(latest.risk_score)}
                       </div>
                       <div className="risk-hero-score-lvl" style={{ color: RISK_LEVEL_COLOR[latest.risk_level], background: '#fff' }}>
                         {RISK_LEVEL_LABEL[latest.risk_level]}
@@ -478,497 +374,300 @@ export default function RiskDetailPage() {
                 </div>
               </div>
 
-              {/* Status & Workflow Actions — pushed near the bottom (read first, act last) */}
-              <div className="panel" style={{ marginTop: 14, order: 3 }}>
-                <div className="pf"><div>
-                  <div className="pt">🔄 Status &amp; Workflow</div>
-                  <div className="psub">Current: <b>{RISK_STATUS_LABEL[risk.status]}</b>. Pick the next action below.</div>
-                </div></div>
-                {transitionError && (
-                  <div className="ac red" style={{ marginBottom: 10 }}>
-                    <div className="ai">⚠️</div>
-                    <div><div className="at">Workflow error</div><div className="as">{transitionError}</div></div>
+              <div className="risk-detail-cols">
+                {/* ---- Main column ---- */}
+                <div className="risk-detail-main">
+                  {/* Risk detail */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">🪪 Risk detail</div></div></div>
+                    <div className="risk-detail-grid">
+                      <DefLine label="Risk ID" mono>{risk.risk_id}</DefLine>
+                      <DefLine label="Department">{dept?.name_en ?? risk.dept_code}</DefLine>
+                      <DefLine label="UiTM domain">
+                        {risk.uitm_domain ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b> : <em style={{ color: 'var(--muted)' }}>Unassigned</em>}
+                      </DefLine>
+                      <DefLine label="Nature">{risk.risk_nature ? RISK_NATURE_LABEL[risk.risk_nature] : '—'}</DefLine>
+                      <DefLine label="Scope">{RISK_SCOPE_LABEL[risk.scope]}</DefLine>
+                      <DefLine label="Treatment">
+                        {risk.treatment_option ? TREATMENT_OPTION_LABEL[risk.treatment_option] : <em style={{ color: 'var(--muted)' }}>—</em>}
+                      </DefLine>
+                      <DefLine label="Context" full>{risk.context || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
+                    </div>
+                    <DefBlock label="Description">{risk.description}</DefBlock>
+                    <DefBlock label="Cause">{risk.cause_description || <em style={{ color: 'var(--muted)' }}>—</em>}</DefBlock>
+                    <DefBlock label="Consequence">{risk.impact_description || <em style={{ color: 'var(--muted)' }}>—</em>}</DefBlock>
+                    <DefBlock label="Existing control">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
+                    <DefBlock label="Additional controls">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
+                    {canEdit && (
+                      <div style={{ marginTop: 6 }}>
+                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn">✎ Edit risk register entry</Link>
+                      </div>
+                    )}
                   </div>
-                )}
-                {/* Reviewer's amendment note — shown while back in DRAFT */}
-                {risk.status === 'DRAFT' && risk.rejection_comment && (
-                  <div className="ac amber" style={{ marginBottom: 10 }}>
-                    <div className="ai">↩</div>
-                    <div>
-                      <div className="at">Returned for amendment — please address before resubmitting</div>
-                      <div className="as">{risk.rejection_comment}</div>
+
+                  {/* Current → Residual */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">📊 Current → Residual risk</div></div></div>
+                    {latest ? (
+                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                        <ScoreBox label="Current" score={Math.round(latest.risk_score)}
+                          level={latest.risk_level} hint={`L${latest.likelihood} × S${latest.severity ?? '—'}`} />
+                        {latest.residual_level ? (
+                          <ScoreBox label="Residual (target)"
+                            score={latest.residual_score != null ? Math.round(latest.residual_score) : null}
+                            level={latest.residual_level}
+                            hint={`L${latest.residual_likelihood ?? '—'} × S${latest.residual_severity ?? '—'}`} />
+                        ) : (
+                          <div style={{ flex: 1, minWidth: 160, border: '1px dashed var(--border)', borderRadius: 8, padding: 14, color: 'var(--muted)', fontSize: 12 }}>
+                            No residual score recorded yet.
+                          </div>
+                        )}
+                      </div>
+                    ) : <div style={{ fontSize: 12, color: 'var(--muted)' }}>Not yet scored.</div>}
+                  </div>
+
+                  {/* Committee trail */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">🕑 Committee trail</div></div></div>
+                    <div className="timeline" style={{ marginTop: 6 }}>
+                      <TrailItem date={fmtDate(risk.date_opened)} title="Logged from paper register">
+                        {risk.entry_mode === 'rmcq_managed'
+                          ? <>Entered by the Risk Coordinator{risk.paper_submitted_by ? <> · submitted by <b>{risk.paper_submitted_by}</b></> : null}{risk.paper_endorsed_by ? <> · HOD-endorsed by <b>{risk.paper_endorsed_by}</b></> : null}{risk.paper_reference ? <> · ref <i>{risk.paper_reference}</i></> : null}.</>
+                          : <>Created in the portal.</>}
+                      </TrailItem>
+                      {risk.committee_stage && risk.committee_stage !== 'NOT_TABLED' && (
+                        <TrailItem date={risk.roc_ref || risk.rtc_ref || '—'} title={STAGE_LABEL[risk.committee_stage]}>
+                          {risk.rtc_ref && <>RTC ref: <b>{risk.rtc_ref}</b>. </>}
+                          {risk.roc_ref && <>ROC ref: <b>{risk.roc_ref}</b>. </>}
+                          {risk.escalation_type === 'AUTO' && <>Auto-escalated (score ≥ High). </>}
+                          {risk.escalation_type === 'MANUAL' && <>Manually escalated. </>}
+                          {risk.submit_to_erms && <><strong>Submit to ERMS UiTM:</strong> ✔ Yes.</>}
+                        </TrailItem>
+                      )}
+                      {risk.committee_notes && (
+                        <TrailItem date="Decision notes" title="Committee decision">
+                          {risk.committee_notes}
+                        </TrailItem>
+                      )}
                     </div>
                   </div>
-                )}
-                <div className="risk-workflow-actions">
-                  {risk.status === 'DRAFT' && (
-                    canSubmit ? (
-                      <>
-                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn">✎ Edit</Link>
-                        <WfBtn primary disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'PENDING_HOD', action: 'SUBMIT_TO_HOD', role: 'RLO', comment: 'Submitted to HOD for endorsement' })}>
-                          → Submit to HOD
-                        </WfBtn>
-                        <WfHint>Edit the details if needed, then submit to the department HOD for endorsement.</WfHint>
-                      </>
-                    ) : <WfHint>This risk is in draft. Only the RLO can edit and submit it to the HOD.</WfHint>
-                  )}
-                  {risk.status === 'PENDING_HOD' && (
-                    canEndorse ? (
-                      <>
-                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn">✎ Amend</Link>
-                        <WfBtn primary disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'PENDING_RC', action: 'ENDORSE', role: 'HOD', comment: 'Endorsed by HOD' })}>
-                          ✓ Endorse (HOD)
-                        </WfBtn>
-                        <WfBtn danger disabled={transitioning} onClick={() => handleReturn('HOD')}>↩ Return for Amendment</WfBtn>
-                        <WfHint>Amend the risk yourself if it needs minor tweaks, then Endorse → forwards to RC. Or Return it for the RLO to amend and resubmit.</WfHint>
-                      </>
-                    ) : <WfHint>Awaiting HOD endorsement. Only the department HOD can act here.</WfHint>
-                  )}
-                  {risk.status === 'PENDING_RC' && (
-                    canValidate ? (
-                      <>
-                        <WfBtn primary disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'TABLED_RTC', action: 'VALIDATE_TABLE_RTC', role: 'RC', comment: 'Validated by RC — tabled for Risk Technical Committee' })}>
-                          ✓ Validate &amp; table for RTC
-                        </WfBtn>
-                        <WfBtn disabled={transitioning} onClick={() => handleReturn('RC')}>↩ Return for Amendment</WfBtn>
-                        <WfBtn danger disabled={transitioning} onClick={handleOutOfScope}>✗ Out of Scope</WfBtn>
-                        <WfHint>RC validates a true risk and tables it for the RTC. Return it if the RLO needs to amend something. Mark Out of Scope if it doesn&apos;t meet the criteria for the register (this archives it).</WfHint>
-                      </>
-                    ) : <WfHint>Awaiting Risk Coordinator validation. Only RC can act here.</WfHint>
-                  )}
-                  {risk.status === 'TABLED_RTC' && (
-                    <WfHint>
-                      Tabled for the Risk Technical Committee (RTC). Add it to an RTC meeting&apos;s agenda from the {' '}
-                      <Link href="/risk/meetings" style={{ color: 'var(--blue)' }}>Meetings</Link> page — the committee&apos;s
-                      recorded decision there (endorse, escalate to ROC, send back, or recommend closure) moves the risk forward.
-                    </WfHint>
-                  )}
-                  {risk.status === 'TABLED_ROC' && (
-                    <WfHint>
-                      Escalated to the Risk Owner Committee (ROC). Add it to an ROC meeting&apos;s agenda from the {' '}
-                      <Link href="/risk/meetings" style={{ color: 'var(--blue)' }}>Meetings</Link> page — the committee&apos;s
-                      recorded decision there moves the risk forward.
-                    </WfHint>
-                  )}
-                  {risk.status === 'ACTIVE' && (
-                    (canManageActive || canRequestClose) ? (
-                      <>
-                        {canClose && (
-                          <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
-                        )}
-                        {canManageActive && (
-                          <WfBtn disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'MONITORING', action: 'MOVE_TO_MONITORING', role: 'RC', comment: 'Moved to monitoring' })}>
-                            → Move to Monitoring
-                          </WfBtn>
-                        )}
-                        {canRequestClose && (
-                          <WfBtn disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested' })}>
-                            Request Closure
-                          </WfBtn>
-                        )}
-                        <WfHint>Active risks are being treated. The RC can close the risk directly (e.g. after a committee decision), move it to Monitoring, or the RLO/HOD can request closure for the RC to confirm.</WfHint>
-                      </>
-                    ) : <WfHint>This risk is active and being treated.</WfHint>
-                  )}
-                  {risk.status === 'MONITORING' && (
-                    (canRequestClose || canManageActive) ? (
-                      <>
-                        {canClose && (
-                          <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
-                        )}
-                        {canRequestClose && (
-                          <WfBtn disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'PENDING_CLOSURE', action: 'REQUEST_CLOSURE', role: 'RLO', comment: 'Closure requested' })}>
-                            Request Closure
-                          </WfBtn>
-                        )}
-                        {canManageActive && (
-                          <WfBtn disabled={transitioning} onClick={() =>
-                            transition({ newStatus: 'ACTIVE', action: 'REACTIVATE', role: 'RC', comment: 'Reactivated from monitoring' })}>
-                            ← Back to Active
-                          </WfBtn>
-                        )}
-                        <WfHint>Risk is being monitored. The RC can close it directly, or the RLO/HOD can request closure. Send back to Active if treatment needs to resume.</WfHint>
-                      </>
-                    ) : <WfHint>This risk is being monitored.</WfHint>
-                  )}
-                  {risk.status === 'PENDING_CLOSURE' && (
-                    canClose ? (
-                      <>
-                        <WfBtn primary disabled={transitioning} onClick={handleClose}>✓ Close Risk (RC)</WfBtn>
-                        <WfBtn disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'ACTIVE', action: 'REOPEN_TO_ACTIVE', role: 'RC', comment: 'Closure rejected — back to active' })}>
-                          ← Reject closure
-                        </WfBtn>
-                        <WfHint>RC has the final say on closure. Approve close, or send back to ACTIVE.</WfHint>
-                      </>
-                    ) : <WfHint>Closure requested — awaiting Risk Coordinator decision.</WfHint>
-                  )}
-                  {(risk.status === 'RETURNED' || risk.status === 'REJECTED') && (
-                    <>
-                      {risk.rejection_comment && (
-                        <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
-                          <b>Returned for amendment:</b><br />
-                          {risk.rejection_comment}
-                        </div>
-                      )}
-                      {canSubmit ? (
-                        <>
-                          <WfBtn primary disabled={transitioning} onClick={handleReviseResubmit}>
-                            ↻ Revise &amp; Resubmit
-                          </WfBtn>
-                          <WfHint>Address the reviewer&apos;s note above, then resubmit. This reopens the same risk ({risk.risk_id}) as a draft so you can amend and send it back through.</WfHint>
-                        </>
-                      ) : <WfHint>This risk was returned to the RLO for amendment. The originating RLO can revise &amp; resubmit it.</WfHint>}
-                    </>
-                  )}
-                  {risk.status === 'OUT_OF_SCOPE' && (
-                    <>
-                      {risk.rejection_comment && (
-                        <div className="risk-def-block-value" style={{ marginBottom: 8, flexBasis: '100%' }}>
-                          <b>Out of scope:</b><br />
-                          {risk.rejection_comment}
-                        </div>
-                      )}
-                      {risk.pending_ack && canSubmit && (
-                        <>
-                          <WfBtn primary disabled={transitioning} onClick={handleAcknowledgeOutOfScope}>✓ Acknowledge</WfBtn>
-                          <WfHint>The RC has marked this risk out of scope for the register. Please acknowledge that you&apos;ve seen the decision and the reason above — it then moves to the Archive.</WfHint>
-                        </>
-                      )}
-                      {risk.pending_ack && !canSubmit && (
-                        <WfHint>Marked out of scope by the RC — awaiting the RLO&apos;s acknowledgment before it&apos;s archived.</WfHint>
-                      )}
-                      {!risk.pending_ack && (
-                        canValidate ? (
-                          <>
-                            <WfBtn disabled={transitioning} onClick={() =>
-                              transition({ newStatus: 'PENDING_RC', action: 'REOPEN_FROM_OUT_OF_SCOPE', role: 'RC', comment: 'Reopened for re-evaluation', extras: { pending_ack: false } })}>
-                              ↻ Reopen for review
-                            </WfBtn>
-                            <WfHint>Acknowledged and archived. Reopen it for review if you reconsider.</WfHint>
-                          </>
-                        ) : <WfHint>The RC marked this out of scope for the register — acknowledged and archived. Only the RC can reopen it.</WfHint>
-                      )}
-                    </>
-                  )}
-                  {risk.status === 'CLOSED' && (
-                    canManageActive ? (
-                      <>
-                        <WfHint>Risk is closed. Reopen if further treatment is needed.</WfHint>
-                        <WfBtn disabled={transitioning} onClick={() =>
-                          transition({ newStatus: 'ACTIVE', action: 'REOPEN', role: 'RC', comment: 'Risk reopened',
-                            extras: { date_closed: undefined, closed_by: undefined } })}>
-                          ↻ Reopen
-                        </WfBtn>
-                      </>
-                    ) : <WfHint>This risk is closed.</WfHint>
-                  )}
-                </div>
-              </div>
 
-              {/* Committee Reviews — decisions from RTC/ROC meetings (below the info sections) */}
-              {committeeReviews.length > 0 && (
-                <div className="panel" style={{ marginTop: 14, order: 2 }}>
-                  <div className="pf"><div>
-                    <div className="pt">🏛️ Committee Reviews</div>
-                    <div className="psub">Decisions recorded for this risk at RTC / ROC meetings</div>
-                  </div></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {committeeReviews.map((cr) => {
-                      const mt = cr.risk_meetings
-                      return (
-                        <div key={cr.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>
-                              {mt ? (
-                                <Link href={`/risk/meetings/${mt.id}`} style={{ color: 'var(--blue)' }}>
-                                  {mt.meeting_type} · {mt.title}
-                                </Link>
-                              ) : 'Meeting'}
-                              <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {mt?.meeting_date ?? fmtDate(cr.decided_at)}</span>
-                            </div>
-                            {cr.outcome && (
-                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 4, color: '#166534', background: '#DCFCE7' }}>
-                                {COMMITTEE_OUTCOME_LABEL[cr.outcome as CommitteeOutcome]}
-                              </span>
+                  {/* Committee decision & department response — recorded by the Coordinator */}
+                  <div className="panel" style={{ borderLeft: '4px solid var(--amber, #F59E0B)' }}>
+                    <div className="pf"><div>
+                      <div className="pt">🗣️ Committee decision &amp; department response</div>
+                      <div className="psub">Recorded by the Coordinator — departments don&apos;t log in; they communicate outside the portal.</div>
+                    </div></div>
+
+                    {responses.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                        {responses.map((r) => (
+                          <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '9px 11px' }}>
+                            {r.directive && (
+                              <div style={{ fontSize: 12, marginBottom: 4 }}>
+                                <span style={{ fontWeight: 700, color: '#92400E' }}>Directive: </span>{r.directive}
+                              </div>
                             )}
+                            {r.response && (
+                              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>
+                                <span style={{ fontWeight: 700 }}>Response: </span>{r.response}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>
+                              {r.received_on ? `Received ${r.received_on}` : 'Received —'}
+                              {r.received_via ? ` · via ${r.received_via}` : ''}
+                              {` · recorded by ${nameOf(r.recorded_by)}`}
+                            </div>
                           </div>
-                          {cr.decision_text && (
-                            <div style={{ fontSize: 12, marginTop: 6 }}>
-                              <span style={{ fontWeight: 700, color: '#166534' }}>Decision: </span>{cr.decision_text}
-                            </div>
-                          )}
-                          {cr.discussion_notes && (
-                            <div style={{ fontSize: 12, marginTop: 4, color: 'var(--muted)' }}>
-                              <span style={{ fontWeight: 700 }}>Discussion: </span>{cr.discussion_notes}
-                            </div>
-                          )}
-                          {cr.pre_meeting_scoring && (
-                            <div style={{ fontSize: 12, marginTop: 4 }}>
-                              <span style={{ fontWeight: 700, color: '#166534' }}>Re-scoring: </span>
-                              <span style={{ color: 'var(--muted)' }}>
-                                pre-meeting <b>{(Math.round(cr.pre_meeting_scoring.risk_score * 10) / 10).toFixed(1)}</b> ({RISK_LEVEL_LABEL[cr.pre_meeting_scoring.risk_level]})
-                              </span>
-                              {' → '}
-                              <span>after meeting refined in same cycle</span>
-                            </div>
-                          )}
-                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                            Recorded by {nameOf(cr.decided_by)}{cr.decided_at ? ` on ${cr.decided_at.slice(0, 10)}` : ''}
-                            {cr.review_id ? ' · risk was re-scored at this meeting' : ''}
+                        ))}
+                      </div>
+                    )}
+
+                    {canEdit ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div className="risk-field">
+                          <label>Committee directive</label>
+                          <textarea rows={2} value={respDirective} onChange={(e) => setRespDirective(e.target.value)}
+                            placeholder="e.g. 'Implement RTP and re-submit residual scoring by next review.'" />
+                        </div>
+                        <div className="risk-field">
+                          <label>Department&apos;s response (email / meeting / WhatsApp)</label>
+                          <textarea rows={2} value={respText} onChange={(e) => setRespText(e.target.value)}
+                            placeholder="e.g. 'ED confirmed 2nd triage station approved, procurement in progress.'" />
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          <div className="risk-field" style={{ flex: '1 1 160px' }}>
+                            <label>Received on</label>
+                            <input type="date" value={respOn} onChange={(e) => setRespOn(e.target.value)} />
+                          </div>
+                          <div className="risk-field" style={{ flex: '1 1 160px' }}>
+                            <label>Received via</label>
+                            <select value={respVia} onChange={(e) => setRespVia(e.target.value)}>
+                              {RECEIVED_VIA.map((v) => <option key={v} value={v}>{v}</option>)}
+                            </select>
                           </div>
                         </div>
-                      )
-                    })}
+                        <div>
+                          <button type="button" className="signout-btn"
+                            style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                            disabled={savingResp || (!respText.trim() && !respDirective.trim())}
+                            onClick={saveResponse}>
+                            {savingResp ? 'Saving…' : 'Save response'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>Only the Risk Coordinator can record responses.</div>
+                    )}
                   </div>
-                </div>
-              )}
 
-              {/* Committee Action Items — directives & clarifications, with RLO feedback (below the info sections) */}
-              {actionItems.length > 0 && (
-                <div className="panel" style={{ marginTop: 14, order: 2 }}>
-                  <div className="pf"><div>
-                    <div className="pt">📌 Committee Action Items</div>
-                    <div className="psub">Directives &amp; clarifications from the committee — the department&apos;s feedback is reviewed at the next meeting</div>
-                  </div></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {actionItems.map((a) => {
-                      const assignedLabel = (a.assigned_depts ?? []).map((c) => actionDeptNames.get(c) ?? c).join(', ') || '—'
-                      // Only the assigned department's RLO/HOD responds.
-                      const itemCanRespond = canRespond && !!activeRole?.dept_code && (a.assigned_depts ?? []).includes(activeRole.dept_code)
-                      return (
-                        <ActionItemBlock
-                          key={a.id}
-                          item={a}
-                          assignedLabel={assignedLabel}
-                          canRespond={itemCanRespond}
-                          onRespond={(text) => respondToAction(a, text)}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Section 1 — Identification */}
-              <div className="panel" style={{ marginTop: 14 }}>
-                <div className="pf"><div><div className="pt">🪪 1. Risk Identification</div></div></div>
-                <div className="risk-detail-grid">
-                  <DefLine label="Risk ID" mono>{risk.risk_id}</DefLine>
-                  <DefLine label="Department">{dept ? `${dept.name_en}` : risk.dept_code} <span style={{ color: 'var(--muted)' }}>({risk.dept_code})</span></DefLine>
-                  <DefLine label="UiTM Domain">
-                    {risk.uitm_domain
-                      ? <b>{RISK_DOMAIN_LABEL[risk.uitm_domain]}</b>
-                      : <em style={{ color: 'var(--muted)' }}>Unassigned</em>}
-                  </DefLine>
-                  <DefLine label="Nature">
-                    {risk.risk_nature
-                      ? RISK_NATURE_LABEL[risk.risk_nature]
-                      : <em style={{ color: 'var(--muted)' }}>—</em>}
-                  </DefLine>
-                  <DefLine label="Scope">{RISK_SCOPE_LABEL[risk.scope]}</DefLine>
-                  <DefLine label="Context" full>
-                    {risk.context || <em style={{ color: 'var(--muted)' }}>—</em>}
-                  </DefLine>
-                  <DefLine label="Risk owner">{dept?.name_en ?? risk.dept_code}</DefLine>
-                  <DefLine label="Created by">{nameOf(risk.created_by)}</DefLine>
-                  <DefLine label="Date opened">{fmtDate(risk.date_opened)}</DefLine>
-                  <DefLine label="Date closed">{fmtDate(risk.date_closed)}</DefLine>
-                  {risk.is_isu_melintang && (
-                    <DefLine label="Isu Melintang" full>
-                      <span style={{ color: 'var(--amber)' }}>⚠ Tagged as cross-cutting hospital-wide issue</span>
-                    </DefLine>
-                  )}
-                  {themes.length > 0 && (
-                    <DefLine label="Themes" full>
-                      {themes.map((t) => (
-                        <span key={t.id} className="theme-pill" style={{ marginRight: 6 }}>{t.name}</span>
-                      ))}
-                    </DefLine>
-                  )}
-                  {risk.entry_mode === 'rmcq_managed' && (risk.paper_submitted_by || risk.paper_endorsed_by || risk.paper_reference) && (
-                    <DefLine label="Paper source" full>
-                      <span style={{ display: 'inline-block', padding: '6px 10px', background: '#FEF3C7', borderRadius: 6, border: '1px solid #FCD34D', fontSize: 12, color: '#78350F' }}>
-                        {risk.paper_submitted_by && <>Submitted by <b>{risk.paper_submitted_by}</b></>}
-                        {risk.paper_submission_date && <> on {risk.paper_submission_date}</>}
-                        {risk.paper_endorsed_by && <> · HOD-endorsed by <b>{risk.paper_endorsed_by}</b></>}
-                        {risk.paper_endorsement_date && <> on {risk.paper_endorsement_date}</>}
-                        {risk.paper_reference && <> · ref: <i>{risk.paper_reference}</i></>}
-                      </span>
-                    </DefLine>
-                  )}
-                </div>
-              </div>
-
-              {/* Section 2 — Description */}
-              <div className="panel">
-                <div className="pf"><div><div className="pt">📝 2. Risk Description</div></div></div>
-                <DefBlock label="Risk description">{risk.description}</DefBlock>
-                <DefBlock label="Cause">{risk.cause_description}</DefBlock>
-                <DefBlock label="Consequence">{risk.impact_description}</DefBlock>
-              </div>
-
-              {/* Section 3 — Controls */}
-              <div className="panel">
-                <div className="pf"><div><div className="pt">🛡️ 3. Controls &amp; Treatment</div></div></div>
-                <DefBlock label="Existing controls">{risk.existing_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
-                <DefBlock label="Additional controls proposed">{risk.additional_controls || <em style={{ color: 'var(--muted)' }}>not specified</em>}</DefBlock>
-                <div className="risk-detail-grid">
-                  <DefLine label="Treatment option">
-                    {risk.treatment_option
-                      ? TREATMENT_OPTION_LABEL[risk.treatment_option]
-                      : <em style={{ color: 'var(--muted)' }}>—</em>}
-                  </DefLine>
-                  <DefLine label="Action owner">
-                    {(risk.action_owner_depts && risk.action_owner_depts.length)
-                      ? risk.action_owner_depts.map((c) => actionDeptNames.get(c) ?? c).join(', ')
-                      : (risk.action_owner || <em style={{ color: 'var(--muted)' }}>—</em>)}
-                  </DefLine>
-                  <DefLine label="Implementation period">{risk.implementation_period || <em style={{ color: 'var(--muted)' }}>—</em>}</DefLine>
-                </div>
-                {risk.notes && <DefBlock label="Notes">{risk.notes}</DefBlock>}
-              </div>
-
-              {/* Attachments — source risk-register PDF + RTP (file upload or Drive link) */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">📎 Attachments</div>
-                  <div className="psub">Source risk register &amp; Risk Treatment Plan (RTP)</div>
-                </div></div>
-                <div style={{ padding: '4px 4px 8px' }}>
-                  <RiskAttachments riskId={risk.id} canEdit={hasRole(['RC', 'ADMIN', 'DIRECTOR'])} />
-                </div>
-              </div>
-
-              {/* Section 4 — Latest Review */}
-              {latest && (
-                <div className="panel">
-                  <div className="pf"><div>
-                    <div className="pt">📊 4. Latest Review — Cycle {latest.cycle_number}</div>
-                    <div className="psub">Reviewed by {nameOf(latest.reviewed_by)} on {fmtDate(latest.review_date)}</div>
-                  </div></div>
-                  <div className="risk-score-preview" style={{ marginTop: 0 }}>
-                    <div className="rsp-block">
-                      <div className="rsp-label">Likelihood</div>
-                      <div className="rsp-value">{latest.likelihood}</div>
-                    </div>
-                    <div className="rsp-block">
-                      <div className="rsp-label">Severity</div>
-                      <div className="rsp-value">{latest.severity ?? (latest.avg_impact != null ? (Math.round(latest.avg_impact * 10) / 10).toFixed(1) : '—')}</div>
-                    </div>
-                    <div className="rsp-block">
-                      <div className="rsp-label">Risk Score</div>
-                      <div className="rsp-value">{(Math.round(latest.risk_score * 10) / 10).toFixed(1)}</div>
-                    </div>
-                    <div className="rsp-block">
-                      <div className="rsp-label">Risk Level</div>
-                      <div className="rsp-value">
-                        <span style={{
-                          display: 'inline-block', padding: '4px 14px', borderRadius: 4,
-                          fontSize: 14, fontWeight: 700,
-                          color: RISK_LEVEL_COLOR[latest.risk_level],
-                          background: RISK_LEVEL_BG[latest.risk_level],
-                        }}>{RISK_LEVEL_LABEL[latest.risk_level]}</span>
+                  {/* Review history */}
+                  {reviews.length > 1 && (
+                    <div className="panel">
+                      <div className="pf"><div><div className="pt">🕘 Review history</div><div className="psub">{reviews.length} cycles</div></div></div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="risk-table">
+                          <thead>
+                            <tr>
+                              <th>Cycle</th><th>Date</th><th>Reviewer</th>
+                              <th style={{ textAlign: 'center' }}>L</th>
+                              <th style={{ textAlign: 'center' }}>S</th>
+                              <th style={{ textAlign: 'right' }}>Score</th>
+                              <th style={{ textAlign: 'center' }}>Res L</th>
+                              <th style={{ textAlign: 'center' }}>Res S</th>
+                              <th style={{ textAlign: 'right' }}>Res Score</th>
+                              <th style={{ textAlign: 'center' }}>Level</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {reviews.map((rv) => (
+                              <tr key={rv.id}>
+                                <td>{rv.cycle_number}</td>
+                                <td>{fmtDate(rv.review_date)}</td>
+                                <td>{nameOf(rv.reviewed_by)}</td>
+                                <td style={{ textAlign: 'center' }}>{rv.likelihood}</td>
+                                <td style={{ textAlign: 'center' }}>{rv.severity ?? '—'}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 700 }}>{Math.round(rv.risk_score)}</td>
+                                <td style={{ textAlign: 'center' }}>{rv.residual_likelihood ?? '—'}</td>
+                                <td style={{ textAlign: 'center' }}>{rv.residual_severity ?? '—'}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 700 }}>{rv.residual_score != null ? Math.round(rv.residual_score) : '—'}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RISK_LEVEL_COLOR[rv.risk_level], background: RISK_LEVEL_BG[rv.risk_level] }}>
+                                    {RISK_LEVEL_LABEL[rv.risk_level]}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
+                  )}
+
+                  {/* Audit log */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">🧾 Audit log</div><div className="psub">{logs.length} event{logs.length === 1 ? '' : 's'}</div></div></div>
+                    {logs.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No audit events yet.</div>
+                    ) : (
+                      <ul className="audit-list">
+                        {logs.map((log) => (
+                          <li key={log.id}>
+                            <span className="audit-action">{log.action_type}</span>
+                            <span className="audit-meta">
+                              {nameOf(log.performed_by)}
+                              {log.user_role && <> · <span style={{ color: 'var(--muted)' }}>{RISK_ROLE_LABEL[log.user_role as keyof typeof RISK_ROLE_LABEL] ?? log.user_role}</span></>}
+                              <> · {fmtDate(log.performed_at)}</>
+                            </span>
+                            {log.comment && <div className="audit-comment">{log.comment}</div>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  <table className="risk-table" style={{ marginTop: 10 }}>
-                    <thead>
-                      <tr>
-                        <th>Likelihood</th><th>Severity</th>
-                        <th>Residual L</th><th>Residual S</th><th>Residual Score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.likelihood}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.severity ?? (latest.avg_impact != null ? (Math.round(latest.avg_impact * 10) / 10).toFixed(1) : '—')}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_likelihood ?? '—'}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_severity ?? '—'}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{latest.residual_score != null ? (Math.round(latest.residual_score * 10) / 10).toFixed(1) : '—'}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  {latest.treatment_update && (
-                    <DefBlock label="Treatment update">{latest.treatment_update}</DefBlock>
+                </div>
+
+                {/* ---- Side column ---- */}
+                <div className="risk-detail-side">
+                  {transitionError && (
+                    <div className="ac red"><div className="ai">⚠️</div>
+                      <div><div className="at">Error</div><div className="as">{transitionError}</div></div>
+                    </div>
+                  )}
+
+                  {/* Attachments */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">📎 Attachments</div></div></div>
+                    <div style={{ padding: '4px 4px 8px' }}>
+                      <RiskAttachments riskId={risk.id} canEdit={canEdit} />
+                    </div>
+                  </div>
+
+                  {/* RTP status */}
+                  <div className="panel">
+                    <div className="pf"><div><div className="pt">🎯 RTP status</div></div></div>
+                    {risk.treatment_option === 'ACCEPT' ? (
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>Treatment is <b>Accept</b> — no RTP required.</div>
+                    ) : rtp ? (
+                      <>
+                        <div className="risk-detail-grid">
+                          <DefLine label="Progress">
+                            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, color: RTP_STATUS_BADGE[rtp.overall_status].fg, background: RTP_STATUS_BADGE[rtp.overall_status].bg }}>
+                              {RTP_STATUS_LABEL[rtp.overall_status]}
+                            </span>
+                          </DefLine>
+                          <DefLine label="Tasks">{rtpTasksDone} of {rtpTasks.length} done</DefLine>
+                          <DefLine label="Adequacy">{rtp.adequacy ?? '—'}</DefLine>
+                          <DefLine label="Last reviewed">{fmtDate(rtp.last_reviewed)}</DefLine>
+                        </div>
+                        <Link href={`/risk/${risk.id}/rtp`} className="signout-btn"
+                          style={{ display: 'block', textAlign: 'center', marginTop: 10, background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
+                          Open RTP →
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>No RTP created yet for this risk.</div>
+                        {canEdit && (
+                          <Link href={`/risk/${risk.id}/rtp`} className="signout-btn"
+                            style={{ display: 'block', textAlign: 'center', background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}>
+                            ＋ Create RTP
+                          </Link>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  {canEdit && (
+                    <div className="panel">
+                      <div className="pf"><div><div className="pt">Actions</div></div></div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <Link href={`/risk/${risk.id}/edit`} className="signout-btn" style={{ textAlign: 'center' }}>✎ Edit risk</Link>
+                        {risk.status !== 'CLOSED' && risk.status !== 'TABLED_ROC' && (
+                          <button type="button" className="signout-btn" disabled={transitioning} onClick={handleEscalate}>🔺 Escalate manually</button>
+                        )}
+                        {risk.status !== 'CLOSED' && risk.status !== 'PENDING_CLOSURE' && (
+                          <button type="button" className="signout-btn" disabled={transitioning}
+                            onClick={() => transition({ newStatus: 'PENDING_CLOSURE', action: 'RECOMMEND_CLOSE', comment: 'Recommended for closure', extras: { committee_stage: 'RECOMMEND_CLOSE' } })}>
+                            🏁 Recommend closure
+                          </button>
+                        )}
+                        {risk.status === 'PENDING_CLOSURE' && (
+                          <button type="button" className="signout-btn" disabled={transitioning}
+                            style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+                            onClick={handleClose}>✓ Close risk</button>
+                        )}
+                        {risk.status === 'CLOSED' && (
+                          <button type="button" className="signout-btn" disabled={transitioning}
+                            onClick={() => transition({ newStatus: 'ACTIVE', action: 'REOPEN', comment: 'Risk reopened', extras: { date_closed: undefined, closed_by: undefined } })}>
+                            ↻ Reopen
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
-              )}
-
-              {/* Section 5 — Review History */}
-              {reviews.length > 1 && (
-                <div className="panel">
-                  <div className="pf"><div><div className="pt">🕘 5. Review History</div><div className="psub">{reviews.length} cycles total</div></div></div>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="risk-table">
-                      <thead>
-                        <tr>
-                          <th>Cycle</th><th>Date</th><th>Reviewer</th>
-                          <th style={{ textAlign: 'center' }}>L</th>
-                          <th style={{ textAlign: 'center' }}>S</th>
-                          <th style={{ textAlign: 'right' }}>Score</th>
-                          <th style={{ textAlign: 'center' }}>Res L</th>
-                          <th style={{ textAlign: 'center' }}>Res S</th>
-                          <th style={{ textAlign: 'right' }}>Res Score</th>
-                          <th style={{ textAlign: 'center' }}>Level</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reviews.map((rv) => (
-                          <tr key={rv.id}>
-                            <td>{rv.cycle_number}</td>
-                            <td>{fmtDate(rv.review_date)}</td>
-                            <td>{nameOf(rv.reviewed_by)}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.likelihood}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.severity ?? (rv.avg_impact != null ? (Math.round(rv.avg_impact * 10) / 10).toFixed(1) : '—')}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{(Math.round(rv.risk_score * 10) / 10).toFixed(1)}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.residual_likelihood ?? '—'}</td>
-                            <td style={{ textAlign: 'center' }}>{rv.residual_severity ?? '—'}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{rv.residual_score != null ? (Math.round(rv.residual_score * 10) / 10).toFixed(1) : '—'}</td>
-                            <td style={{ textAlign: 'center' }}>
-                              <span style={{
-                                display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                                fontSize: 10, fontWeight: 700,
-                                color: RISK_LEVEL_COLOR[rv.risk_level],
-                                background: RISK_LEVEL_BG[rv.risk_level],
-                              }}>{RISK_LEVEL_LABEL[rv.risk_level]}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Section 6 — Audit log (always last) */}
-              <div className="panel" style={{ order: 4 }}>
-                <div className="pf"><div><div className="pt">🧾 6. Audit Log</div><div className="psub">{logs.length} event{logs.length === 1 ? '' : 's'}</div></div></div>
-                {logs.length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No audit events yet.</div>
-                ) : (
-                  <ul className="audit-list">
-                    {logs.map((log) => (
-                      <li key={log.id}>
-                        <span className="audit-action">{log.action_type}</span>
-                        <span className="audit-meta">
-                          {nameOf(log.performed_by)}
-                          {log.user_role && <> · <span style={{ color: 'var(--muted)' }}>{RISK_ROLE_LABEL[log.user_role as keyof typeof RISK_ROLE_LABEL] ?? log.user_role}</span></>}
-                          <> · {fmtDate(log.performed_at)}</>
-                        </span>
-                        {log.comment && <div className="audit-comment">{log.comment}</div>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
               </div>
             </>
           )}
@@ -980,10 +679,33 @@ export default function RiskDetailPage() {
 
 /* ---- helpers ---- */
 
-function daysOpen(opened: string, closed: string | null): number {
-  const start = new Date(opened).getTime()
-  const end = closed ? new Date(closed).getTime() : Date.now()
-  return Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)))
+function ScoreBox({ label, score, level, hint }: {
+  label: string
+  score: number | null
+  level: RiskReview['risk_level']
+  hint: string
+}) {
+  return (
+    <div style={{ flex: 1, minWidth: 160, border: '1px solid var(--border)', borderRadius: 8, padding: 14, textAlign: 'center' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 34, fontWeight: 800, color: RISK_LEVEL_COLOR[level], lineHeight: 1.1 }}>{score ?? '—'}</div>
+      <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 4, fontSize: 11, fontWeight: 700, color: RISK_LEVEL_COLOR[level], background: RISK_LEVEL_BG[level] }}>
+        {RISK_LEVEL_LABEL[level]}
+      </span>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{hint}</div>
+    </div>
+  )
+}
+
+function TrailItem({ date, title, children }: { date: string; title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ position: 'relative', paddingLeft: 16, paddingBottom: 12, borderLeft: '2px solid var(--border)', marginLeft: 4 }}>
+      <span style={{ position: 'absolute', left: -5, top: 2, width: 8, height: 8, borderRadius: '50%', background: 'var(--blue)' }} />
+      <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{date}</div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{children}</div>
+    </div>
+  )
 }
 
 function DefLine({ label, children, full, mono }: {
@@ -1005,108 +727,6 @@ function DefBlock({ label, children }: { label: string; children: React.ReactNod
     <div className="risk-def-block">
       <div className="risk-def-label">{label}</div>
       <div className="risk-def-block-value">{children}</div>
-    </div>
-  )
-}
-
-const ACTION_STATUS_BADGE: Record<ActionStatus, { bg: string; fg: string }> = {
-  PENDING:   { bg: '#FEF3C7', fg: '#92400E' },
-  RESPONDED: { bg: '#DBEAFE', fg: '#1E40AF' },
-  ACCEPTED:  { bg: '#DCFCE7', fg: '#166534' },
-  OVERDUE:   { bg: '#FEE2E2', fg: '#991B1B' },
-  ESCALATED: { bg: '#EDE9FE', fg: '#5B21B6' },
-}
-
-function ActionItemBlock({ item, assignedLabel, canRespond, onRespond }: {
-  item: RiskActionItem
-  assignedLabel: string
-  canRespond: boolean
-  onRespond: (text: string) => void
-}) {
-  const [text, setText] = useState(item.response ?? '')
-  const [editing, setEditing] = useState(false)
-  const sb = ACTION_STATUS_BADGE[item.status]
-  return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {ACTION_TYPE_LABEL[item.action_type]}
-          <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
-            {' '}· assigned to {assignedLabel}
-          </span>
-        </div>
-        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sb.fg, background: sb.bg }}>
-          {ACTION_STATUS_LABEL[item.status]}
-        </span>
-      </div>
-      <div style={{ fontSize: 13, marginTop: 5 }}>{item.description}</div>
-
-      {item.response && !editing && (
-        <div style={{ marginTop: 8, background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Department feedback</div>
-          <div style={{ fontSize: 13, marginTop: 2, whiteSpace: 'pre-wrap' }}>{item.response}</div>
-        </div>
-      )}
-
-      {canRespond && (editing || !item.response) ? (
-        <div style={{ marginTop: 8 }}>
-          <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
-            placeholder="Your feedback / progress on this directive…"
-            style={{ width: '100%', padding: 8, border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'inherit', fontSize: 13 }} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
-            {editing && (
-              <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
-                onClick={() => { setText(item.response ?? ''); setEditing(false) }}>Cancel</button>
-            )}
-            <button type="button" className="signout-btn"
-              style={{ fontSize: 11, padding: '4px 12px', background: text.trim() ? 'var(--blue)' : '#9CA3AF', color: '#fff', borderColor: text.trim() ? 'var(--blue)' : '#9CA3AF' }}
-              disabled={!text.trim()} onClick={() => { onRespond(text); setEditing(false) }}>
-              {item.response ? 'Update feedback' : 'Submit feedback'}
-            </button>
-          </div>
-        </div>
-      ) : canRespond && item.response ? (
-        <div style={{ marginTop: 6 }}>
-          <button type="button" className="signout-btn" style={{ fontSize: 11, padding: '4px 10px' }}
-            onClick={() => setEditing(true)}>✎ Edit feedback</button>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function WfBtn({ children, primary, danger, disabled, onClick }: {
-  children: React.ReactNode
-  primary?: boolean
-  danger?: boolean
-  disabled?: boolean
-  onClick?: () => void
-}) {
-  const bg = primary ? 'var(--blue)' : danger ? 'var(--red)' : '#fff'
-  const fg = (primary || danger) ? '#fff' : 'var(--text)'
-  const border = primary ? 'var(--blue)' : danger ? 'var(--red)' : 'var(--border)'
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="signout-btn"
-      style={{
-        background: disabled ? '#9CA3AF' : bg,
-        color: fg,
-        borderColor: disabled ? '#9CA3AF' : border,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.7 : 1,
-      }}>
-      {children}
-    </button>
-  )
-}
-
-function WfHint({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: 11, color: 'var(--muted)', flexBasis: '100%' }}>
-      {children}
     </div>
   )
 }

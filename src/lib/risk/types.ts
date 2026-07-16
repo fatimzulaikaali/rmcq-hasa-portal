@@ -80,6 +80,15 @@ export interface Risk {
   paper_endorsed_by: string | null
   paper_endorsement_date: string | null
   paper_reference: string | null
+  /* Rebuild (2026): committee-outcome summary recorded inline by the Coordinator
+   * from paper/PDF submissions, plus the ERMS submission flag set at ROC. */
+  submit_to_erms: boolean
+  escalation_type: 'AUTO' | 'MANUAL' | 'NONE' | null
+  committee_stage: 'NOT_TABLED' | 'TABLED_RTC' | 'ENDORSED_ROC' | 'SENT_BACK' | 'RECOMMEND_CLOSE' | null
+  rtc_ref: string | null
+  roc_ref: string | null
+  committee_notes: string | null
+  register_review_date: string | null
   date_opened: string
   date_closed: string | null
   closed_by: number | null
@@ -270,4 +279,67 @@ export interface RiskActionItem {
   created_by: number | null
   created_at: string
   updated_at: string
+}
+
+/* ---------- Rebuild (2026): first-class RTP (Form 0045) ---------- */
+
+export type RtpAdequacy = 'H' | 'M' | 'L'
+export type RtpOverallStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'VERIFIED'
+export type RtpTaskStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'
+
+/* One Risk Treatment Plan per risk. `existing_control` is NOT stored here — it
+ * is read live from the linked risk so it always matches the register. */
+export interface RiskRtp {
+  id: string
+  risk_id: number
+  new_control: string | null
+  adequacy: RtpAdequacy | null
+  participating_depts: string | null
+  risk_owner: string | null
+  monitored_by: string | null
+  prepared_by_name: string | null;  prepared_by_date: string | null
+  approved_hod_name: string | null; approved_hod_date: string | null
+  reviewed_rtc_name: string | null; reviewed_rtc_date: string | null
+  approved_roc_name: string | null; approved_roc_date: string | null
+  overall_status: RtpOverallStatus
+  last_reviewed: string | null
+  created_by: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RiskRtpTask {
+  id: string
+  rtp_id: string
+  seq: number
+  task: string
+  pic: string | null
+  due_date: string | null
+  status: RtpTaskStatus
+  updated_by: number | null
+  updated_at: string
+  created_at: string
+}
+
+/* Timestamped log of Coordinator status changes to an RTP. */
+export interface RiskRtpUpdate {
+  id: string
+  rtp_id: string
+  note: string | null
+  status: string | null
+  created_by: number | null
+  created_at: string
+}
+
+/* A department's response to a committee directive, recorded by the Coordinator
+ * (departments don't log in — they communicate outside the portal). */
+export interface RiskDeptResponse {
+  id: string
+  risk_id: number
+  directive: string | null
+  response: string | null
+  received_on: string | null
+  received_via: string | null
+  recorded_by: number | null
+  created_at: string
 }
