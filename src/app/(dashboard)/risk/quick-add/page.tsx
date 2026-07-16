@@ -352,13 +352,16 @@ export default function LogRiskPage() {
 
           {!loading && !loadError && !accessDenied && (
             <form onSubmit={(e) => { e.preventDefault(); void handleSubmit() }}>
+              {/* Intro banner */}
+              <div className="banner blue">
+                📄 One register = one department, many risks. Add each risk below, then attach the source PDF on each risk after saving.
+              </div>
+
               {/* Register header */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">Register header</div>
-                  <div className="psub">Applies to every risk in this register. One register = one department.</div>
-                </div></div>
-                <div className="risk-form-grid">
+              <div className="card">
+                <div className="card-hd">Register header</div>
+                <div className="card-sub">Applies to every risk in this register.</div>
+                <div className="frow three">
                   <Field label="Department" required>
                     <DeptSearchPicker depts={allDepts} value={deptCode}
                       onChange={setDeptCode} placeholder="Type to search a department…" allowEmpty />
@@ -366,8 +369,9 @@ export default function LogRiskPage() {
                   <Field label="Date of review" required>
                     <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
                   </Field>
-                  <Field label="Register reference" hint="Optional — e.g. 'ED register Q2 2026'.">
-                    <input type="text" value={registerRef} onChange={(e) => setRegisterRef(e.target.value)} />
+                  <Field label="Register reference">
+                    <input type="text" value={registerRef} onChange={(e) => setRegisterRef(e.target.value)}
+                      placeholder="e.g. ED register Q2 2026" />
                   </Field>
                 </div>
               </div>
@@ -381,44 +385,55 @@ export default function LogRiskPage() {
                   onAddTask={() => addTask(i)} />
               ))}
 
-              <div className="panel" style={{ textAlign: 'center' }}>
-                <button type="button" className="signout-btn" onClick={addRisk}
-                  style={{ borderStyle: 'dashed' }}>＋ Add another risk to this register</button>
+              <div className="btn-row" style={{ margin: '-6px 0 18px' }}>
+                <button type="button" className="btn dashed" onClick={addRisk}>＋ Add another risk to this register</button>
               </div>
 
               {/* Sign-off */}
-              <div className="panel">
-                <div className="pf"><div>
-                  <div className="pt">Sign-off (from the paper form)</div>
-                  <div className="psub">Recorded as it appears on the department&apos;s submitted register.</div>
-                </div></div>
-                <div className="risk-form-grid">
-                  <Field label="Prepared / Updated by — RLO name">
-                    <input type="text" value={preparedName} onChange={(e) => setPreparedName(e.target.value)} />
-                  </Field>
-                  <Field label="RLO designation">
-                    <input type="text" value={preparedDesig} onChange={(e) => setPreparedDesig(e.target.value)} />
-                  </Field>
-                  <Field label="RLO date">
-                    <input type="date" value={preparedDate} onChange={(e) => setPreparedDate(e.target.value)} />
-                  </Field>
-                  <Field label="Reviewed / Approved by — HOD name">
-                    <input type="text" value={approvedName} onChange={(e) => setApprovedName(e.target.value)} />
-                  </Field>
-                  <Field label="HOD designation">
-                    <input type="text" value={approvedDesig} onChange={(e) => setApprovedDesig(e.target.value)} />
-                  </Field>
-                  <Field label="HOD date">
-                    <input type="date" value={approvedDate} onChange={(e) => setApprovedDate(e.target.value)} />
-                  </Field>
+              <div className="card">
+                <div className="card-hd">Sign-off (from the paper form)</div>
+                <div className="card-sub">Recorded as it appears on the department&apos;s submitted register.</div>
+                <div className="signoff">
+                  <div className="box">
+                    <div className="r">Prepared / Updated by — Risk Liaison Officer</div>
+                    <div className="frow" style={{ marginBottom: 0 }}>
+                      <Field label="Name">
+                        <input type="text" value={preparedName} onChange={(e) => setPreparedName(e.target.value)} />
+                      </Field>
+                      <Field label="Date">
+                        <input type="date" value={preparedDate} onChange={(e) => setPreparedDate(e.target.value)} />
+                      </Field>
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <Field label="Designation">
+                        <input type="text" value={preparedDesig} onChange={(e) => setPreparedDesig(e.target.value)} />
+                      </Field>
+                    </div>
+                  </div>
+                  <div className="box">
+                    <div className="r">Reviewed / Approved by — Head of Department</div>
+                    <div className="frow" style={{ marginBottom: 0 }}>
+                      <Field label="Name">
+                        <input type="text" value={approvedName} onChange={(e) => setApprovedName(e.target.value)} />
+                      </Field>
+                      <Field label="Date">
+                        <input type="date" value={approvedDate} onChange={(e) => setApprovedDate(e.target.value)} />
+                      </Field>
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <Field label="Designation">
+                        <input type="text" value={approvedDesig} onChange={(e) => setApprovedDesig(e.target.value)} />
+                      </Field>
+                    </div>
+                  </div>
                 </div>
-                <div className="risk-field-hint" style={{ marginTop: 6 }}>
+                <div className="hint" style={{ marginTop: 10 }}>
                   📎 Attach the source register PDF / RTP on each risk&apos;s page after saving.
                 </div>
               </div>
 
               {/* Submit */}
-              <div className="panel">
+              <div className="card">
                 {errors.length > 0 && (
                   <div className="ac amber" style={{ marginBottom: 10 }}>
                     <div className="ai">!</div>
@@ -435,17 +450,13 @@ export default function LogRiskPage() {
                     <div><div className="at">Could not save</div><div className="as">{submitError}</div></div>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                  <Link href="/risk" className="signout-btn">Cancel</Link>
-                  <button type="submit" className="signout-btn"
-                    style={{
-                      background: canSubmit ? 'var(--blue)' : '#9CA3AF', color: '#fff',
-                      borderColor: canSubmit ? 'var(--blue)' : '#9CA3AF',
-                      cursor: canSubmit ? 'pointer' : 'not-allowed',
-                    }}
+                <div className="btn-row">
+                  <button type="submit" className="btn primary"
+                    style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
                     disabled={!canSubmit}>
                     {submitting ? 'Saving…' : `Save register (${risks.length} risk${risks.length === 1 ? '' : 's'})`}
                   </button>
+                  <Link href="/risk" className="btn ghost">Cancel</Link>
                 </div>
               </div>
             </form>
@@ -474,20 +485,22 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
   const isAccept = block.treatment_option === 'ACCEPT'
 
   return (
-    <div className="panel" style={{ borderLeft: '4px solid var(--blue)' }}>
-      <div className="pf"><div>
-        <div className="pt">Risk {index + 1} <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12 }}>of this register</span></div>
+    <div className="card" style={{ borderLeft: '4px solid var(--blue)' }}>
+      <div className="card-hd">
+        Risk {index + 1} <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>of this register</span>
+        {total > 1 && (
+          <button type="button" className="btn ghost" onClick={onRemove}
+            style={{ marginLeft: 'auto', color: 'var(--red)' }}>✕ Remove</button>
+        )}
       </div>
-      {total > 1 && (
-        <button type="button" className="signout-btn" onClick={onRemove}
-          style={{ color: 'var(--red)' }}>✕ Remove</button>
-      )}</div>
 
-      <div className="risk-form-grid">
-        <Field label="Context" required full
+      <div className="frow one">
+        <Field label="Context" required
           hint="External / Internal / Needs of interested parties — the department's own framing.">
           <textarea rows={2} value={block.context} onChange={(e) => onChange({ context: e.target.value })} />
         </Field>
+      </div>
+      <div className="frow">
         <Field label="Actual or potential" required>
           <select value={block.risk_nature}
             onChange={(e) => onChange({ risk_nature: e.target.value as RiskNature })}>
@@ -501,13 +514,19 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
           <input type="text" value="Auto-assigned on save" disabled
             style={{ color: 'var(--muted)', background: '#F3F1EB' }} />
         </Field>
-        <Field label="Description of risk" required full>
+      </div>
+      <div className="frow one">
+        <Field label="Description of risk" required>
           <textarea rows={2} value={block.description} onChange={(e) => onChange({ description: e.target.value })} />
         </Field>
-        <Field label="Consequence of risk" required full>
+      </div>
+      <div className="frow one">
+        <Field label="Consequence of risk" required>
           <textarea rows={2} value={block.impact_description} onChange={(e) => onChange({ impact_description: e.target.value })} />
         </Field>
-        <Field label="Existing control (if any)" full>
+      </div>
+      <div className="frow one">
+        <Field label="Existing control (if any)">
           <textarea rows={2} value={block.existing_controls} onChange={(e) => onChange({ existing_controls: e.target.value })} />
         </Field>
       </div>
@@ -523,7 +542,7 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
 
       {/* Treatment (after current risk) */}
       <SubHeading>Treatment option</SubHeading>
-      <div className="risk-form-grid">
+      <div className="frow">
         <Field label="Option" required hint="Accept = no RTP required.">
           <select value={block.treatment_option}
             onChange={(e) => onChange({ treatment_option: e.target.value as TreatmentOption, rtpOpen: e.target.value === 'ACCEPT' ? false : block.rtpOpen })}>
@@ -541,22 +560,23 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
       </div>
 
       {!isAccept && (
-        <div style={{ marginTop: 4 }}>
+        <div className="btn-row" style={{ marginTop: 4 }}>
           {!block.rtpOpen ? (
-            <button type="button" className="signout-btn"
-              style={{ background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' }}
+            <button type="button" className="btn primary"
               onClick={() => onChange({ rtpOpen: true })}>🎯 Fill RTP now →</button>
           ) : (
-            <div style={{ border: '1px dashed var(--blue)', borderRadius: 10, padding: 12, background: 'var(--blue-lt)', marginTop: 6 }}>
+            <div style={{ border: '1px dashed var(--blue)', borderRadius: 10, padding: 14, background: 'var(--blue-lt)', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <strong style={{ color: 'var(--blue)' }}>🎯 Risk Treatment Plan (Form 0045)</strong>
-                <button type="button" className="signout-btn" style={{ marginLeft: 'auto' }}
+                <button type="button" className="btn ghost" style={{ marginLeft: 'auto' }}
                   onClick={() => onChange({ rtpOpen: false })}>✕ collapse</button>
               </div>
-              <div className="risk-form-grid">
-                <Field label="New / additional control" full>
+              <div className="frow one">
+                <Field label="New / additional control">
                   <textarea rows={2} value={block.rtp_new_control} onChange={(e) => onChange({ rtp_new_control: e.target.value })} />
                 </Field>
+              </div>
+              <div className="frow">
                 <Field label="Adequacy of existing control">
                   <select value={block.rtp_adequacy} onChange={(e) => onChange({ rtp_adequacy: e.target.value as RtpAdequacy })}>
                     <option value="">—</option>
@@ -566,7 +586,7 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
                   </select>
                 </Field>
               </div>
-              <div className="risk-field-hint" style={{ marginBottom: 4 }}>Task list</div>
+              <div className="hint" style={{ marginBottom: 4 }}>Task list</div>
               {block.rtp_tasks.map((t, ti) => (
                 <div key={ti} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
                   <input type="text" placeholder="Task" value={t.task}
@@ -584,8 +604,8 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
                   </select>
                 </div>
               ))}
-              <button type="button" className="signout-btn" onClick={onAddTask}>＋ Add task</button>
-              <div className="risk-field-hint" style={{ marginTop: 6 }}>
+              <button type="button" className="btn" style={{ marginTop: 2 }} onClick={onAddTask}>＋ Add task</button>
+              <div className="hint" style={{ marginTop: 6 }}>
                 Full approval chain (RLO → HOD → RTC → ROC) is captured on the RTP page.
               </div>
             </div>
@@ -604,7 +624,7 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
 
       {/* Committee outcome */}
       <SubHeading>Committee outcome <span style={{ fontWeight: 400, color: 'var(--muted)' }}>— what RTC / ROC decided</span></SubHeading>
-      <div className="risk-form-grid">
+      <div className="frow">
         <Field label="Current stage">
           <select value={block.committee_stage} onChange={(e) => onChange({ committee_stage: e.target.value as CommitteeStage })}>
             {(Object.keys(STAGE_LABEL) as CommitteeStage[]).map((s) => (
@@ -619,6 +639,8 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
             <option value="NONE">Not escalated</option>
           </select>
         </Field>
+      </div>
+      <div className="frow">
         <Field label="RTC meeting & date">
           <input type="text" value={block.rtc_ref} onChange={(e) => onChange({ rtc_ref: e.target.value })}
             placeholder="e.g. Jun Technical Review · 18 Jun 2026" />
@@ -627,12 +649,16 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
           <input type="text" value={block.roc_ref} onChange={(e) => onChange({ roc_ref: e.target.value })}
             placeholder="e.g. Q2 ROC · 30 Jun 2026" />
         </Field>
-        <Field label="Decision / outcome notes" full>
+      </div>
+      <div className="frow one">
+        <Field label="Decision / outcome notes">
           <textarea rows={2} value={block.committee_notes} onChange={(e) => onChange({ committee_notes: e.target.value })} />
         </Field>
+      </div>
+      <div className="frow one">
         <Field label="Submit to ERMS UiTM" hint="Set at ROC only — ROC is terminal and decides what goes to ERMS.">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-            <input type="checkbox" checked={block.submit_to_erms}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--text)' }}>
+            <input type="checkbox" checked={block.submit_to_erms} style={{ width: 'auto' }}
               onChange={(e) => onChange({ submit_to_erms: e.target.checked })} />
             Include in ERMS UiTM submission
           </label>
@@ -645,7 +671,7 @@ function RiskBlockCard({ index, total, block, onChange, onRemove, onTaskChange, 
 /* ---------------- small helpers ---------------- */
 
 function SubHeading({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 13, fontWeight: 700, margin: '14px 0 6px' }}>{children}</div>
+  return <div className="card-sub" style={{ margin: '14px 0 6px', fontWeight: 600, color: 'var(--text)' }}>{children}</div>
 }
 
 /* Likelihood + Severity as two compact dropdowns with the computed score/level
@@ -657,23 +683,23 @@ function ScoreBox({ likelihood, severity, onLikelihood, onSeverity, computed, re
   required?: boolean; placeholder: string
 }) {
   return (
-    <div className="risk-scorebox">
-      <div className="risk-field" style={{ maxWidth: 130 }}>
-        <label>Likelihood (1–5){required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
+    <div className="scorebox">
+      <div className="fld" style={{ minWidth: 120 }}>
+        <label>Likelihood (1–5){required && <span className="req"> *</span>}</label>
         <select value={likelihood} onChange={(e) => onLikelihood(Number(e.target.value))}>
           <option value={0}>—</option>
           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
       </div>
-      <div className="risk-field" style={{ maxWidth: 130 }}>
-        <label>Severity (1–5){required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
+      <div className="fld" style={{ minWidth: 120 }}>
+        <label>Severity (1–5){required && <span className="req"> *</span>}</label>
         <select value={severity} onChange={(e) => onSeverity(Number(e.target.value))}>
           <option value={0}>—</option>
           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
       </div>
       {computed ? (
-        <div className="risk-scoreout">
+        <div className="scoreout">
           Score {computed.riskScore} ·{' '}
           <span style={{
             display: 'inline-block', padding: '2px 9px', borderRadius: 4, fontSize: 11, fontWeight: 700,
@@ -687,14 +713,14 @@ function ScoreBox({ likelihood, severity, onLikelihood, onSeverity, computed, re
   )
 }
 
-function Field({ label, required, hint, full, children }: {
-  label: string; required?: boolean; hint?: string; full?: boolean; children: React.ReactNode
+function Field({ label, required, hint, children }: {
+  label: string; required?: boolean; hint?: string; children: React.ReactNode
 }) {
   return (
-    <div className={`risk-field ${full ? 'full' : ''}`}>
-      <label>{label}{required && <span style={{ color: 'var(--red)' }}> *</span>}</label>
+    <div className="fld">
+      <label>{label}{required && <span className="req"> *</span>}</label>
       {children}
-      {hint && <div className="risk-field-hint">{hint}</div>}
+      {hint && <div className="hint">{hint}</div>}
     </div>
   )
 }
