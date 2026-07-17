@@ -73,7 +73,6 @@ export function RiskSidebar({ onClose, active, children }: {
               <Link href="/ir" className="nav-item"><span className="nav-icon">🩺</span><span>IR Dashboard</span></Link>
               <Link href="/kpi" className="nav-item"><span className="nav-icon">📈</span><span>KPI Monitor</span></Link>
               <Link href="/pscs" className="nav-item"><span className="nav-icon">🛡️</span><span>Safety Culture</span></Link>
-              <Link href="/acc" className="nav-item"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
             </>
           )}
           <Link href="/risk" className={`nav-item ${active === 'risk' ? 'active' : ''}`}>
@@ -104,6 +103,9 @@ export function RiskSidebar({ onClose, active, children }: {
             <Link href="/risk/meetings" className={`nav-item nav-sub ${active === 'committees' ? 'active' : ''}`}>
               <span className="nav-icon">📋</span><span>Committees</span>
             </Link>
+          )}
+          {showGlobal && (
+            <Link href="/acc" className="nav-item"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
           )}
         </div>
         {children}

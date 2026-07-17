@@ -22,14 +22,14 @@ type Module = {
 }
 
 const MODULES: Module[] = [
-  { href: '/risk', icon: '⚠️', title: 'Risk Register', accent: 'var(--amber)',
-    desc: 'Log, score and review department risks; track committee action items.', global: false },
   { href: '/ir', icon: '🩺', title: 'IR Dashboard', accent: 'var(--red)',
     desc: 'Incident reporting and patient-safety analytics across the hospital.', global: true },
   { href: '/kpi', icon: '📈', title: 'KPI Monitor', accent: 'var(--blue)',
     desc: 'Track quality and safety key performance indicators over time.', global: true },
   { href: '/pscs', icon: '🛡️', title: 'Safety Culture', accent: 'var(--teal)',
     desc: 'Patient Safety Culture survey results and workforce insights.', global: true },
+  { href: '/risk', icon: '⚠️', title: 'Risk Register', accent: 'var(--amber)',
+    desc: 'Log, score and review department risks; track committee action items.', global: false },
   { href: '/acc', icon: '📋', title: 'Accreditation', accent: 'var(--purple)',
     desc: 'MSQH 7th Edition — Standard 24 criteria and evidence of compliance.', global: true },
 ]
