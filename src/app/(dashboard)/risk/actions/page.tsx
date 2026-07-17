@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import type { RiskActionItem, ActionStatus } from '@/lib/risk/types'
 import { ACTION_TYPE_LABEL, ACTION_STATUS_LABEL } from '@/lib/risk/scoring'
 import { exportActionItemsXlsx, exportActionItemsPdf, type ActionItemListItem } from '@/lib/risk/exports'
@@ -164,6 +165,8 @@ export default function RiskActionsPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="actions" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

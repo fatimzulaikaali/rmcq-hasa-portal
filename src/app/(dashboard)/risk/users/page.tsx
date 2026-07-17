@@ -12,6 +12,7 @@ import { resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { resolveActiveRole } from '@/lib/risk/activeRole'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 
 interface UserRow {
   user: RiskUser
@@ -317,6 +318,8 @@ export default function RiskUsersPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="risk" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

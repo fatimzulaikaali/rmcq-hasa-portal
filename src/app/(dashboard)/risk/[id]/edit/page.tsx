@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import { DeptOwnerPicker } from '@/components/DeptOwnerPicker'
 import { Risk, RiskReview, RiskDept, RiskNature, TreatmentOption, RiskScope, RiskRole } from '@/lib/risk/types'
 import { resolveCurrentRiskUser } from '@/lib/risk/auth'
@@ -290,6 +291,8 @@ export default function EditRiskPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="risk" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

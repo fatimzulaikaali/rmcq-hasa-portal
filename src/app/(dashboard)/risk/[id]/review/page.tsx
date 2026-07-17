@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import { Risk, RiskReview, RiskDept, TreatmentStatus } from '@/lib/risk/types'
 import {
   computeSeverityScore,
@@ -231,6 +232,8 @@ export default function NewReviewPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="risk" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

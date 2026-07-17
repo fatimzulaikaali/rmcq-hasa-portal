@@ -23,6 +23,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import { RiskDept, RiskNature, TreatmentOption, RiskScope } from '@/lib/risk/types'
 import { sortDeptsAlpha } from '@/lib/risk/sortDepts'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
@@ -417,6 +418,8 @@ export default function BulkUploadPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="bulkupload" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

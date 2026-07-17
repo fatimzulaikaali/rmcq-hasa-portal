@@ -25,6 +25,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import { DeptSearchPicker } from '@/components/DeptSearchPicker'
 import { RiskPdfImport } from '@/components/RiskPdfImport'
 import type { ParsedRegister } from '@/lib/risk/pdfImport'
@@ -345,6 +346,8 @@ export default function LogRiskPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="quickadd" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

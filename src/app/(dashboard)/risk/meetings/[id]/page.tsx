@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import type {
   RiskMeeting, RiskMeetingAgenda, RiskActionItem, Risk, RiskReview, RiskUser,
   CommitteeOutcome, MeetingStatus, ActionType, CrossCuttingTheme, RiskLevel,
@@ -937,6 +938,8 @@ export default function RiskMeetingDetailPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="committees" />
 
         <main className="tab-pane risk-skin">
           {loadError && (

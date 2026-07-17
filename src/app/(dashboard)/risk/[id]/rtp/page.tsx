@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess, resolveCurrentRiskUser } from '@/lib/risk/auth'
 import { RiskAccountChip } from '@/components/RiskAccountChip'
 import { RiskSidebar } from '@/components/RiskSidebar'
+import { RiskTabs } from '@/components/RiskTabs'
 import {
   Risk, RiskDept, RiskUser, RiskRtp, RiskRtpTask, RiskRtpUpdate,
   RtpAdequacy, RtpOverallStatus, RtpTaskStatus,
@@ -376,6 +377,8 @@ export default function RtpEditorPage() {
             <button type="button" className="signout-btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+
+        <RiskTabs active="rtp" />
 
         <main className="tab-pane risk-skin">
           {loadError && (
