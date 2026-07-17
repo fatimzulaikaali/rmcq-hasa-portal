@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
+import { getCachedAllModules, setCachedAllModules } from '@/lib/risk/accessCache'
 
 /* Shared left sidebar for every /risk page.
  *
@@ -24,7 +25,9 @@ export function RiskSidebar({ onClose, children }: {
   children?: React.ReactNode
 }) {
   const supabase = useMemo(() => createClient(), [])
-  const [showGlobal, setShowGlobal] = useState(false)
+  // Seed from the session cache so the full module list renders immediately on
+  // navigation instead of flashing "Home + Risk Register" for ~0.5s.
+  const [showGlobal, setShowGlobal] = useState<boolean>(() => getCachedAllModules() ?? false)
 
   useEffect(() => {
     void (async () => {
@@ -34,6 +37,7 @@ export function RiskSidebar({ onClose, children }: {
         // Risk tab bar (see RiskTabs), so no counts are needed here anymore.
         const access = await getModuleAccess(supabase)
         setShowGlobal(access.allModules)
+        setCachedAllModules(access.allModules)
       } catch { /* leave hidden on error */ }
     })()
   }, [supabase])

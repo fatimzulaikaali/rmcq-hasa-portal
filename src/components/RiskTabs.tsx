@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
+import { getCachedAllModules, setCachedAllModules } from '@/lib/risk/accessCache'
 
 /* Horizontal tab bar for the Risk module.
  *
@@ -30,7 +31,8 @@ const badgeStyle: React.CSSProperties = {
 
 export function RiskTabs({ active }: { active: RiskTab }) {
   const supabase = useMemo(() => createClient(), [])
-  const [showGlobal, setShowGlobal] = useState(false)
+  // Seed from the session cache so the gated tabs don't flash in on navigation.
+  const [showGlobal, setShowGlobal] = useState<boolean>(() => getCachedAllModules() ?? false)
   const [actionCount, setActionCount] = useState(0)
   const [draftCount, setDraftCount] = useState(0)
 
@@ -39,6 +41,7 @@ export function RiskTabs({ active }: { active: RiskTab }) {
       try {
         const access = await getModuleAccess(supabase)
         setShowGlobal(access.allModules)
+        setCachedAllModules(access.allModules)
 
         let q = supabase.from('risk_action_items')
           .select('id').in('status', ['PENDING', 'OVERDUE'])

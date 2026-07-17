@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getModuleAccess } from '@/lib/risk/auth'
+import { getCachedAllModules, setCachedAllModules } from '@/lib/risk/accessCache'
 
 /* Modules shown as tiles on the welcome page.
  * `global: true` means the tile is only shown to hospital-wide roles
@@ -40,7 +41,7 @@ export default function HomePage() {
 
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
-  const [allModules, setAllModules] = useState(false)
+  const [allModules, setAllModules] = useState<boolean>(() => getCachedAllModules() ?? false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export default function HomePage() {
       const access = await getModuleAccess(supabase)
       if (cancelled) return
       setAllModules(access.allModules)
+      setCachedAllModules(access.allModules)
       setName(access.riskUser?.name ?? user.email ?? '')
       setLoading(false)
     })()
