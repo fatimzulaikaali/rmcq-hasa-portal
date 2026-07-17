@@ -368,24 +368,32 @@ export default function PscsPage() {
       </aside>
 
       <main className="main">
-        <div className="topbar">
-          <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" type="button">☰</button>
-          <div className="tb-title">Patient Safety Culture Survey · {campaign?.code ?? '—'}</div>
-          <div style={{ flex: 1 }} />
-          <button onClick={handleLogout} className="signout-btn" type="button">Sign out</button>
-        </div>
+        <header className="topbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" type="button">☰</button>
+            <div>
+              <div className="tb-title">Patient Safety Culture Survey</div>
+              <div className="tb-meta">Hospital Al-Sultan Abdullah UiTM · {campaign?.code ?? '—'}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="rec-badge">
+              {loading ? 'Loading…' : `${filteredResponses.length.toLocaleString()} response${filteredResponses.length === 1 ? '' : 's'}`}
+            </div>
+            <button onClick={handleLogout} className="signout-btn" type="button">Sign out</button>
+          </div>
+        </header>
 
-        <div className="tabbar" role="tablist">
+        <nav className="tab-nav" role="tablist">
           {TABS.map((t) => (
             <button
               key={t.id}
               role="tab"
               aria-selected={tab === t.id}
-              className={`tab ${tab === t.id ? 'active' : ''}`}
+              className={`tab-btn ${tab === t.id ? 'active' : ''}`}
               onClick={() => setTab(t.id)}
               type="button">
-              <span className="tab-ico">{t.icon}</span>
-              <span>{t.label}</span>
+              {t.icon} {t.label}
             </button>
           ))}
           <button
@@ -398,7 +406,7 @@ export default function PscsPage() {
               : `Muat turun maklum balas mentah + buku kod untuk kempen ${campaign?.code ?? ''}`}>
             ⬇ {language === 'en' ? 'Export to Excel' : 'Eksport ke Excel'}
           </button>
-        </div>
+        </nav>
 
         <div className="content">
           {loadError && <div className="ac red"><div className="ai">⚠️</div><div><div className="at">Load error</div><div className="as">{loadError}</div></div></div>}
