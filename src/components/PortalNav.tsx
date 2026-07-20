@@ -12,7 +12,7 @@ import Link from 'next/link'
  *
  * Note: the Home and Risk sidebars are intentionally NOT built on this, because
  * they gate which modules show based on the signed-in user's access. */
-export type PortalModule = 'home' | 'ir' | 'kpi' | 'pscs' | 'risk' | 'acc'
+export type PortalModule = 'home' | 'ir' | 'kpi' | 'pscs' | 'risk' | 'vmo' | 'acc'
 
 const MODULES: { key: PortalModule; href: string; icon: string; label: string }[] = [
   { key: 'home', href: '/home', icon: '🏠', label: 'Home' },
@@ -20,6 +20,7 @@ const MODULES: { key: PortalModule; href: string; icon: string; label: string }[
   { key: 'kpi',  href: '/kpi',  icon: '📈', label: 'KPI Monitor' },
   { key: 'pscs', href: '/pscs', icon: '🛡️', label: 'Safety Culture' },
   { key: 'risk', href: '/risk', icon: '⚠️', label: 'Risk Register' },
+  { key: 'vmo',  href: '/vmo',  icon: '🎯', label: 'VMO Survey' },
   { key: 'acc',  href: '/acc',  icon: '📋', label: 'Accreditation' },
 ]
 

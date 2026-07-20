@@ -31,6 +31,8 @@ const MODULES: Module[] = [
     desc: 'Patient Safety Culture survey results and workforce insights.', global: true },
   { href: '/risk', icon: '⚠️', title: 'Risk Register', accent: 'var(--amber)',
     desc: 'Log, score and review department risks; track committee action items.', global: false },
+  { href: '/vmo', icon: '🎯', title: 'VMO Survey', accent: 'var(--teal)',
+    desc: 'Hala Tuju Strategik HASA — staff, student and patient views on the Vision, Mission and Objectives.', global: false },
   { href: '/acc', icon: '📋', title: 'Accreditation', accent: 'var(--purple)',
     desc: 'MSQH 7th Edition — Standard 24 criteria and evidence of compliance.', global: true },
 ]
