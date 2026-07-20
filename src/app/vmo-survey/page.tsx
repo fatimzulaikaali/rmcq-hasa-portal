@@ -9,6 +9,7 @@ import {
   type VmoGroup, type VmoQuestion, type VmoGroupQuestion,
   type VmoDemographic, type VmoOption, type VmoLang,
 } from '@/lib/vmo/types'
+import { HASA_VMO } from '@/lib/vmo/statement'
 
 /* Public, anonymous VMO survey — Hala Tuju Strategik HASA.
  *
@@ -303,7 +304,42 @@ export default function VmoSurveyPage() {
                           <span>{anchors[0]}</span><span>{anchors[1]}</span><span>{anchors[2]}</span>
                         </div>
                       </div>
-                      {i === 0 && <div className="vmo-poster">🖼️ {t.poster}</div>}
+                      {i === 0 && (
+                        /* The VMO itself, shown right after Q1 — respondents must be able
+                         * to read it before Q2 asks whether they understand it. */
+                        <section className="vmo-statement" aria-label={HASA_VMO.heading[lang]}>
+                          <div className="vs-head">{HASA_VMO.heading[lang]}</div>
+
+                          <div className="vs-block">
+                            <div className="vs-lbl">{HASA_VMO.visionLabel[lang]}</div>
+                            <p className="vs-lead">{HASA_VMO.vision[lang]}</p>
+                          </div>
+
+                          <div className="vs-block">
+                            <div className="vs-lbl">{HASA_VMO.missionLabel[lang]}</div>
+                            <p className="vs-lead">{HASA_VMO.mission[lang]}</p>
+                          </div>
+
+                          <div className="vs-block">
+                            <div className="vs-lbl">{HASA_VMO.objectivesLabel[lang]}</div>
+                            <ul className="vs-list">
+                              {HASA_VMO.objectives.map((o) => <li key={o.en}>{o[lang]}</li>)}
+                            </ul>
+                          </div>
+
+                          <div className="vs-block">
+                            <div className="vs-lbl">{HASA_VMO.valuesLabel[lang]}</div>
+                            <div className="vs-values">
+                              {HASA_VMO.values.map((v) => (
+                                <div className="vs-val" key={v.name_en}>
+                                  <b>{lang === 'ms' ? v.name_ms : v.name_en}</b>
+                                  <span>{lang === 'ms' ? v.desc_ms : v.desc_en}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </section>
+                      )}
                     </div>
                   )
                 })}

@@ -1092,3 +1092,31 @@ body{counter-reset:rcpage;}
   .tab-pane{padding:0 !important;}
   .vd-a4{border:0;padding:0;max-width:none;}
 }
+
+/* VMO statement panel — shown after Q1 in the public survey.
+ * Real bilingual text rather than a poster image: readable on a phone,
+ * selectable, and available to screen readers. */
+.vmo-statement{border:1.5px solid color-mix(in srgb,var(--vac) 26%,#fff);border-radius:14px;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--vac) 7%,#fff),#fff 62%);
+  padding:20px 20px 18px;margin:8px 0 4px;}
+.vs-head{font-family:var(--font-display);font-size:14.5px;font-weight:600;
+  color:color-mix(in srgb,var(--vac) 80%,#000);margin-bottom:14px;padding-bottom:10px;
+  border-bottom:1px solid color-mix(in srgb,var(--vac) 20%,#fff);line-height:1.35;}
+.vs-block{margin-bottom:14px;}
+.vs-block:last-child{margin-bottom:0;}
+.vs-lbl{font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--vac);margin-bottom:5px;}
+.vs-lead{font-size:13.5px;line-height:1.6;color:var(--text);}
+.vs-list{margin:0;padding-left:17px;}
+.vs-list li{font-size:13px;line-height:1.55;margin-bottom:4px;color:var(--text);}
+.vs-list li:last-child{margin-bottom:0;}
+.vs-values{display:grid;gap:9px;}
+.vs-val{background:rgba(255,255,255,.72);border:1px solid color-mix(in srgb,var(--vac) 15%,#fff);
+  border-radius:9px;padding:9px 11px;}
+.vs-val b{display:block;font-size:12.5px;font-weight:600;
+  color:color-mix(in srgb,var(--vac) 78%,#000);margin-bottom:2px;}
+.vs-val span{display:block;font-size:12px;line-height:1.5;color:var(--muted);}
+@media(max-width:400px){
+  .vmo-statement{padding:16px 15px 14px;}
+  .vs-lead{font-size:13px;}
+}
