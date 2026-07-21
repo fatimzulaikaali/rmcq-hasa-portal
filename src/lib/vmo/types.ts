@@ -70,7 +70,8 @@ export interface VmoResponse {
 export interface VmoAnswer {
   response_id: number
   question_code: string
-  value: number
+  /** 1–6, or null when the respondent chose "Tidak tahu / Tidak berkaitan". */
+  value: number | null
 }
 
 /* ---------------------------------------------------------------- scoring */
@@ -85,28 +86,81 @@ export const VMO_THEMES: { key: VmoTheme; ms: string; en: string }[] = [
   { key: 'growth', ms: 'Pembangunan diri', en: 'Growth & development' },
 ]
 
-/** Scale anchor labels, shown under positions 1 / 3 / 5. */
-export const VMO_ANCHORS: Record<VmoScale, Record<VmoLang, [string, string, string]>> = {
+/* ---------------------------------------------------------------- the scale
+ *
+ * A 1–6 FORCED-CHOICE scale: there is deliberately no midpoint, so every
+ * respondent has to lean one way or the other. People with genuinely no view
+ * choose "Tidak tahu / Tidak berkaitan" instead, which is stored as NULL and
+ * excluded from score denominators — that keeps "no opinion" from being
+ * confused with "disagree".
+ *
+ *   1–2  negative      3–4  soft      5–6  positive      null  don't know
+ */
+export const VMO_SCALE_MAX = 6
+
+/** Full label for every point, used for aria-labels and the report codebook. */
+export const VMO_POINTS: Record<VmoScale, Record<VmoLang, string[]>> = {
   agreement: {
-    ms: ['Sangat Tidak Setuju', 'Neutral', 'Sangat Setuju'],
-    en: ['Strongly Disagree', 'Neutral', 'Strongly Agree'],
+    ms: ['Sangat Tidak Setuju', 'Tidak Setuju', 'Agak Tidak Setuju', 'Agak Setuju', 'Setuju', 'Sangat Setuju'],
+    en: ['Strongly Disagree', 'Disagree', 'Slightly Disagree', 'Slightly Agree', 'Agree', 'Strongly Agree'],
   },
   happiness: {
-    ms: ['Sangat Tidak Gembira', 'Neutral', 'Sangat Gembira'],
-    en: ['Very Unhappy', 'Neutral', 'Very Happy'],
+    ms: ['Sangat Tidak Gembira', 'Tidak Gembira', 'Agak Tidak Gembira', 'Agak Gembira', 'Gembira', 'Sangat Gembira'],
+    en: ['Very Unhappy', 'Unhappy', 'Slightly Unhappy', 'Slightly Happy', 'Happy', 'Very Happy'],
   },
+}
+
+/** Just the two end labels — what we print under the scale on screen. */
+export const VMO_ANCHORS: Record<VmoScale, Record<VmoLang, [string, string]>> = {
+  agreement: {
+    ms: ['Sangat Tidak Setuju', 'Sangat Setuju'],
+    en: ['Strongly Disagree', 'Strongly Agree'],
+  },
+  happiness: {
+    ms: ['Sangat Tidak Gembira', 'Sangat Gembira'],
+    en: ['Very Unhappy', 'Very Happy'],
+  },
+}
+
+export const VMO_DK_LABEL: Record<VmoLang, string> = {
+  ms: 'Tidak tahu / Tidak berkaitan',
+  en: "Don't know / Not applicable",
 }
 
 /** Apply reverse scoring. Q4 asks whether the VMO *needs updating*, so agreeing
- *  is negative — it must be flipped before entering any theme average. */
+ *  is negative — it must be flipped before entering any theme average.
+ *  On a 1–6 scale the mirror of v is 7 − v. */
 export function vmoScore(value: number, reverse: boolean): number {
-  return reverse ? 6 - value : value
+  return reverse ? (VMO_SCALE_MAX + 1) - value : value
 }
 
-/** % positive = share scoring 4 or 5 (after reverse scoring where applicable). */
+/** Strip don't-knows. Everything below scores only over real opinions. */
+export function opinions(values: (number | null)[]): number[] {
+  return values.filter((v): v is number => v !== null && v !== undefined)
+}
+
+/** % positive = share scoring 5 or 6 (after reverse scoring where applicable). */
 export function pctPositive(values: number[]): number {
   if (!values.length) return 0
-  return Math.round((values.filter((v) => v >= 4).length / values.length) * 100)
+  return Math.round((values.filter((v) => v >= 5).length / values.length) * 100)
+}
+
+/** % negative = share scoring 1 or 2. */
+export function pctNegative(values: number[]): number {
+  if (!values.length) return 0
+  return Math.round((values.filter((v) => v <= 2).length / values.length) * 100)
+}
+
+/** % soft = the 3–4 band: leaning, but without conviction. Often the real story. */
+export function pctSoft(values: number[]): number {
+  if (!values.length) return 0
+  return Math.round((values.filter((v) => v === 3 || v === 4).length / values.length) * 100)
+}
+
+/** Share of respondents who answered "don't know" for this item. */
+export function pctDontKnow(values: (number | null)[]): number {
+  if (!values.length) return 0
+  return Math.round((values.filter((v) => v === null || v === undefined).length / values.length) * 100)
 }
 
 export function meanOf(values: number[]): number {

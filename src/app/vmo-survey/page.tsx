@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
-  VMO_ANCHORS, hashIdentifier,
+  VMO_ANCHORS, VMO_POINTS, VMO_DK_LABEL, VMO_SCALE_MAX, hashIdentifier,
   type VmoGroup, type VmoQuestion, type VmoGroupQuestion,
   type VmoDemographic, type VmoOption, type VmoLang,
 } from '@/lib/vmo/types'
@@ -88,7 +88,10 @@ export default function VmoSurveyPage() {
   const [group, setGroup] = useState<VmoGroup | null>(null)
   const [idDigits, setIdDigits] = useState('')
   const [demoVals, setDemoVals] = useState<Record<string, string>>({})
-  const [answers, setAnswers] = useState<Record<string, number>>({})
+  /* value 1–6, or null for "Tidak tahu". A key being absent means unanswered —
+   * which is why validation uses hasOwnProperty rather than a truthiness check
+   * (null is a valid answer here, 0 would never be). */
+  const [answers, setAnswers] = useState<Record<string, number | null>>({})
   const [freeText, setFreeText] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -149,7 +152,9 @@ export default function VmoSurveyPage() {
     goto('questions')
   }
   function nextFromQuestions() {
-    for (const x of myQs) if (!answers[x.question_code]) { setErr(t.errB); return }
+    for (const x of myQs) {
+      if (!Object.prototype.hasOwnProperty.call(answers, x.question_code)) { setErr(t.errB); return }
+    }
     goto('comments')
   }
 
@@ -288,21 +293,32 @@ export default function VmoSurveyPage() {
               <div style={{ marginTop: 4 }}>
                 {myQs.map((x, i) => {
                   const anchors = VMO_ANCHORS[x.q.scale_type][lang]
+                  const points = VMO_POINTS[x.q.scale_type][lang]
+                  const answered = Object.prototype.hasOwnProperty.call(answers, x.question_code)
+                  const isDk = answered && answers[x.question_code] === null
                   return (
                     <div key={x.question_code}>
                       <div className="vmo-q">
                         <div className="vmo-qt"><i className="vmo-qnum">{x.position}</i>{lang === 'ms' ? x.q.text_ms : x.q.text_en}</div>
                         <div className="vmo-qe">{lang === 'ms' ? x.q.text_en : x.q.text_ms}</div>
-                        <div className="vmo-scale">
-                          {[1, 2, 3, 4, 5].map((v) => (
-                            <button key={v} type="button" aria-label={String(v)}
-                              className={answers[x.question_code] === v ? 'on' : ''}
+                        {/* 1–6 forced choice. The gap between 3 and 4 is deliberate:
+                            it shows there is no middle option to fall back on. */}
+                        <div className="vmo-scale six">
+                          {Array.from({ length: VMO_SCALE_MAX }, (_, k) => k + 1).map((v) => (
+                            <button key={v} type="button" aria-label={`${v} — ${points[v - 1]}`}
+                              className={`${answers[x.question_code] === v ? 'on' : ''}${v === 4 ? ' gap' : ''}`}
                               onClick={() => setAnswers({ ...answers, [x.question_code]: v })}>{v}</button>
                           ))}
                         </div>
-                        <div className="vmo-anchors">
-                          <span>{anchors[0]}</span><span>{anchors[1]}</span><span>{anchors[2]}</span>
+                        <div className="vmo-anchors two">
+                          <span>{anchors[0]}</span><span>{anchors[1]}</span>
                         </div>
+                        <button type="button"
+                          className={`vmo-dk ${isDk ? 'on' : ''}`}
+                          aria-pressed={isDk}
+                          onClick={() => setAnswers({ ...answers, [x.question_code]: null })}>
+                          {VMO_DK_LABEL[lang]}
+                        </button>
                       </div>
                       {i === 0 && (
                         /* The VMO itself, shown right after Q1 — respondents must be able

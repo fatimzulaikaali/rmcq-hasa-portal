@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { PortalNav } from '@/components/PortalNav'
 import {
-  VMO_THEMES, vmoScore, pctPositive, meanOf,
+  VMO_THEMES, VMO_SCALE_MAX, vmoScore, pctPositive, pctNegative, pctSoft,
+  pctDontKnow, opinions, meanOf,
   type VmoGroup, type VmoQuestion, type VmoGroupQuestion,
   type VmoDemographic, type VmoOption, type VmoResponse, type VmoAnswer, type VmoTheme,
 } from '@/lib/vmo/types'
@@ -35,14 +36,19 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
 const SHARED = ['Q1_HAPPY', 'Q2_AWARE', 'Q3_VALID', 'Q4_UPDATE']
 const SHARED_LABEL = ['Happiness', 'VMO aware', 'VMO valid', 'Needs update']
 
+/* Colour bands are calibrated to the 1–6 forced-choice scale, where "positive"
+ * means 5–6 — the top third. That is a stricter bar than the top-2-of-5 used by
+ * PSCS, so the same sentiment reads lower here. Bands below reflect that; adjust
+ * once you have a couple of rounds of real data to benchmark against. */
 function heat(p: number): [string, string] {
-  if (p >= 75) return ['#D1F0E3', '#0F6E56']
-  if (p >= 65) return ['#E4F3D8', '#3B6D11']
-  if (p >= 55) return ['#FDF0D5', '#854F0B']
-  if (p >= 45) return ['#FBE2D3', '#993C1D']
+  if (p >= 55) return ['#D1F0E3', '#0F6E56']
+  if (p >= 40) return ['#E4F3D8', '#3B6D11']
+  if (p >= 28) return ['#FDF0D5', '#854F0B']
+  if (p >= 15) return ['#FBE2D3', '#993C1D']
   return ['#FBDADA', '#A32D2D']
 }
-const DISTC = ['#D9534F', '#E8956A', '#D8CFA8', '#7FB77E', '#3E8E5A']
+/* Six bars, red → green, matching the 1–6 points. */
+const DISTC = ['#C9453F', '#DD7B52', '#E3B06B', '#BFCE86', '#6FAF6B', '#2E8B57']
 
 export default function VmoDashboardPage() {
   const router = useRouter()
@@ -108,20 +114,25 @@ export default function VmoDashboardPage() {
     return m
   }, [responses])
 
-  /** values for a question, optionally within one group, reverse-scored applied */
-  const valuesFor = useMemo(() => (qcode: string, groupCode?: string, raw = false): number[] => {
-    const q = questions[qcode]
-    const rev = !raw && !!q?.reverse_scored
-    const out: number[] = []
+  /** Every submitted answer for a question, don't-knows included as null. */
+  const rawFor = useMemo(() => (qcode: string, groupCode?: string): (number | null)[] => {
+    const out: (number | null)[] = []
     for (const a of answers) {
       if (a.question_code !== qcode) continue
       const r = respById[a.response_id]
       if (!r) continue
       if (groupCode && r.group_code !== groupCode) continue
-      out.push(vmoScore(a.value, rev))
+      out.push(a.value)
     }
     return out
-  }, [answers, questions, respById])
+  }, [answers, respById])
+
+  /** Opinions only (don't-knows stripped), reverse scoring applied unless raw. */
+  const valuesFor = useMemo(() => (qcode: string, groupCode?: string, raw = false): number[] => {
+    const q = questions[qcode]
+    const rev = !raw && !!q?.reverse_scored
+    return opinions(rawFor(qcode, groupCode)).map((v) => vmoScore(v, rev))
+  }, [questions, rawFor])
 
   const countByGroup = useMemo(() => {
     const m: Record<string, number> = {}
@@ -137,6 +148,7 @@ export default function VmoDashboardPage() {
     for (const a of answers) {
       const q = questions[a.question_code]
       if (!q || q.theme !== theme) continue
+      if (a.value === null) continue          // don't-knows excluded from the score
       const r = respById[a.response_id]
       if (!r) continue
       if (groupCode && r.group_code !== groupCode) continue
@@ -183,7 +195,9 @@ export default function VmoDashboardPage() {
     const head = ['response_id', 'group', 'submitted_at', 'language',
       'age', 'sex', 'service', 'position', 'posting_year', 'faculty', 'study_level',
       ...qcodes, 'free_text']
-    const ansByResp: Record<number, Record<string, number>> = {}
+    /* null = "Tidak tahu". Exported as the literal DK so it is never mistaken
+     * for a missing answer or silently averaged as a number. */
+    const ansByResp: Record<number, Record<string, number | null>> = {}
     for (const a of answers) {
       ansByResp[a.response_id] = ansByResp[a.response_id] ?? {}
       ansByResp[a.response_id][a.question_code] = a.value
@@ -194,7 +208,11 @@ export default function VmoDashboardPage() {
       return [r.id, r.group_code, r.submitted_at, r.language,
         d.age ?? '', d.sex ?? '', d.service ?? '', d.position ?? '',
         d.posting_year ?? '', d.faculty ?? '', d.study_level ?? '',
-        ...qcodes.map((c) => av[c] ?? ''),
+        ...qcodes.map((c) => {
+          if (!Object.prototype.hasOwnProperty.call(av, c)) return ''   // not asked
+          const v = av[c]
+          return v === null ? 'DK' : v                                  // DK = tidak tahu
+        }),
         (r.free_text ?? '').replace(/"/g, '""')]
     })
     const csv = [head, ...rows].map((row) =>
@@ -406,19 +424,26 @@ export default function VmoDashboardPage() {
                     ))}
                   </div>
                   <div className="vd-legend">
-                    {['1 Sangat tidak setuju', '2', '3 Neutral', '4', '5 Sangat setuju'].map((l, i) => (
+                    {['1 Sangat tidak setuju', '2', '3 Agak tidak setuju', '4 Agak setuju', '5', '6 Sangat setuju'].map((l, i) => (
                       <span key={l}><i className="sw" style={{ background: DISTC[i] }} />{l}</span>
                     ))}
+                    <span><i className="sw" style={{ background: '#D4D4D8' }} />Tidak tahu</span>
                   </div>
                   <div className="card">
                     {(() => {
                       let lastTheme = ''
                       return groupQs(selG).map((x) => {
-                        const vals = valuesFor(x.question_code, selG)
-                        const rawVals = valuesFor(x.question_code, selG, true)
+                        const submitted = rawFor(x.question_code, selG)   // includes don't-knows
+                        const vals = valuesFor(x.question_code, selG)     // scored opinions
+                        const rawVals = valuesFor(x.question_code, selG, true) // unreversed opinions
                         const pct = pctPositive(vals)
-                        const counts = [1, 2, 3, 4, 5].map((v) => rawVals.filter((z) => z === v).length)
-                        const tot = rawVals.length || 1
+                        const neg = pctNegative(vals)
+                        const soft = pctSoft(vals)
+                        const dk = pctDontKnow(submitted)
+                        const counts = Array.from({ length: VMO_SCALE_MAX }, (_, k) => k + 1)
+                          .map((v) => rawVals.filter((z) => z === v).length)
+                        const dkCount = submitted.length - rawVals.length
+                        const tot = submitted.length || 1
                         const themeChanged = x.q.theme !== lastTheme
                         lastTheme = x.q.theme
                         return (
@@ -439,6 +464,15 @@ export default function VmoDashboardPage() {
                                     {counts.map((c, i) => (
                                       <i key={i} style={{ width: `${(c / tot) * 100}%`, background: DISTC[i] }} />
                                     ))}
+                                    {dkCount > 0 && (
+                                      <i style={{ width: `${(dkCount / tot) * 100}%`, background: '#D4D4D8' }} />
+                                    )}
+                                  </div>
+                                  <div className="vd-bands">
+                                    <span className="neg">{neg}% negatif</span>
+                                    <span className="soft">{soft}% sederhana</span>
+                                    <span className="pos">{pct}% positif</span>
+                                    {dk > 0 && <span className="dk">{dk}% tidak tahu</span>}
                                   </div>
                                 </div>
                                 <div className="vd-meta">
@@ -495,6 +529,7 @@ export default function VmoDashboardPage() {
                                     const vals: number[] = []
                                     for (const a of answers) {
                                       if (!ids.has(a.response_id)) continue
+                                      if (a.value === null) continue   // don't-knows excluded
                                       const q = questions[a.question_code]
                                       if (!q || q.theme !== t.key) continue
                                       vals.push(vmoScore(a.value, q.reverse_scored))

@@ -173,15 +173,55 @@ Fakulti Sains Kesihatan · Fakulti-fakulti lain di UiTM · Pelajar bukan UiTM
 
 ---
 
-## 5. Answer scale
+## 5. Answer scale — 1–6 forced choice + explicit "don't know"
 
-All 12 questions in every group use a **1–5 single-select scale** with anchors
-printed under positions 1, 3 and 5:
+**Changed from the Tally forms.** Those used 1–5 with a Neutral midpoint. The
+portal uses a **1–6 forced-choice scale with no midpoint**, plus a separate
+*Tidak tahu / Tidak berkaitan* option.
 
-`1 = Sangat Tidak Setuju` · `3 = Neutral` · `5 = Sangat Setuju`
+The reasoning: midpoint clustering is a real risk (respondents satisfice by
+picking the middle, and midpoint response styles run higher in Southeast Asian
+samples). But a midpoint is not only laziness — it is also genuine ambivalence
+or "I have no idea". Removing the midpoint alone would push the second group
+into a side they don't hold. So the two cases get separate treatment: the even
+scale forces a lean from people who *have* a view, and the don't-know button
+catches those who don't.
 
-Anchors are Malay-only on the Tally forms. The portal version will show both
-languages, following the BM/EN toggle.
+| Point | Malay | English | Band |
+|---|---|---|---|
+| 1 | Sangat Tidak Setuju | Strongly Disagree | negative |
+| 2 | Tidak Setuju | Disagree | negative |
+| 3 | Agak Tidak Setuju | Slightly Disagree | soft |
+| 4 | Agak Setuju | Slightly Agree | soft |
+| 5 | Setuju | Agree | positive |
+| 6 | Sangat Setuju | Strongly Agree | positive |
+| — | Tidak tahu / Tidak berkaitan | Don't know / Not applicable | excluded |
+
+Q1 uses the happiness equivalent (Sangat Tidak Gembira → Sangat Gembira).
+On screen only the two end anchors are printed; every button carries its full
+label as an aria-label. A visual gap sits between 3 and 4, marking where a
+midpoint would have been.
+
+**Don't know is available on all 12 questions** and is stored as `NULL` — not
+as 0, 7 or any sentinel number. A sentinel would silently corrupt every mean
+and percentage the first time a filter was forgotten; `NULL` cannot, and the
+type system flags any code path that ignores it.
+
+### Scoring consequences
+
+- **% positive = 5–6** (top third). This is a stricter bar than top-2-of-5.
+  The same underlying sentiment reads roughly 15 points lower than it would
+  have on the old scale — not wrong, but it must stay consistent from now on.
+- **% negative = 1–2**, **% soft = 3–4**. The soft band is reported in its own
+  right: "few are convinced but many lean mildly positive" is a more useful
+  finding than a single satisfaction number.
+- **Don't-knows are excluded from the denominator** and reported separately as
+  their own rate — which is itself a finding for a VMO awareness survey.
+- **Reverse scoring is now `7 − value`** (was `6 − value` on the 1–5 scale).
+- **VMO and PSCS are no longer directly comparable**, since PSCS keeps its
+  5-point scale. Accepted trade — the two measure different things.
+- Dashboard colour bands were recalibrated to the stricter definition
+  (≥55% strong, ≥40% moderate, ≥28% weak). Revisit once real data exists.
 
 ---
 

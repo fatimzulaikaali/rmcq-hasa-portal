@@ -1120,3 +1120,31 @@ body{counter-reset:rcpage;}
   .vmo-statement{padding:16px 15px 14px;}
   .vs-lead{font-size:13px;}
 }
+
+/* 1-6 forced-choice scale. Six buttons need to be a little tighter than five,
+ * and the gap before button 4 marks where a midpoint would have been - a
+ * visual cue that there is no neutral to retreat to. */
+.vmo-scale.six button{height:46px;font-size:15px;}
+.vmo-scale.six button.gap{margin-left:13px;}
+.vmo-anchors.two span{flex:0 0 auto;max-width:47%;}
+.vmo-anchors.two span:last-child{text-align:right;}
+/* "Tidak tahu" sits below the numbers, deliberately not styled as a 7th box:
+ * it should be a considered choice, not an easy mis-tap next to 6. */
+.vmo-dk{display:block;width:100%;margin-top:11px;padding:10px 14px;border-radius:9px;
+  border:1.5px dashed var(--border);background:transparent;color:var(--muted);
+  font-family:inherit;font-size:12.5px;font-weight:500;cursor:pointer;transition:all .13s;}
+.vmo-dk:hover{border-color:var(--vac);color:var(--text);}
+.vmo-dk.on{border-style:solid;border-color:var(--vac);
+  background:color-mix(in srgb,var(--vac) 9%,#fff);color:color-mix(in srgb,var(--vac) 80%,#000);font-weight:600;}
+@media(max-width:420px){
+  .vmo-scale.six{gap:4px;}
+  .vmo-scale.six button{height:44px;font-size:14px;border-radius:8px;}
+  .vmo-scale.six button.gap{margin-left:8px;}
+  .vmo-anchors.two{font-size:9.5px;}
+}
+/* Negative / soft / positive / don't-know split under each item bar. */
+.vd-bands{display:flex;flex-wrap:wrap;gap:10px;margin-top:5px;font-size:10.5px;font-weight:600;}
+.vd-bands .neg{color:#A32D2D;}
+.vd-bands .soft{color:#854F0B;}
+.vd-bands .pos{color:#0F6E56;}
+.vd-bands .dk{color:var(--muted);font-weight:500;}
