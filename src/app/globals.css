@@ -1148,3 +1148,16 @@ body{counter-reset:rcpage;}
 .vd-bands .soft{color:#854F0B;}
 .vd-bands .pos{color:#0F6E56;}
 .vd-bands .dk{color:var(--muted);font-weight:500;}
+
+/* VMO survey — choice (pick-two) questions */
+.vmo-picktwo{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--vac);background:color-mix(in srgb,var(--vac) 11%,#fff);padding:3px 10px;border-radius:99px;margin-bottom:10px;}
+.vmo-choices{display:grid;gap:8px;}
+.vmo-choice{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:1.5px solid var(--border);
+  background:var(--surface);border-radius:11px;padding:12px 14px;font-family:inherit;font-size:14px;color:var(--text);
+  cursor:pointer;transition:all .13s;}
+.vmo-choice:hover{border-color:var(--vac);}
+.vmo-choice.on{border-color:var(--vac);background:color-mix(in srgb,var(--vac) 8%,#fff);font-weight:500;}
+.vmo-choice .box{flex-shrink:0;width:22px;height:22px;border-radius:6px;border:1.5px solid var(--border);
+  display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff;}
+.vmo-choice.on .box{background:var(--vac);border-color:var(--vac);}

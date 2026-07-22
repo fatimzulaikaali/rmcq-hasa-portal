@@ -5,74 +5,58 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
-  VMO_ANCHORS, VMO_POINTS, VMO_DK_LABEL, VMO_SCALE_MAX, hashIdentifier,
+  VMO_ANCHORS, VMO_POINTS, VMO_DK_LABEL, VMO_SCALE_MAX,
   type VmoGroup, type VmoQuestion, type VmoGroupQuestion,
-  type VmoDemographic, type VmoOption, type VmoLang,
+  type VmoDemographic, type VmoOption, type VmoQuestionOption, type VmoLang,
 } from '@/lib/vmo/types'
 import { HASA_VMO } from '@/lib/vmo/statement'
 
-/* Public, anonymous VMO survey — Hala Tuju Strategik HASA.
- *
- * Lives OUTSIDE the (dashboard) route group so it needs no login. Respondents
- * pick their group, enter the last 6 digits of their NRIC/passport (hashed
- * client-side, never stored raw), answer 12 questions and optionally leave a
- * comment. Submission goes through the vmo_submit RPC so the response and its
- * answers are written atomically. */
+/* Public, anonymous VMO survey — Hala Tuju Strategik HASA (v2).
+ * No identifier is collected; the form trusts one response per person. */
 
-type Step = 'loading' | 'pick' | 'id' | 'demo' | 'questions' | 'comments' | 'done' | 'duplicate' | 'error'
+type Step = 'loading' | 'pick' | 'demo' | 'questions' | 'comments' | 'done' | 'error'
+
+/* T2 open-text prompt is group-specific. */
+const T2: Record<string, { ms: string; en: string }> = {
+  pengurusan: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk mencapai VMO & hala tuju strategiknya.', en: 'One thing HASA should change or improve to achieve its VMO & strategic direction.' },
+  klinikal: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk mencapai VMO & meningkatkan penjagaan klinikal.', en: 'One thing HASA should change or improve to achieve its VMO & improve clinical care.' },
+  sokongan: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk membantu unit anda bekerja dengan lebih baik.', en: 'One thing HASA should change or improve to help your unit work better.' },
+  konsesi: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk penyelarasan yang lebih baik antara konsesi & hospital.', en: 'One thing HASA should change or improve to coordinate better between concessionaire & hospital.' },
+  fakulti: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk mengukuhkan sinergi HASA–fakulti & mencapai VMO.', en: 'One thing HASA should change or improve to strengthen HASA–faculty synergy & achieve its VMO.' },
+  pelajar: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk memperbaiki pengalaman pembelajaran anda.', en: 'One thing HASA should change or improve to improve your learning experience.' },
+  pesakit: { ms: 'Satu perkara yang HASA patut UBAH atau PERBAIKI untuk memperbaiki pengalaman rawatan anda.', en: 'One thing HASA should change or improve to improve your care experience.' },
+}
 
 const T = {
   ms: {
-    title: 'Borang Soal Selidik Hala Tuju Strategik HASA',
-    other: 'HASA Strategic Direction Questionnaire',
+    title: 'Borang Soal Selidik Hala Tuju Strategik HASA', other: 'HASA Strategic Direction Questionnaire',
     hosp: 'Hospital Al-Sultan Abdullah UiTM',
-    intro: 'Arahan: Sila tandakan atau isi maklumat yang berkaitan. Maklumat yang diberikan akan dikumpulkan secara agregat dan tidak akan digunakan untuk mengenal pasti mana-mana individu.',
-    pick: 'Sila pilih kumpulan anda',
-    pickSub: 'Pilih kumpulan yang paling menggambarkan anda. Setiap kumpulan mempunyai set soalan tersendiri.',
-    idL: '6 Digit Terakhir Nombor Kad Pengenalan atau Pasport',
-    idH: 'Maklumat ini dikumpul semata-mata untuk tujuan pengesahan data bagi mengelakkan kemasukan berulang dan akan dirahsiakan sepenuhnya.',
-    verify: 'Pengesahan', secA: 'Maklumat Responden', secB: 'Soalan Utama', sugg: 'Cadangan',
-    eyeV: 'Pengesahan', eyeA: 'Bahagian A', eyeB: 'Bahagian B', eyeC: 'Akhir sekali',
-    openQ: 'Adakah terdapat sebarang isu atau cadangan khusus yang ingin anda bawa ke perhatian pengurusan tertinggi? (Sila nyatakan secara ringkas).',
-    optional: 'Pilihan — tidak wajib diisi',
+    intro: 'Arahan: Sila pilih SATU kumpulan yang paling menggambarkan anda, kemudian jawab soalan untuk kumpulan tersebut. Borang ini tanpa nama dan tidak mengumpul sebarang pengenalan diri. Maklumat dikumpul secara agregat.',
+    pick: 'Sila pilih kumpulan anda', pickSub: 'Pilih kumpulan yang paling menggambarkan anda. Setiap kumpulan mempunyai set soalan tersendiri.',
+    secA: 'Maklumat Responden', secB: 'Soalan Utama', sugg: 'Soalan Terbuka',
+    eyeA: 'Bahagian A', eyeB: 'Bahagian B', eyeC: 'Akhir sekali',
+    optional: 'Pilihan — tidak wajib diisi', pickTwo: 'Pilih DUA', dk: VMO_DK_LABEL.ms,
     back: 'Kembali', next: 'Seterusnya', submit: 'Hantar', sending: 'Menghantar…',
-    errId: 'Sila masukkan 6 digit terakhir.',
-    errA: 'Sila lengkapkan semua ruangan bertanda *.',
-    errB: 'Sila jawab semua soalan.',
-    errNet: 'Maaf, penghantaran gagal. Sila cuba lagi.',
-    poster: 'Visi · Misi · Objektif · Nilai Teras HASA',
-    doneT: 'Terima kasih!',
-    doneS: 'Maklum balas anda telah direkodkan. Pandangan anda amat kami hargai.',
-    dupT: 'Anda telah menjawab',
-    dupS: 'Rekod menunjukkan maklum balas untuk kumpulan ini telah pun dihantar. Setiap orang hanya boleh menjawab sekali bagi setiap kumpulan.',
-    sel: '— Sila pilih —', step: (n: number) => `Langkah ${n} daripada 4`, stepPick: 'Pilih kumpulan',
-    loading: 'Memuatkan…', closed: 'Borang tidak tersedia buat masa ini.',
+    errA: 'Sila lengkapkan semua ruangan bertanda *.', errB: 'Sila jawab semua soalan.',
+    errChoice: 'Sila pilih tepat DUA pilihan bagi soalan berkaitan.', errNet: 'Maaf, penghantaran gagal. Sila cuba lagi.',
+    doneT: 'Terima kasih!', doneS: 'Maklum balas anda telah direkodkan. Pandangan anda amat kami hargai.',
+    sel: '— Sila pilih —', step: (n: number) => `Langkah ${n} daripada 3`, stepPick: 'Pilih kumpulan',
+    loading: 'Memuatkan…', closed: 'Borang tidak tersedia buat masa ini.', vmoRead: 'Sila baca VMO HASA sebelum meneruskan.',
   },
   en: {
-    title: 'HASA Strategic Direction Questionnaire',
-    other: 'Borang Soal Selidik Hala Tuju Strategik HASA',
+    title: 'HASA Strategic Direction Questionnaire', other: 'Borang Soal Selidik Hala Tuju Strategik HASA',
     hosp: 'Hospital Al-Sultan Abdullah UiTM',
-    intro: 'Instruction: Please tick or fill in the relevant information. The information provided will be aggregated and will not be used to identify any individual.',
-    pick: 'Please select your group',
-    pickSub: 'Choose the group that best describes you. Each group has its own set of questions.',
-    idL: 'Last 6 Digits of NRIC or Passport Number',
-    idH: 'This information is collected solely for data verification purposes to prevent duplicate entries and will be kept strictly confidential.',
-    verify: 'Verification', secA: 'Respondent Information', secB: 'Main Questions', sugg: 'Suggestions',
-    eyeV: 'Verification', eyeA: 'Section A', eyeB: 'Section B', eyeC: 'Finally',
-    openQ: 'Are there any specific issues or suggestions you would like to bring to the attention of top management? (Please be brief).',
-    optional: 'Optional',
+    intro: 'Instruction: Please choose ONE group that best describes you, then answer the questions for that group. This form is anonymous and collects no personal identifiers. Responses are aggregated.',
+    pick: 'Please select your group', pickSub: 'Choose the group that best describes you. Each group has its own set of questions.',
+    secA: 'Respondent Information', secB: 'Main Questions', sugg: 'Open Questions',
+    eyeA: 'Section A', eyeB: 'Section B', eyeC: 'Finally',
+    optional: 'Optional', pickTwo: 'Choose TWO', dk: VMO_DK_LABEL.en,
     back: 'Back', next: 'Next', submit: 'Submit', sending: 'Submitting…',
-    errId: 'Please enter the last 6 digits.',
-    errA: 'Please complete all fields marked *.',
-    errB: 'Please answer every question.',
-    errNet: 'Sorry, submission failed. Please try again.',
-    poster: 'HASA Vision · Mission · Objectives · Core Values',
-    doneT: 'Thank you!',
-    doneS: 'Your response has been recorded. We appreciate your feedback.',
-    dupT: 'You have already responded',
-    dupS: 'Our records show a response for this group has already been submitted. Each person may answer once per group.',
-    sel: '— Please select —', step: (n: number) => `Step ${n} of 4`, stepPick: 'Choose your group',
-    loading: 'Loading…', closed: 'The form is not available at the moment.',
+    errA: 'Please complete all fields marked *.', errB: 'Please answer every question.',
+    errChoice: 'Please choose exactly TWO options for the relevant question.', errNet: 'Sorry, submission failed. Please try again.',
+    doneT: 'Thank you!', doneS: 'Your response has been recorded. We appreciate your feedback.',
+    sel: '— Please select —', step: (n: number) => `Step ${n} of 3`, stepPick: 'Choose your group',
+    loading: 'Loading…', closed: 'The form is not available at the moment.', vmoRead: 'Please read HASA’s VMO before continuing.',
   },
 }
 
@@ -85,14 +69,12 @@ export default function VmoSurveyPage() {
   const [gq, setGq] = useState<VmoGroupQuestion[]>([])
   const [demos, setDemos] = useState<VmoDemographic[]>([])
   const [options, setOptions] = useState<VmoOption[]>([])
+  const [qOptions, setQOptions] = useState<VmoQuestionOption[]>([])
   const [group, setGroup] = useState<VmoGroup | null>(null)
-  const [idDigits, setIdDigits] = useState('')
   const [demoVals, setDemoVals] = useState<Record<string, string>>({})
-  /* value 1–6, or null for "Tidak tahu". A key being absent means unanswered —
-   * which is why validation uses hasOwnProperty rather than a truthiness check
-   * (null is a valid answer here, 0 would never be). */
-  const [answers, setAnswers] = useState<Record<string, number | null>>({})
-  const [freeText, setFreeText] = useState('')
+  const [scaleAns, setScaleAns] = useState<Record<string, number | null>>({})
+  const [choiceAns, setChoiceAns] = useState<Record<string, string[]>>({})
+  const [open, setOpen] = useState<Record<string, string>>({ t1: '', t2: '', t3: '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -101,28 +83,25 @@ export default function VmoSurveyPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const [g, q, m, d, o] = await Promise.all([
+        const [g, q, m, d, o, qo] = await Promise.all([
           supabase.from('vmo_groups').select('*').eq('active', true).order('sort_order'),
           supabase.from('vmo_questions').select('*'),
           supabase.from('vmo_group_questions').select('*').order('position'),
           supabase.from('vmo_demographics').select('*').order('position'),
-          supabase.from('vmo_demographic_options').select('*').eq('active', true).order('sort_order'),
+          supabase.from('vmo_demographic_options').select('*').order('sort_order'),
+          supabase.from('vmo_question_options').select('*').order('sort_order'),
         ])
-        if (g.error || q.error || m.error || d.error || o.error) { setStep('error'); return }
+        if (g.error || q.error || m.error || d.error || o.error || qo.error) { setStep('error'); return }
         const qmap: Record<string, VmoQuestion> = {}
         for (const row of (q.data ?? []) as VmoQuestion[]) qmap[row.code] = row
-        setGroups((g.data ?? []) as VmoGroup[])
-        setQuestions(qmap)
-        setGq((m.data ?? []) as VmoGroupQuestion[])
-        setDemos((d.data ?? []) as VmoDemographic[])
-        setOptions((o.data ?? []) as VmoOption[])
+        setGroups((g.data ?? []) as VmoGroup[]); setQuestions(qmap)
+        setGq((m.data ?? []) as VmoGroupQuestion[]); setDemos((d.data ?? []) as VmoDemographic[])
+        setOptions((o.data ?? []) as VmoOption[]); setQOptions((qo.data ?? []) as VmoQuestionOption[])
         setStep('pick')
       } catch { setStep('error') }
     })()
   }, [supabase])
 
-  /* .filter() does not narrow types on its own, so the predicate below is what
-   * lets us treat `q` as definitely present downstream. */
   const myQs = useMemo(() => {
     if (!group) return []
     return gq.filter((x) => x.group_code === group.code)
@@ -136,53 +115,55 @@ export default function VmoSurveyPage() {
     [group, demos])
 
   const optsFor = (set: string) => options.filter((o) => o.option_set === set)
+  const choiceOptsFor = (qcode: string) => qOptions.filter((o) => o.question_code === qcode)
 
   function choose(g: VmoGroup) {
-    setGroup(g); setIdDigits(''); setDemoVals({}); setAnswers({}); setFreeText('')
-    setErr(''); setStep('id'); window.scrollTo({ top: 0 })
+    setGroup(g); setDemoVals({}); setScaleAns({}); setChoiceAns({}); setOpen({ t1: '', t2: '', t3: '' })
+    setErr(''); setStep('demo'); window.scrollTo({ top: 0 })
   }
   function goto(s: Step) { setErr(''); setStep(s); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
-  function nextFromId() {
-    if (!/^\d{6}$/.test(idDigits.trim())) { setErr(t.errId); return }
-    goto('demo')
-  }
   function nextFromDemo() {
     for (const d of myDemos) if (d.required && !demoVals[d.field_code]) { setErr(t.errA); return }
     goto('questions')
   }
   function nextFromQuestions() {
     for (const x of myQs) {
-      if (!Object.prototype.hasOwnProperty.call(answers, x.question_code)) { setErr(t.errB); return }
+      if (x.q.scale_type === 'choice') {
+        if ((choiceAns[x.question_code]?.length ?? 0) !== x.q.pick_count) { setErr(t.errChoice); return }
+      } else if (!Object.prototype.hasOwnProperty.call(scaleAns, x.question_code)) {
+        setErr(t.errB); return
+      }
     }
     goto('comments')
+  }
+
+  function toggleChoice(qcode: string, val: string, pick: number) {
+    setChoiceAns((prev) => {
+      const cur = prev[qcode] ?? []
+      if (cur.includes(val)) return { ...prev, [qcode]: cur.filter((v) => v !== val) }
+      if (cur.length >= pick) return prev            // at cap — ignore extra picks
+      return { ...prev, [qcode]: [...cur, val] }
+    })
   }
 
   async function submit() {
     if (!group || busy) return
     setBusy(true); setErr('')
     try {
-      const hash = await hashIdentifier(idDigits, group.salt)
       const { data, error } = await supabase.rpc('vmo_submit', {
-        p_group: group.code,
-        p_hash: hash,
-        p_demo: demoVals,
-        p_free: freeText,
-        p_lang: lang,
-        p_answers: answers,
+        p_group: group.code, p_lang: lang,
+        p_scale: scaleAns, p_choices: choiceAns, p_open: open,
       })
-      if (error) { setErr(t.errNet); setBusy(false); return }
-      if (data === 'duplicate') { setStep('duplicate'); window.scrollTo({ top: 0 }); setBusy(false); return }
-      if (data !== 'ok') { setErr(t.errNet); setBusy(false); return }
+      if (error || data !== 'ok') { setErr(t.errNet); setBusy(false); return }
       setStep('done'); window.scrollTo({ top: 0 })
     } catch { setErr(t.errNet) }
     setBusy(false)
   }
 
   const accent = group?.accent ?? '#2563EB'
-  const pct = step === 'pick' ? 0 : step === 'id' ? 20 : step === 'demo' ? 42
-    : step === 'questions' ? 80 : step === 'comments' ? 96 : 100
-  const stepNo = step === 'id' ? 1 : step === 'demo' ? 2 : step === 'questions' ? 3 : 4
+  const pct = step === 'pick' ? 0 : step === 'demo' ? 30 : step === 'questions' ? 75 : step === 'comments' ? 96 : 100
+  const stepNo = step === 'demo' ? 1 : step === 'questions' ? 2 : 3
 
   return (
     <div className="vmo-root" style={{ '--vac': accent } as React.CSSProperties}>
@@ -214,7 +195,6 @@ export default function VmoSurveyPage() {
       <div className="vmo-wrap">
         <div className="vmo-card">
           {err && <div className="vmo-err">{err}</div>}
-
           {step === 'loading' && <div className="vmo-mute">{t.loading}</div>}
           {step === 'error' && <div className="vmo-err">{t.closed}</div>}
 
@@ -227,8 +207,7 @@ export default function VmoSurveyPage() {
                 {groups.map((g) => {
                   const note = lang === 'ms' ? g.note_ms : g.note_en
                   const tag = g.kind === 'staff' ? (lang === 'ms' ? 'Staf' : 'Staff')
-                    : g.kind === 'student' ? (lang === 'ms' ? 'Pelajar' : 'Student')
-                      : (lang === 'ms' ? 'Pesakit' : 'Patient')
+                    : g.kind === 'student' ? (lang === 'ms' ? 'Pelajar' : 'Student') : (lang === 'ms' ? 'Pesakit' : 'Patient')
                   return (
                     <button key={g.code} type="button" className="vmo-gcard"
                       style={{ '--gc': g.accent } as React.CSSProperties} onClick={() => choose(g)}>
@@ -239,24 +218,6 @@ export default function VmoSurveyPage() {
                     </button>
                   )
                 })}
-              </div>
-            </>
-          )}
-
-          {step === 'id' && (
-            <>
-              <div className="vmo-eyebrow">{t.eyeV}</div>
-              <h2>{t.verify}</h2>
-              <div className="vmo-field" style={{ marginTop: 20 }}>
-                <label className="vmo-lbl" htmlFor="vmoid">{t.idL}<span className="req">*</span></label>
-                <input id="vmoid" className="vmo-digits" type="text" inputMode="numeric" maxLength={6}
-                  autoComplete="off" value={idDigits} placeholder="••••••"
-                  onChange={(e) => setIdDigits(e.target.value.replace(/\D/g, ''))} />
-                <div className="vmo-hint">🔒 {t.idH}</div>
-              </div>
-              <div className="vmo-nav">
-                <button type="button" className="vmo-btn" onClick={() => { setGroup(null); goto('pick') }}>{t.back}</button>
-                <button type="button" className="vmo-btn primary" onClick={nextFromId}>{t.next}</button>
               </div>
             </>
           )}
@@ -280,7 +241,7 @@ export default function VmoSurveyPage() {
                 ))}
               </div>
               <div className="vmo-nav">
-                <button type="button" className="vmo-btn" onClick={() => goto('id')}>{t.back}</button>
+                <button type="button" className="vmo-btn" onClick={() => { setGroup(null); goto('pick') }}>{t.back}</button>
                 <button type="button" className="vmo-btn primary" onClick={nextFromDemo}>{t.next}</button>
               </div>
             </>
@@ -291,69 +252,66 @@ export default function VmoSurveyPage() {
               <div className="vmo-eyebrow">{t.eyeB}</div>
               <h2>{t.secB}</h2>
               <div style={{ marginTop: 4 }}>
-                {myQs.map((x, i) => {
-                  const anchors = VMO_ANCHORS[x.q.scale_type][lang]
-                  const points = VMO_POINTS[x.q.scale_type][lang]
-                  const answered = Object.prototype.hasOwnProperty.call(answers, x.question_code)
-                  const isDk = answered && answers[x.question_code] === null
+                {myQs.map((x) => {
+                  const isChoice = x.q.scale_type === 'choice'
+                  const showVmoAfter = x.q.code === 'FAMILIAR_VMO'
                   return (
                     <div key={x.question_code}>
                       <div className="vmo-q">
                         <div className="vmo-qt"><i className="vmo-qnum">{x.position}</i>{lang === 'ms' ? x.q.text_ms : x.q.text_en}</div>
                         <div className="vmo-qe">{lang === 'ms' ? x.q.text_en : x.q.text_ms}</div>
-                        {/* 1–6 forced choice. The gap between 3 and 4 is deliberate:
-                            it shows there is no middle option to fall back on. */}
-                        <div className="vmo-scale six">
-                          {Array.from({ length: VMO_SCALE_MAX }, (_, k) => k + 1).map((v) => (
-                            <button key={v} type="button" aria-label={`${v} — ${points[v - 1]}`}
-                              className={`${answers[x.question_code] === v ? 'on' : ''}${v === 4 ? ' gap' : ''}`}
-                              onClick={() => setAnswers({ ...answers, [x.question_code]: v })}>{v}</button>
-                          ))}
-                        </div>
-                        <div className="vmo-anchors two">
-                          <span>{anchors[0]}</span><span>{anchors[1]}</span>
-                        </div>
-                        <button type="button"
-                          className={`vmo-dk ${isDk ? 'on' : ''}`}
-                          aria-pressed={isDk}
-                          onClick={() => setAnswers({ ...answers, [x.question_code]: null })}>
-                          {VMO_DK_LABEL[lang]}
-                        </button>
+
+                        {isChoice ? (
+                          <>
+                            <div className="vmo-picktwo">{t.pickTwo}</div>
+                            <div className="vmo-choices">
+                              {choiceOptsFor(x.question_code).map((o) => {
+                                const sel = (choiceAns[x.question_code] ?? []).includes(o.value)
+                                return (
+                                  <button key={o.value} type="button" aria-pressed={sel}
+                                    className={`vmo-choice ${sel ? 'on' : ''}`}
+                                    onClick={() => toggleChoice(x.question_code, o.value, x.q.pick_count)}>
+                                    <span className="box">{sel ? '✓' : ''}</span>
+                                    <span>{lang === 'ms' ? o.label_ms : o.label_en}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="vmo-scale six">
+                              {Array.from({ length: VMO_SCALE_MAX }, (_, k) => k + 1).map((v) => {
+                                const pts = VMO_POINTS[x.q.scale_type][lang]
+                                return (
+                                  <button key={v} type="button" aria-label={`${v} — ${pts[v - 1]}`}
+                                    className={`${scaleAns[x.question_code] === v ? 'on' : ''}${v === 4 ? ' gap' : ''}`}
+                                    onClick={() => setScaleAns({ ...scaleAns, [x.question_code]: v })}>{v}</button>
+                                )
+                              })}
+                            </div>
+                            <div className="vmo-anchors two">
+                              <span>{VMO_ANCHORS[x.q.scale_type][lang][0]}</span>
+                              <span>{VMO_ANCHORS[x.q.scale_type][lang][1]}</span>
+                            </div>
+                            <button type="button"
+                              className={`vmo-dk ${Object.prototype.hasOwnProperty.call(scaleAns, x.question_code) && scaleAns[x.question_code] === null ? 'on' : ''}`}
+                              onClick={() => setScaleAns({ ...scaleAns, [x.question_code]: null })}>{t.dk}</button>
+                          </>
+                        )}
                       </div>
-                      {i === 0 && (
-                        /* The VMO itself, shown right after Q1 — respondents must be able
-                         * to read it before Q2 asks whether they understand it. */
+
+                      {showVmoAfter && (
                         <section className="vmo-statement" aria-label={HASA_VMO.heading[lang]}>
                           <div className="vs-head">{HASA_VMO.heading[lang]}</div>
-
-                          <div className="vs-block">
-                            <div className="vs-lbl">{HASA_VMO.visionLabel[lang]}</div>
-                            <p className="vs-lead">{HASA_VMO.vision[lang]}</p>
-                          </div>
-
-                          <div className="vs-block">
-                            <div className="vs-lbl">{HASA_VMO.missionLabel[lang]}</div>
-                            <p className="vs-lead">{HASA_VMO.mission[lang]}</p>
-                          </div>
-
-                          <div className="vs-block">
-                            <div className="vs-lbl">{HASA_VMO.objectivesLabel[lang]}</div>
-                            <ul className="vs-list">
-                              {HASA_VMO.objectives.map((o) => <li key={o.en}>{o[lang]}</li>)}
-                            </ul>
-                          </div>
-
-                          <div className="vs-block">
-                            <div className="vs-lbl">{HASA_VMO.valuesLabel[lang]}</div>
-                            <div className="vs-values">
-                              {HASA_VMO.values.map((v) => (
-                                <div className="vs-val" key={v.name_en}>
-                                  <b>{lang === 'ms' ? v.name_ms : v.name_en}</b>
-                                  <span>{lang === 'ms' ? v.desc_ms : v.desc_en}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                          <div className="vs-block"><div className="vs-lbl">{HASA_VMO.visionLabel[lang]}</div><p className="vs-lead">{HASA_VMO.vision[lang]}</p></div>
+                          <div className="vs-block"><div className="vs-lbl">{HASA_VMO.missionLabel[lang]}</div><p className="vs-lead">{HASA_VMO.mission[lang]}</p></div>
+                          <div className="vs-block"><div className="vs-lbl">{HASA_VMO.objectivesLabel[lang]}</div>
+                            <ul className="vs-list">{HASA_VMO.objectives.map((o) => <li key={o.en}>{o[lang]}</li>)}</ul></div>
+                          <div className="vs-block"><div className="vs-lbl">{HASA_VMO.valuesLabel[lang]}</div>
+                            <div className="vs-values">{HASA_VMO.values.map((v) => (
+                              <div className="vs-val" key={v.name_en}><b>{lang === 'ms' ? v.name_ms : v.name_en}</b><span>{lang === 'ms' ? v.desc_ms : v.desc_en}</span></div>
+                            ))}</div></div>
                         </section>
                       )}
                     </div>
@@ -367,35 +325,33 @@ export default function VmoSurveyPage() {
             </>
           )}
 
-          {step === 'comments' && (
+          {step === 'comments' && group && (
             <>
               <div className="vmo-eyebrow">{t.eyeC}</div>
               <h2>{t.sugg}</h2>
-              <div className="vmo-field" style={{ marginTop: 18 }}>
-                <label className="vmo-lbl">{t.openQ}</label>
-                <textarea value={freeText} placeholder={t.optional} onChange={(e) => setFreeText(e.target.value)} />
-                <div className="vmo-hint">{t.optional}</div>
-              </div>
+              <div className="vmo-sub" style={{ marginBottom: 8 }}>{t.optional}</div>
+              {[
+                { key: 't1', label: lang === 'ms' ? 'Satu perkara yang HASA patut KEKALKAN.' : 'One thing HASA should keep doing.' },
+                { key: 't2', label: (T2[group.code] ?? T2.pengurusan)[lang] },
+                { key: 't3', label: lang === 'ms' ? 'Sebarang isu atau cadangan lain untuk pengurusan tertinggi (ringkas).' : 'Any other issue or suggestion for top management (brief).' },
+              ].map((f) => (
+                <div className="vmo-field" key={f.key}>
+                  <label className="vmo-lbl">{f.label}</label>
+                  <textarea value={open[f.key] ?? ''} onChange={(e) => setOpen({ ...open, [f.key]: e.target.value })} />
+                </div>
+              ))}
               <div className="vmo-nav">
                 <button type="button" className="vmo-btn" onClick={() => goto('questions')}>{t.back}</button>
-                <button type="button" className="vmo-btn primary" disabled={busy} onClick={submit}>
-                  {busy ? t.sending : t.submit}
-                </button>
+                <button type="button" className="vmo-btn primary" disabled={busy} onClick={submit}>{busy ? t.sending : t.submit}</button>
               </div>
             </>
           )}
 
-          {(step === 'done' || step === 'duplicate') && (
+          {step === 'done' && (
             <div className="vmo-done">
-              <div className="vmo-tick" style={step === 'duplicate' ? { background: '#6B7280' } : undefined}>
-                <svg viewBox="0 0 24 24">
-                  {step === 'done'
-                    ? <path d="M4 12.5l5.5 5.5L20 7" />
-                    : <path d="M12 8v5m0 3.5v.01M12 3a9 9 0 100 18 9 9 0 000-18z" />}
-                </svg>
-              </div>
-              <h2>{step === 'done' ? t.doneT : t.dupT}</h2>
-              <div className="vmo-sub" style={{ marginTop: 6 }}>{step === 'done' ? t.doneS : t.dupS}</div>
+              <div className="vmo-tick"><svg viewBox="0 0 24 24"><path d="M4 12.5l5.5 5.5L20 7" /></svg></div>
+              <h2>{t.doneT}</h2>
+              <div className="vmo-sub" style={{ marginTop: 6 }}>{t.doneS}</div>
             </div>
           )}
         </div>
