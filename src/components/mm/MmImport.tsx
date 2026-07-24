@@ -178,6 +178,15 @@ export function MmImport({
 
       {step === 'pick' && (
         <>
+          <div className="mm-sec">Facility &amp; type</div>
+          <div className="mm-grid">
+            <div className="mm-field"><label>Facility (whole file)</label>
+              <select value={facility} onChange={(e) => setFacility(e.target.value as MmFacility)}>{MM_FACILITIES.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}</select></div>
+            <div className="mm-field"><label>Import as</label>
+              <select value={reportType} onChange={(e) => setReportType(e.target.value as 'Mortality' | 'Morbidity')}><option>Mortality</option><option>Morbidity</option></select></div>
+          </div>
+          <p className="vd-sub" style={{ marginTop: 10 }}>If a single file contains both facilities, you can map a Facility column on the next screen and each row is set from it.</p>
+
           <div className="mm-sec">Upload monthly mortality list</div>
           <p className="vd-sub">Choose the Excel file (.xlsx / .xls). The first sheet is read; the top row must be column headers.</p>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f) }} />
