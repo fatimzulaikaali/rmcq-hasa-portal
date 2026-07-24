@@ -201,6 +201,7 @@ export default function MmPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="rec-badge">{loading ? 'Loading…' : `${cases.length} case${cases.length === 1 ? '' : 's'}`}</div>
+            <button type="button" className="mm-btn" onClick={() => setModal({ mode: 'import' })}>⬆ Import list</button>
             <button type="button" className="mm-btn primary" onClick={() => setModal({ mode: 'new' })}>+ New case</button>
           </div>
         </header>
@@ -219,7 +220,11 @@ export default function MmPage() {
           {empty && (
             <div className="card">
               <h3 className="vd-h">No cases yet</h3>
-              <p className="vd-sub">Add the first M&amp;M case with <b>+ New case</b>, or import the monthly mortality list. Cases are de-identified — no patient name or NRIC is stored.</p>
+              <p className="vd-sub">Import the monthly mortality list (Excel), or add a single case by hand. Cases are de-identified — no patient name or NRIC is stored.</p>
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                <button type="button" className="mm-btn primary" onClick={() => setModal({ mode: 'import' })}>⬆ Import monthly list</button>
+                <button type="button" className="mm-btn" onClick={() => setModal({ mode: 'new' })}>+ New case</button>
+              </div>
             </div>
           )}
 
