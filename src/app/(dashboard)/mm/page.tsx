@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { PortalNav } from '@/components/PortalNav'
 import { MmCaseForm } from '@/components/mm/MmCaseForm'
 import { MmCaseView } from '@/components/mm/MmCaseView'
+import { MmImport } from '@/components/mm/MmImport'
 import {
   MM_STATUSES, MM_SHORTFALLS, pi01, coverageColor, effectiveActionStatus, isDocumented, nextCaseNo,
   type MmCase, type MmDepartment, type MmCaseShortfall, type MmAction,
@@ -43,7 +44,7 @@ export default function MmPage() {
   const [actions, setActions] = useState<MmAction[]>([])
 
   const [fDept, setFDept] = useState(''); const [fType, setFType] = useState(''); const [fStatus, setFStatus] = useState('')
-  const [modal, setModal] = useState<{ mode: 'view' | 'edit' | 'new'; caseId?: number } | null>(null)
+  const [modal, setModal] = useState<{ mode: 'view' | 'edit' | 'new' | 'import'; caseId?: number } | null>(null)
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -270,6 +271,7 @@ export default function MmPage() {
                     <select value={fDept} onChange={(e) => setFDept(e.target.value)}><option value="">All departments</option>{departments.map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select>
                     <select value={fType} onChange={(e) => setFType(e.target.value)}><option value="">All types</option><option>Mortality</option><option>Morbidity</option></select>
                     <select value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">All statuses</option>{MM_STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
+                    <button type="button" className="mm-btn primary" style={{ marginLeft: 'auto' }} onClick={() => setModal({ mode: 'import' })}>⬆ Import monthly list</button>
                   </div>
                   <div className="card" style={{ padding: '6px 16px 10px' }}><div className="vd-scroll"><table className="vd-table">
                     <thead><tr><th>Case No</th><th>Dept</th><th>Type</th><th>Age/Sex</th><th>Ward</th><th>Category</th><th>Status</th></tr></thead>
@@ -353,10 +355,15 @@ export default function MmPage() {
         <div className="mm-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) setModal(null) }}>
           <div className="mm-modal">
             <div className="mm-modal-head">
-              <h3>{modal.mode === 'new' ? 'New M&M case' : modal.mode === 'edit' ? 'Edit case' : 'Case'}</h3>
+              <h3>{modal.mode === 'new' ? 'New M&M case' : modal.mode === 'edit' ? 'Edit case' : modal.mode === 'import' ? 'Import monthly mortality list' : 'Case'}</h3>
               <button type="button" className="x" onClick={() => setModal(null)}>×</button>
             </div>
             <div className="mm-modal-body">
+              {modal.mode === 'import' && (
+                <MmImport supabase={supabase} departments={departments} existingCaseNos={cases.map((c) => c.case_no)}
+                  onCancel={() => setModal(null)}
+                  onDone={async (n) => { await load(); setModal(null); setTab('reg'); alert(`Imported ${n} case${n === 1 ? '' : 's'} as Untriaged.`) }} />
+              )}
               {(modal.mode === 'new' || modal.mode === 'edit') && (
                 <MmCaseForm supabase={supabase}
                   initial={modal.mode === 'edit' ? modalCase : null}
