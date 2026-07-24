@@ -33,6 +33,8 @@ const MODULES: Module[] = [
     desc: 'Log, score and review department risks; track committee action items.', global: false },
   { href: '/vmo', icon: '🎯', title: 'VMO Survey', accent: 'var(--teal)',
     desc: 'Hala Tuju Strategik HASA — staff, student and patient views on the Vision, Mission and Objectives.', global: false },
+  { href: '/mm', icon: '📕', title: 'M&M Monitoring', accent: 'var(--red)',
+    desc: 'Mortality & Morbidity review workflow, action-plan audit and MSQH PI 01 reporting — de-identified.', global: false },
   { href: '/acc', icon: '📋', title: 'Accreditation', accent: 'var(--purple)',
     desc: 'MSQH 7th Edition — Standard 24 criteria and evidence of compliance.', global: true },
 ]

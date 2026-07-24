@@ -64,6 +64,7 @@ export function RiskSidebar({ onClose, children }: {
             <span className="nav-icon">⚠️</span><span>Risk Register</span>
           </Link>
           <Link href="/vmo" className="nav-item"><span className="nav-icon">🎯</span><span>VMO Survey</span></Link>
+          <Link href="/mm" className="nav-item"><span className="nav-icon">📕</span><span>M&M Monitoring</span></Link>
           {showGlobal && (
             <Link href="/acc" className="nav-item"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
           )}
