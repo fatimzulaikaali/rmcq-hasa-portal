@@ -1249,3 +1249,5 @@ body{counter-reset:rcpage;}
   .tiles{grid-template-columns:1fr 1fr;}.grid2,.grid3{grid-template-columns:1fr;}
   .mm-grid,.mm-grid.three{grid-template-columns:1fr;}.kv{grid-template-columns:1fr;}
 }
+.mm-facility{padding:6px 10px;border:1px solid var(--border);border-radius:99px;font-size:12px;font-weight:600;font-family:inherit;background:var(--surface);color:var(--text);outline:none;cursor:pointer;}
+.mm-facility:focus{border-color:var(--blue);}

@@ -6,6 +6,21 @@
 
 export type MmReportType = 'Mortality' | 'Morbidity'
 
+/** The two facilities, analysed separately.
+ *  HASA = Hospital Al-Sultan Abdullah · PPUiTM = Pusat Perubatan UiTM. */
+export type MmFacility = 'HASA' | 'PPUiTM'
+export const MM_FACILITIES: { code: MmFacility; label: string }[] = [
+  { code: 'HASA', label: 'HASA' },
+  { code: 'PPUiTM', label: 'PPUiTM' },
+]
+/** Normalise a free-text facility value (from Excel) to a facility code. */
+export function normFacility(v: unknown, fallback: MmFacility = 'HASA'): MmFacility {
+  const s = String(v ?? '').toLowerCase()
+  if (/ppuitm|pusat perubatan|sungai buloh|selayang/.test(s)) return 'PPUiTM'
+  if (/hasa|sultan abdullah/.test(s)) return 'HASA'
+  return fallback
+}
+
 export type MmStatus =
   | 'Untriaged' | 'No review' | 'Dept review' | 'HOD verified'
   | 'Hospital-level' | 'Actions open' | 'Closed'
@@ -28,6 +43,7 @@ export interface MmDepartment {
 export interface MmCase {
   id: number
   case_no: string
+  facility: MmFacility
   report_type: MmReportType
   report_date: string | null
   dept_code: string | null

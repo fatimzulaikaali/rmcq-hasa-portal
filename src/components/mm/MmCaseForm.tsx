@@ -3,15 +3,15 @@
 import { useMemo, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  MM_CATEGORIES, MM_SHORTFALLS, MM_ASSESS_FIELDS, MM_STATUSES,
-  type MmCase, type MmDepartment, type MmCaseShortfall,
+  MM_CATEGORIES, MM_SHORTFALLS, MM_ASSESS_FIELDS, MM_STATUSES, MM_FACILITIES,
+  type MmCase, type MmDepartment, type MmCaseShortfall, type MmFacility,
 } from '@/lib/mm/types'
 
 /* Create / edit an M&M case — the five-part form with the two gates, as one
  * scrollable modal grouped by the form's parts. Saves to mm_cases and replaces
  * the case's rows in mm_case_shortfalls. De-identified: no name/NRIC fields. */
 
-type Draft = Partial<MmCase> & { case_no: string; report_type: 'Mortality' | 'Morbidity' }
+type Draft = Partial<MmCase> & { case_no: string; report_type: 'Mortality' | 'Morbidity'; facility: MmFacility }
 
 export function MmCaseForm({
   supabase, initial, departments, existingShortfalls, onSaved, onCancel, suggestCaseNo,
@@ -26,7 +26,7 @@ export function MmCaseForm({
 }) {
   const [d, setD] = useState<Draft>(() => initial
     ? { ...initial }
-    : { case_no: suggestCaseNo, report_type: 'Mortality', is_bid: false, minutes_attached: false,
+    : { case_no: suggestCaseNo, facility: 'HASA', report_type: 'Mortality', is_bid: false, minutes_attached: false,
         attendance_attached: false, hod_certification: false, learning_points_disseminated: false, status: 'Untriaged' })
   const [shortfalls, setShortfalls] = useState<Record<string, string | true>>(() => {
     const m: Record<string, string | true> = {}
@@ -89,6 +89,11 @@ export function MmCaseForm({
       <div className="mm-sec">Intake · Part 1</div>
       <div className="mm-grid">
         <L label="Case number"><input value={d.case_no} onChange={(e) => set({ case_no: e.target.value })} /></L>
+        <L label="Facility">
+          <select value={d.facility} onChange={(e) => set({ facility: e.target.value as MmFacility })}>
+            {MM_FACILITIES.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
+          </select>
+        </L>
         <L label="Report type">
           <select value={d.report_type} onChange={(e) => set({ report_type: e.target.value as 'Mortality' | 'Morbidity' })}>
             <option>Mortality</option><option>Morbidity</option>

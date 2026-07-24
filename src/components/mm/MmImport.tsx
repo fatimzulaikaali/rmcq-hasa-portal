@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { nextCaseNo, type MmDepartment } from '@/lib/mm/types'
+import { nextCaseNo, normFacility, MM_FACILITIES, type MmDepartment, type MmFacility } from '@/lib/mm/types'
 
 /* Import a monthly mortality list from Excel into de-identified M&M cases.
  *
@@ -15,6 +15,7 @@ import { nextCaseNo, type MmDepartment } from '@/lib/mm/types'
 type Row = Record<string, unknown>
 
 const FIELDS: { key: string; label: string; kw: string[] }[] = [
+  { key: 'facility', label: 'Facility (optional column)', kw: ['facility', 'fasiliti', 'hospital', 'pusat', 'ppuitm', 'hasa'] },
   { key: 'department', label: 'Department', kw: ['depart', 'jabatan', 'dept', 'unit', 'ward dept', 'discipline'] },
   { key: 'ward', label: 'Ward / location', kw: ['ward', 'wad', 'location', 'lokasi', 'bed'] },
   { key: 'age', label: 'Age', kw: ['age', 'umur'] },
@@ -62,6 +63,7 @@ export function MmImport({
   const [rows, setRows] = useState<Row[]>([])
   const [map, setMap] = useState<Record<string, string>>({})
   const [reportType, setReportType] = useState<'Mortality' | 'Morbidity'>('Mortality')
+  const [facility, setFacility] = useState<MmFacility>('HASA')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -108,6 +110,7 @@ export function MmImport({
     const deptText = g('department')
     const wardText = String(g('ward') ?? '')
     return {
+      facility: map.facility ? normFacility(g('facility'), facility) : facility,
       dept_code: matchDept(deptText),
       deptText: String(deptText ?? ''),
       ward: wardText || null,
@@ -139,6 +142,7 @@ export function MmImport({
         if (adm && death) { const dd = Math.round((new Date(death).getTime() - new Date(adm).getTime()) / 86400000); if (dd >= 0) los = dd }
         return {
           report_type: reportType,
+          facility: map.facility ? normFacility(g('facility'), facility) : facility,
           dept_code: matchDept(g('department')),
           ward: wardText || null,
           age: g('age') != null && g('age') !== '' ? Number(g('age')) : null,
@@ -185,6 +189,8 @@ export function MmImport({
         <>
           <div className="mm-sec">Map columns · {rows.length} row{rows.length === 1 ? '' : 's'} found</div>
           <div className="mm-grid">
+            <div className="mm-field"><label>Facility (whole file)</label>
+              <select value={facility} onChange={(e) => setFacility(e.target.value as MmFacility)}>{MM_FACILITIES.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}</select></div>
             <div className="mm-field"><label>Import as</label>
               <select value={reportType} onChange={(e) => setReportType(e.target.value as 'Mortality' | 'Morbidity')}><option>Mortality</option><option>Morbidity</option></select></div>
             {FIELDS.map((f) => (
@@ -210,10 +216,12 @@ export function MmImport({
           )}
 
           <div className="mm-sec">Preview (first {Math.min(preview.length, 60)})</div>
+          <div className="note" style={{ marginBottom: 10 }}>Whole file imports as <b>{facility}</b>. If the file contains both facilities, map a <b>Facility</b> column above and each row is set from it.</div>
           <div className="vd-scroll"><table className="vd-table">
-            <thead><tr><th>Dept</th><th>Ward</th><th>Age/Sex</th><th>Admission</th><th>Death</th><th>Diagnosis</th><th>BID</th></tr></thead>
+            <thead><tr><th>Facility</th><th>Dept</th><th>Ward</th><th>Age/Sex</th><th>Admission</th><th>Death</th><th>Diagnosis</th><th>BID</th></tr></thead>
             <tbody>{preview.slice(0, 12).map((p, i) => (
               <tr key={i}>
+                <td><span className={`badge ${p.facility === 'PPUiTM' ? 'b-blue' : 'b-info'}`}>{p.facility}</span></td>
                 <td>{p.dept_code ? departments.find((d) => d.code === p.dept_code)?.name : <span className="badge b-warn">unmatched</span>}</td>
                 <td>{p.ward ?? '—'}</td><td>{p.age ?? '?'} / {p.sex ?? '?'}</td>
                 <td>{p.admission_date ?? '—'}</td><td>{p.death_datetime?.slice(0, 10) ?? '—'}</td>

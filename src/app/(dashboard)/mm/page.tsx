@@ -10,8 +10,8 @@ import { MmCaseForm } from '@/components/mm/MmCaseForm'
 import { MmCaseView } from '@/components/mm/MmCaseView'
 import { MmImport } from '@/components/mm/MmImport'
 import {
-  MM_STATUSES, MM_SHORTFALLS, pi01, coverageColor, effectiveActionStatus, isDocumented, nextCaseNo,
-  type MmCase, type MmDepartment, type MmCaseShortfall, type MmAction,
+  MM_STATUSES, MM_SHORTFALLS, MM_FACILITIES, pi01, coverageColor, effectiveActionStatus, isDocumented, nextCaseNo,
+  type MmCase, type MmDepartment, type MmCaseShortfall, type MmAction, type MmFacility,
 } from '@/lib/mm/types'
 
 type Tab = 'dash' | 'reg' | 'act' | 'msqh'
@@ -39,10 +39,12 @@ export default function MmPage() {
   const [loadError, setLoadError] = useState('')
 
   const [departments, setDepartments] = useState<MmDepartment[]>([])
-  const [cases, setCases] = useState<MmCase[]>([])
-  const [shortfalls, setShortfalls] = useState<MmCaseShortfall[]>([])
-  const [actions, setActions] = useState<MmAction[]>([])
+  const [rawCases, setRawCases] = useState<MmCase[]>([])
+  const [rawShortfalls, setRawShortfalls] = useState<MmCaseShortfall[]>([])
+  const [rawActions, setRawActions] = useState<MmAction[]>([])
 
+  // Facility scope — analysis is separated by facility (HASA / PPUiTM).
+  const [facility, setFacility] = useState<'ALL' | MmFacility>('ALL')
   const [fDept, setFDept] = useState(''); const [fType, setFType] = useState(''); const [fStatus, setFStatus] = useState('')
   const [modal, setModal] = useState<{ mode: 'view' | 'edit' | 'new' | 'import'; caseId?: number } | null>(null)
 
@@ -59,9 +61,9 @@ export default function MmPage() {
       const firstError = [dp.error, cs.error, sf.error, ac.error].find((e) => e)
       if (firstError) { setLoadError(firstError.message); setLoading(false); return }
       setDepartments((dp.data ?? []) as MmDepartment[])
-      setCases((cs.data ?? []) as MmCase[])
-      setShortfalls((sf.data ?? []) as MmCaseShortfall[])
-      setActions((ac.data ?? []) as MmAction[])
+      setRawCases((cs.data ?? []) as MmCase[])
+      setRawShortfalls((sf.data ?? []) as MmCaseShortfall[])
+      setRawActions((ac.data ?? []) as MmAction[])
       setLoading(false)
     } catch (e) { setLoadError(e instanceof Error ? e.message : 'Load failed'); setLoading(false) }
   }
@@ -70,6 +72,14 @@ export default function MmPage() {
     // load() is stable for the page's lifetime; run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /* Facility scope applied here — every aggregate below reads these views, so
+   * selecting HASA / PPUiTM re-scopes the whole module. Case numbers stay unique
+   * across facilities, so those use rawCases. */
+  const cases = useMemo(() => facility === 'ALL' ? rawCases : rawCases.filter((c) => c.facility === facility), [rawCases, facility])
+  const caseIds = useMemo(() => new Set(cases.map((c) => c.id)), [cases])
+  const shortfalls = useMemo(() => rawShortfalls.filter((s) => caseIds.has(s.case_id)), [rawShortfalls, caseIds])
+  const actions = useMemo(() => rawActions.filter((a) => caseIds.has(a.case_id)), [rawActions, caseIds])
 
   const deptName = (code: string | null) => departments.find((d) => d.code === code)?.name ?? code ?? '—'
 
@@ -147,9 +157,9 @@ export default function MmPage() {
   }, [shortfalls, cases])
 
   function openView(id: number) { setModal({ mode: 'view', caseId: id }); window.scrollTo({ top: 0 }) }
-  const modalCase = modal?.caseId ? cases.find((c) => c.id === modal.caseId) ?? null : null
-  const modalShorts = modal?.caseId ? shortfalls.filter((s) => s.case_id === modal.caseId) : []
-  const modalActions = modal?.caseId ? actions.filter((a) => a.case_id === modal.caseId) : []
+  const modalCase = modal?.caseId ? rawCases.find((c) => c.id === modal.caseId) ?? null : null
+  const modalShorts = modal?.caseId ? rawShortfalls.filter((s) => s.case_id === modal.caseId) : []
+  const modalActions = modal?.caseId ? rawActions.filter((a) => a.case_id === modal.caseId) : []
 
   const gauge = (p: number, label: string) => {
     const r = 46, c = 2 * Math.PI * r, off = c * (1 - p / 100)
@@ -200,6 +210,10 @@ export default function MmPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <select className="mm-facility" value={facility} onChange={(e) => setFacility(e.target.value as 'ALL' | MmFacility)} title="Facility scope">
+              <option value="ALL">Both facilities</option>
+              {MM_FACILITIES.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
+            </select>
             <div className="rec-badge">{loading ? 'Loading…' : `${cases.length} case${cases.length === 1 ? '' : 's'}`}</div>
             <button type="button" className="mm-btn" onClick={() => setModal({ mode: 'import' })}>⬆ Import list</button>
             <button type="button" className="mm-btn primary" onClick={() => setModal({ mode: 'new' })}>+ New case</button>
@@ -279,10 +293,10 @@ export default function MmPage() {
                     <button type="button" className="mm-btn primary" style={{ marginLeft: 'auto' }} onClick={() => setModal({ mode: 'import' })}>⬆ Import monthly list</button>
                   </div>
                   <div className="card" style={{ padding: '6px 16px 10px' }}><div className="vd-scroll"><table className="vd-table">
-                    <thead><tr><th>Case No</th><th>Dept</th><th>Type</th><th>Age/Sex</th><th>Ward</th><th>Category</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Case No</th><th>Facility</th><th>Dept</th><th>Type</th><th>Age/Sex</th><th>Ward</th><th>Category</th><th>Status</th></tr></thead>
                     <tbody>{filteredCases.map((c) => (
                       <tr key={c.id} className="mm-rowlink" onClick={() => openView(c.id)}>
-                        <td><b>{c.case_no}</b></td><td>{deptName(c.dept_code)}</td><td>{c.report_type}</td>
+                        <td><b>{c.case_no}</b></td><td><span className={`badge ${c.facility === 'PPUiTM' ? 'b-blue' : 'b-info'}`}>{c.facility}</span></td><td>{deptName(c.dept_code)}</td><td>{c.report_type}</td>
                         <td>{c.age ?? '<1'} / {c.sex ?? '?'}</td><td>{c.ward ?? '—'}</td><td>{c.category_of_death ?? '—'}</td><td>{statusBadge(c.status)}</td></tr>
                     ))}</tbody>
                   </table></div></div>
@@ -365,7 +379,7 @@ export default function MmPage() {
             </div>
             <div className="mm-modal-body">
               {modal.mode === 'import' && (
-                <MmImport supabase={supabase} departments={departments} existingCaseNos={cases.map((c) => c.case_no)}
+                <MmImport supabase={supabase} departments={departments} existingCaseNos={rawCases.map((c) => c.case_no)}
                   onCancel={() => setModal(null)}
                   onDone={async (n) => { await load(); setModal(null); setTab('reg'); alert(`Imported ${n} case${n === 1 ? '' : 's'} as Untriaged.`) }} />
               )}
@@ -374,7 +388,7 @@ export default function MmPage() {
                   initial={modal.mode === 'edit' ? modalCase : null}
                   departments={departments}
                   existingShortfalls={modal.mode === 'edit' ? modalShorts : []}
-                  suggestCaseNo={nextCaseNo(cases.map((c) => c.case_no))}
+                  suggestCaseNo={nextCaseNo(rawCases.map((c) => c.case_no))}
                   onCancel={() => setModal(null)}
                   onSaved={async () => { await load(); setModal(null) }} />
               )}
