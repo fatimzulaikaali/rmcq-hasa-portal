@@ -153,7 +153,7 @@ export default function VmoSurveyPage() {
     try {
       const { data, error } = await supabase.rpc('vmo_submit', {
         p_group: group.code, p_lang: lang,
-        p_scale: scaleAns, p_choices: choiceAns, p_open: open,
+        p_demo: demoVals, p_scale: scaleAns, p_choices: choiceAns, p_open: open,
       })
       if (error || data !== 'ok') { setErr(t.errNet); setBusy(false); return }
       setStep('done'); window.scrollTo({ top: 0 })

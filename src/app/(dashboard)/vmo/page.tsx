@@ -62,6 +62,22 @@ export default function VmoDashboardPage() {
     void (async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.replace('/login'); return }
+      // Supabase caps a single select at 1000 rows, and vmo_answers has thousands.
+      // Page through in 1000-row chunks so every answer is loaded (otherwise all
+      // scores under-count).
+      async function fetchAll<T>(table: string, order?: string): Promise<{ data: T[]; error: unknown }> {
+        const out: T[] = []
+        for (let from = 0; ; from += 1000) {
+          let query = supabase.from(table).select('*').range(from, from + 999)
+          if (order) query = query.order(order)
+          const { data, error } = await query
+          if (error) return { data: out, error }
+          const rows = (data ?? []) as T[]
+          out.push(...rows)
+          if (rows.length < 1000) break
+        }
+        return { data: out, error: null }
+      }
       try {
         const [g, q, m, d, o, qo, r, a, c] = await Promise.all([
           supabase.from('vmo_groups').select('*').order('sort_order'),
@@ -70,19 +86,20 @@ export default function VmoDashboardPage() {
           supabase.from('vmo_demographics').select('*').order('position'),
           supabase.from('vmo_demographic_options').select('*').order('sort_order'),
           supabase.from('vmo_question_options').select('*').order('sort_order'),
-          supabase.from('vmo_responses').select('*').order('submitted_at', { ascending: false }),
-          supabase.from('vmo_answers').select('*'),
-          supabase.from('vmo_answer_choices').select('*'),
+          fetchAll<VmoResponse>('vmo_responses'),
+          fetchAll<VmoAnswer>('vmo_answers'),
+          fetchAll<VmoAnswerChoice>('vmo_answer_choices'),
         ])
         if (cancelled) return
         const firstError = [g.error, q.error, m.error, d.error, o.error, qo.error, r.error, a.error, c.error].find((e) => e)
-        if (firstError) { setLoadError(firstError.message); setLoading(false); return }
+        if (firstError) { setLoadError(String((firstError as { message?: string }).message ?? firstError)); setLoading(false); return }
         const qmap: Record<string, VmoQuestion> = {}
         for (const row of (q.data ?? []) as VmoQuestion[]) qmap[row.code] = row
         setGroups((g.data ?? []) as VmoGroup[]); setQuestions(qmap)
         setGq((m.data ?? []) as VmoGroupQuestion[]); setDemos((d.data ?? []) as VmoDemographic[])
         setOptions((o.data ?? []) as VmoOption[]); setQOptions((qo.data ?? []) as VmoQuestionOption[])
-        setResponses((r.data ?? []) as VmoResponse[]); setAnswers((a.data ?? []) as VmoAnswer[])
+        setResponses(((r.data ?? []) as VmoResponse[]).slice().sort((x, y) => (y.submitted_at ?? '').localeCompare(x.submitted_at ?? '')))
+        setAnswers((a.data ?? []) as VmoAnswer[])
         setChoices((c.data ?? []) as VmoAnswerChoice[])
         setSelG(((g.data ?? [])[0] as VmoGroup | undefined)?.code ?? '')
         setLoading(false)
@@ -216,9 +233,11 @@ export default function VmoDashboardPage() {
     const qcodes = Array.from(new Set(gq.map((x) => x.question_code)))
     const scaleCodes = qcodes.filter((c) => questions[c]?.scale_type !== 'choice')
     const choiceCodes = qcodes.filter((c) => questions[c]?.scale_type === 'choice')
+    // Demographic columns are dynamic — collect every key actually present, since
+    // the field codes differ by group (service_hasa / service_uitm / treatment …).
+    const demoKeys = Array.from(new Set(responses.flatMap((r) => Object.keys(r.demographics ?? {})))).sort()
     const head = ['response_id', 'group', 'submitted_at', 'language',
-      'age', 'sex', 'service', 'position', 'posting_year', 'faculty', 'faculty_dept', 'study_level', 'treatment',
-      ...scaleCodes, ...choiceCodes, 't1_keep', 't2_change', 't3_other']
+      ...demoKeys, ...scaleCodes, ...choiceCodes, 't1_keep', 't2_change', 't3_other']
     const ans: Record<number, Record<string, number | null>> = {}
     for (const a of answers) { ans[a.response_id] = ans[a.response_id] ?? {}; ans[a.response_id][a.question_code] = a.value }
     const chosen: Record<number, Record<string, string[]>> = {}
@@ -226,7 +245,7 @@ export default function VmoDashboardPage() {
     const rows = responses.map((r) => {
       const d = r.demographics ?? {}, av = ans[r.id] ?? {}, cv = chosen[r.id] ?? {}, op = r.open_answers ?? {}
       return [r.id, r.group_code, r.submitted_at, r.language,
-        d.age ?? '', d.sex ?? '', d.service ?? '', d.position ?? '', d.posting_year ?? '', d.faculty ?? '', d.faculty_dept ?? '', d.study_level ?? '', d.treatment ?? '',
+        ...demoKeys.map((k) => d[k] ?? ''),
         ...scaleCodes.map((c) => (!Object.prototype.hasOwnProperty.call(av, c) ? '' : av[c] === null ? 'DK' : av[c])),
         ...choiceCodes.map((c) => (cv[c] ?? []).join('|')),
         (op.t1 ?? ''), (op.t2 ?? ''), (op.t3 ?? '')]
