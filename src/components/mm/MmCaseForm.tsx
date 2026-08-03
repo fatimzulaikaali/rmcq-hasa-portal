@@ -113,8 +113,8 @@ export function MmCaseForm({
           <select value={d.sex ?? ''} onChange={(e) => set({ sex: e.target.value || null })}><option value="">—</option><option>M</option><option>F</option></select>
         </L>
         <L label="Admission date"><input type="date" value={d.admission_date ?? ''} onChange={(e) => set({ admission_date: e.target.value || null })} /></L>
-        <L label="Death date/time"><input type="datetime-local" value={(d.death_datetime ?? '').slice(0, 16)} onChange={(e) => set({ death_datetime: e.target.value || null })} /></L>
-        <L label="Time of death"><input value={d.time_of_death ?? ''} onChange={(e) => set({ time_of_death: e.target.value })} placeholder="HH:MM" /></L>
+        <L label="Death date"><input type="date" value={(d.death_datetime ?? '').slice(0, 10)} onChange={(e) => set({ death_datetime: e.target.value || null })} /></L>
+        <L label="Time of death"><input type="time" value={d.time_of_death ?? ''} onChange={(e) => set({ time_of_death: e.target.value })} placeholder="HH:MM" /></L>
         <L label="Length of stay (days)"><input value={losDays ?? ''} readOnly title="Derived from admission → death" /></L>
         <L label="Diagnosis"><input value={d.diagnosis ?? ''} onChange={(e) => set({ diagnosis: e.target.value })} /></L>
         <L label="Cause of death (ICD-10)"><input value={d.cause_icd ?? ''} onChange={(e) => set({ cause_icd: e.target.value })} /></L>
