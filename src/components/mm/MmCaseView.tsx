@@ -81,7 +81,7 @@ export function MmCaseView({
       <div className="mm-viewhead">
         <div>
           <div className="mm-viewtitle">{c.case_no} · {c.report_type}</div>
-          <div className="mm-viewsub">{dept?.name ?? c.dept_code ?? '—'} · {c.age ?? '<1'} / {c.sex ?? '?'} · Ward {c.ward ?? '—'} · LOS {c.los_days ?? '—'} day(s)</div>
+          <div className="mm-viewsub">{c.facility} · {dept?.name ?? c.dept_code ?? '—'} · {c.age ?? '<1'} / {c.sex ?? '?'}{c.race ? ' · ' + c.race : ''} · Adm ward {c.admission_ward ?? '—'} → death ward {c.ward ?? '—'} · LOS {c.los_days ?? '—'} day(s){c.time_of_death ? ' · ToD ' + c.time_of_death : ''}</div>
         </div>
         <button type="button" className="mm-btn primary" onClick={onEdit}>Edit case</button>
       </div>
@@ -162,7 +162,7 @@ export function MmCaseView({
           {c.learning_points_disseminated ? `✓ ${c.dissemination_date ?? ''} ${c.dissemination_method ? '· ' + c.dissemination_method : ''}` : '—'}</div>
       </div>
       <div className="note" style={{ marginTop: 14 }}>
-        <b>Privacy:</b> this case is keyed by number only. No patient name or NRIC is stored — the case number is the bridge to the secured mortality list.
+        <b>Privacy:</b> fully de-identified — no patient name, NRIC or MRN is stored. The Case ID is the only identifier; keep any Case ID ↔ MRN mapping in a separate, restricted offline sheet.
       </div>
     </div>
   )

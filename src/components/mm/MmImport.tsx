@@ -15,17 +15,24 @@ import { nextCaseNo, normFacility, MM_FACILITIES, type MmDepartment, type MmFaci
 type Row = Record<string, unknown>
 
 const FIELDS: { key: string; label: string; kw: string[] }[] = [
+  { key: 'case_no', label: 'Case ID (e.g. MM/2026/0001)', kw: ['case id', 'case no', 'caseno', 'case number', 'id kes', 'mm/'] },
   { key: 'facility', label: 'Facility (optional column)', kw: ['facility', 'fasiliti', 'hospital', 'pusat', 'ppuitm', 'hasa'] },
   { key: 'department', label: 'Department', kw: ['depart', 'jabatan', 'dept', 'unit', 'ward dept', 'discipline'] },
-  { key: 'ward', label: 'Ward / location', kw: ['ward', 'wad', 'location', 'lokasi', 'bed'] },
+  { key: 'race', label: 'Race', kw: ['race', 'bangsa', 'kaum', 'ethnic', 'etnik'] },
+  { key: 'admission_ward', label: 'Admission ward', kw: ['admission ward', 'wad masuk', 'adm ward', 'ward masuk'] },
+  { key: 'ward', label: 'Ward / location at death', kw: ['ward at death', 'death ward', 'wad kematian', 'ward', 'wad', 'location', 'lokasi', 'bed'] },
   { key: 'age', label: 'Age', kw: ['age', 'umur'] },
   { key: 'sex', label: 'Sex', kw: ['sex', 'gender', 'jantina'] },
   { key: 'admission_date', label: 'Admission date', kw: ['admiss', 'masuk', 'doa', 'adm date'] },
   { key: 'death_datetime', label: 'Death date/time', kw: ['death', 'demise', 'mati', 'meninggal', 'dod', 'expired', 'tarikh kematian'] },
+  { key: 'time_of_death', label: 'Time of death', kw: ['time of death', 'masa kematian', 'time death', 'death time', 'waktu kematian', 'tod'] },
   { key: 'diagnosis', label: 'Diagnosis', kw: ['diagnos', 'diagnosa'] },
   { key: 'cause_icd', label: 'Cause of death (ICD)', kw: ['cause', 'icd', 'punca'] },
 ]
-const IDENTIFIER_KW = ['name', 'nama', 'nric', 'ic', 'kad pengenalan', 'mrn', 'rn no', 'passport', 'pesakit', 'patient name']
+/* Columns dropped at import — patient identifiers are NEVER stored. The portal is
+ * fully de-identified: the Case ID (MM/2026/NNNN) is the only key. Keep the MRN ↔
+ * Case ID mapping in your own offline master sheet. */
+const IDENTIFIER_KW = ['name', 'nama', 'nric', 'kad pengenalan', 'no kp', 'passport', 'patient name', 'mrn', 'rekod perubatan', 'medical record']
 
 function norm(s: string) { return s.toLowerCase().replace(/[^a-z0-9]/g, '') }
 
@@ -66,10 +73,26 @@ export function MmImport({
   const [facility, setFacility] = useState<MmFacility>('HASA')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [summary, setSummary] = useState('')
 
   const identifierCols = useMemo(
     () => headers.filter((h) => IDENTIFIER_KW.some((k) => norm(h).includes(norm(k)))),
     [headers])
+  // Case IDs already in the portal — used to skip rows on re-upload.
+  const existingSet = useMemo(() => new Set(existingCaseNos.map((c) => c.trim())), [existingCaseNos])
+  // Count new / skipped across ALL rows (preview only shows the first 60).
+  const importCounts = useMemo(() => {
+    const seen = new Set<string>(); let nu = 0, sk = 0, du = 0
+    for (const r of rows) {
+      const raw = map.case_no ? r[map.case_no] : null
+      const cn = raw != null && String(raw).trim() !== '' ? String(raw).trim() : ''
+      if (!cn) { nu++; continue }
+      if (existingSet.has(cn)) { sk++; continue }
+      if (seen.has(cn)) { du++; continue }
+      seen.add(cn); nu++
+    }
+    return { nu, sk, du }
+  }, [rows, map, existingSet])
 
   async function onFile(file: File) {
     setErr('')
@@ -81,11 +104,13 @@ export function MmImport({
       if (!data.length) { setErr('The first sheet has no rows.'); return }
       const hdrs = Object.keys(data[0])
       setHeaders(hdrs); setRows(data)
-      // auto-guess mapping
+      // auto-guess mapping — each header maps to at most one field (first FIELDS
+      // entry wins), so "Admission ward" isn't also grabbed by "Admission date".
       const guess: Record<string, string> = {}
+      const used = new Set<string>()
       for (const f of FIELDS) {
-        const hit = hdrs.find((h) => f.kw.some((k) => norm(h).includes(norm(k))))
-        if (hit) guess[f.key] = hit
+        const hit = hdrs.find((h) => !used.has(h) && f.kw.some((k) => norm(h).includes(norm(k))))
+        if (hit) { guess[f.key] = hit; used.add(hit) }
       }
       setMap(guess); setStep('map')
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not read the file.') }
@@ -110,10 +135,14 @@ export function MmImport({
     const deptText = g('department')
     const wardText = String(g('ward') ?? '')
     return {
+      case_no: g('case_no') != null && g('case_no') !== '' ? String(g('case_no')).trim() : null,
       facility: map.facility ? normFacility(g('facility'), facility) : facility,
       dept_code: matchDept(deptText),
       deptText: String(deptText ?? ''),
       ward: wardText || null,
+      admission_ward: g('admission_ward') != null && g('admission_ward') !== '' ? String(g('admission_ward')) : null,
+      race: g('race') != null && g('race') !== '' ? String(g('race')) : null,
+      time_of_death: g('time_of_death') != null && g('time_of_death') !== '' ? String(g('time_of_death')) : null,
       age: g('age') != null && g('age') !== '' ? Number(g('age')) : null,
       sex: toSex(g('sex')),
       admission_date: toDateStr(g('admission_date')),
@@ -121,9 +150,10 @@ export function MmImport({
       diagnosis: g('diagnosis') != null ? String(g('diagnosis')) : null,
       cause_icd: g('cause_icd') != null ? String(g('cause_icd')) : null,
       is_bid: /bid|brought.?in.?dead|police|polis|forensic/i.test(wardText),
+      existing: (() => { const cn = g('case_no'); return cn != null && cn !== '' ? existingSet.has(String(cn).trim()) : false })(),
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [rows, map, departments])
+  }), [rows, map, departments, existingSet])
 
   const unmatchedDepts = useMemo(() => {
     const set = new Set<string>()
@@ -134,17 +164,41 @@ export function MmImport({
   async function doImport() {
     setBusy(true); setErr('')
     try {
-      const all = rows.map((r) => {
+      const used = [...existingCaseNos]              // reserve auto-numbers against these
+      const seenInFile = new Set<string>()           // catch duplicate Case IDs within the file too
+      let skipped = 0                                 // already in portal
+      let dupInFile = 0                               // repeated Case ID inside this upload
+
+      const toInsert: Record<string, unknown>[] = []
+      for (const r of rows) {
         const g = (k: string) => (map[k] ? r[map[k]] : null)
         const wardText = String(g('ward') ?? '')
         const adm = toDateStr(g('admission_date')); const death = toDateTimeStr(g('death_datetime'))
         let los: number | null = null
         if (adm && death) { const dd = Math.round((new Date(death).getTime() - new Date(adm).getTime()) / 86400000); if (dd >= 0) los = dd }
-        return {
+
+        // Case ID drives de-duplication. Use the sheet's ID when present; otherwise
+        // auto-assign the next MM/<year>/NNNN. Skip anything already in the portal.
+        const rawId = g('case_no')
+        let case_no = rawId != null && String(rawId).trim() !== '' ? String(rawId).trim() : ''
+        if (case_no) {
+          if (existingSet.has(case_no)) { skipped++; continue }   // already uploaded before
+          if (seenInFile.has(case_no)) { dupInFile++; continue }  // repeated in this same file
+          seenInFile.add(case_no)
+        } else {
+          case_no = nextCaseNo(used)                               // no ID given → generate one
+          used.push(case_no)
+        }
+
+        toInsert.push({
+          case_no,
           report_type: reportType,
           facility: map.facility ? normFacility(g('facility'), facility) : facility,
           dept_code: matchDept(g('department')),
           ward: wardText || null,
+          admission_ward: g('admission_ward') != null && g('admission_ward') !== '' ? String(g('admission_ward')) : null,
+          race: g('race') != null && g('race') !== '' ? String(g('race')) : null,
+          time_of_death: g('time_of_death') != null && g('time_of_death') !== '' ? String(g('time_of_death')) : null,
           age: g('age') != null && g('age') !== '' ? Number(g('age')) : null,
           sex: toSex(g('sex')),
           admission_date: adm,
@@ -155,25 +209,31 @@ export function MmImport({
           is_bid: /bid|brought.?in.?dead|police|polis|forensic/i.test(wardText),
           status: 'Untriaged',
           report_date: new Date().toISOString().slice(0, 10),
-        }
-      })
-      // assign sequential case numbers (never derived from any identifier)
-      const used = [...existingCaseNos]
-      const withNo = all.map((row) => { const case_no = nextCaseNo(used); used.push(case_no); return { ...row, case_no } })
-      const { error } = await supabase.from('mm_cases').insert(withNo)
-      if (error) { setErr(error.message); setBusy(false); return }
-      onDone(withNo.length)
+        })
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from('mm_cases').insert(toInsert)
+        if (error) { setErr(error.message); setBusy(false); return }
+      }
+      const bits = [`${toInsert.length} new case${toInsert.length === 1 ? '' : 's'} added`]
+      if (skipped > 0) bits.push(`${skipped} already in portal — skipped`)
+      if (dupInFile > 0) bits.push(`${dupInFile} duplicate Case ID${dupInFile === 1 ? '' : 's'} in file — skipped`)
+      setSummary(bits.join(' · '))
+      onDone(toInsert.length)
     } catch (e) { setErr(e instanceof Error ? e.message : 'Import failed'); setBusy(false) }
   }
 
   return (
     <div className="mm-form">
       {err && <div className="mm-err">{err}</div>}
+      {summary && <div className="note" style={{ marginTop: 0, marginBottom: 12, borderColor: '#86EFAC', background: '#F0FDF4' }}>✓ {summary}</div>}
 
       <div className="note" style={{ marginTop: 0, marginBottom: 16 }}>
-        <b>Privacy:</b> only de-identified columns are imported. Patient <b>name</b> and <b>NRIC</b> are never
-        mapped or stored — they are dropped here in your browser and never sent to the portal. Each case is
-        given a new case number; that number is the only bridge back to your secured list.
+        <b>Privacy:</b> patient <b>name</b>, <b>NRIC</b> and <b>MRN</b> are never stored — they are dropped here in
+        your browser and never sent to the portal. The <b>Case ID</b> (e.g. MM/2026/0001) is the only identifier
+        kept, and it is also how re-uploads recognise cases already in the portal. Keep your Case ID ↔ MRN mapping
+        in your own offline sheet.
       </div>
 
       {step === 'pick' && (
@@ -227,13 +287,17 @@ export function MmImport({
           <div className="mm-sec">Preview (first {Math.min(preview.length, 60)})</div>
           <div className="note" style={{ marginBottom: 10 }}>Whole file imports as <b>{facility}</b>. If the file contains both facilities, map a <b>Facility</b> column above and each row is set from it.</div>
           <div className="vd-scroll"><table className="vd-table">
-            <thead><tr><th>Facility</th><th>Dept</th><th>Ward</th><th>Age/Sex</th><th>Admission</th><th>Death</th><th>Diagnosis</th><th>BID</th></tr></thead>
+            <thead><tr><th>Case ID</th><th>Status</th><th>Facility</th><th>Dept</th><th>Race</th><th>Adm ward</th><th>Ward @ death</th><th>Age/Sex</th><th>Admission</th><th>Death</th><th>ToD</th><th>Diagnosis</th><th>BID</th></tr></thead>
             <tbody>{preview.slice(0, 12).map((p, i) => (
               <tr key={i}>
+                <td>{p.case_no ?? <span className="badge b-warn">auto</span>}</td>
+                <td>{p.case_no ? (p.existing ? <span className="badge b-neut">already in portal</span> : <span className="badge b-info">new</span>) : <span className="badge b-warn">auto-number</span>}</td>
                 <td><span className={`badge ${p.facility === 'PPUiTM' ? 'b-blue' : 'b-info'}`}>{p.facility}</span></td>
                 <td>{p.dept_code ? departments.find((d) => d.code === p.dept_code)?.name : <span className="badge b-warn">unmatched</span>}</td>
-                <td>{p.ward ?? '—'}</td><td>{p.age ?? '?'} / {p.sex ?? '?'}</td>
+                <td>{p.race ?? '—'}</td><td>{p.admission_ward ?? '—'}</td><td>{p.ward ?? '—'}</td>
+                <td>{p.age ?? '?'} / {p.sex ?? '?'}</td>
                 <td>{p.admission_date ?? '—'}</td><td>{p.death_datetime?.slice(0, 10) ?? '—'}</td>
+                <td>{p.time_of_death ?? '—'}</td>
                 <td>{p.diagnosis ?? '—'}</td><td>{p.is_bid ? <span className="badge b-neut">BID</span> : ''}</td>
               </tr>
             ))}</tbody>
@@ -241,8 +305,8 @@ export function MmImport({
 
           <div className="mm-formnav">
             <button type="button" className="mm-btn" onClick={() => setStep('pick')}>Back</button>
-            <button type="button" className="mm-btn primary" disabled={busy} onClick={doImport}>
-              {busy ? 'Importing…' : `Import ${rows.length} case${rows.length === 1 ? '' : 's'}`}
+            <button type="button" className="mm-btn primary" disabled={busy || importCounts.nu === 0} onClick={doImport}>
+              {busy ? 'Importing…' : `Import ${importCounts.nu} new case${importCounts.nu === 1 ? '' : 's'}${importCounts.sk > 0 ? ` (${importCounts.sk} skipped)` : ''}`}
             </button>
           </div>
         </>

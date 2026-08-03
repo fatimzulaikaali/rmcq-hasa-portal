@@ -88,7 +88,7 @@ export function MmCaseForm({
 
       <div className="mm-sec">Intake · Part 1</div>
       <div className="mm-grid">
-        <L label="Case number"><input value={d.case_no} onChange={(e) => set({ case_no: e.target.value })} /></L>
+        <L label="Case ID (e.g. MM/2026/0001)"><input value={d.case_no} onChange={(e) => set({ case_no: e.target.value })} /></L>
         <L label="Facility">
           <select value={d.facility} onChange={(e) => set({ facility: e.target.value as MmFacility })}>
             {MM_FACILITIES.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
@@ -105,13 +105,16 @@ export function MmCaseForm({
             {departments.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
           </select>
         </L>
-        <L label="Ward / location"><input value={d.ward ?? ''} onChange={(e) => set({ ward: e.target.value })} /></L>
+        <L label="Race"><input value={d.race ?? ''} onChange={(e) => set({ race: e.target.value })} placeholder="e.g. Malay, Chinese, Indian" /></L>
+        <L label="Admission ward"><input value={d.admission_ward ?? ''} onChange={(e) => set({ admission_ward: e.target.value })} placeholder="Ward at admission" /></L>
+        <L label="Ward / location at death"><input value={d.ward ?? ''} onChange={(e) => set({ ward: e.target.value })} placeholder="Ward at time of death" /></L>
         <L label="Age"><input type="number" value={d.age ?? ''} onChange={(e) => set({ age: e.target.value === '' ? null : Number(e.target.value) })} /></L>
         <L label="Sex">
           <select value={d.sex ?? ''} onChange={(e) => set({ sex: e.target.value || null })}><option value="">—</option><option>M</option><option>F</option></select>
         </L>
         <L label="Admission date"><input type="date" value={d.admission_date ?? ''} onChange={(e) => set({ admission_date: e.target.value || null })} /></L>
         <L label="Death date/time"><input type="datetime-local" value={(d.death_datetime ?? '').slice(0, 16)} onChange={(e) => set({ death_datetime: e.target.value || null })} /></L>
+        <L label="Time of death"><input value={d.time_of_death ?? ''} onChange={(e) => set({ time_of_death: e.target.value })} placeholder="HH:MM" /></L>
         <L label="Length of stay (days)"><input value={losDays ?? ''} readOnly title="Derived from admission → death" /></L>
         <L label="Diagnosis"><input value={d.diagnosis ?? ''} onChange={(e) => set({ diagnosis: e.target.value })} /></L>
         <L label="Cause of death (ICD-10)"><input value={d.cause_icd ?? ''} onChange={(e) => set({ cause_icd: e.target.value })} /></L>

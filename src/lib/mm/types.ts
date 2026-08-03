@@ -1,8 +1,10 @@
 /* Types + helpers for the Mortality & Morbidity (M&M) monitoring module.
  *
- * De-identified by design: no patient name or NRIC anywhere. A case is keyed by
- * its case number; that number is the bridge to the secured (offline) mortality
- * list. The module is a governance/monitoring tool, not a clinical record. */
+ * Minimal-identifier by design: no patient NAME and no NRIC are ever stored.
+ * The case does retain the MRN as the linkage key back to the patient record,
+ * plus its own case number. Because MRN is a patient identifier, the module is
+ * restricted to department access with a full audit trail. It is a governance/
+ * monitoring tool, not a clinical record. */
 
 export type MmReportType = 'Mortality' | 'Morbidity'
 
@@ -47,11 +49,14 @@ export interface MmCase {
   report_type: MmReportType
   report_date: string | null
   dept_code: string | null
-  ward: string | null
+  ward: string | null              // ward / location at time of death
+  admission_ward: string | null    // ward at admission
+  race: string | null
   age: number | null
   sex: string | null
   admission_date: string | null
   death_datetime: string | null
+  time_of_death: string | null     // HH:MM (free text)
   los_days: number | null
   diagnosis: string | null
   cause_icd: string | null

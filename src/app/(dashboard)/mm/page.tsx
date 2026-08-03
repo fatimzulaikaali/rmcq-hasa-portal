@@ -234,7 +234,7 @@ export default function MmPage() {
           {empty && (
             <div className="card">
               <h3 className="vd-h">No cases yet</h3>
-              <p className="vd-sub">Import the monthly mortality list (Excel), or add a single case by hand. Cases are de-identified — no patient name or NRIC is stored.</p>
+              <p className="vd-sub">Import the monthly mortality list (Excel), or add a single case by hand. Fully de-identified — no patient name, NRIC or MRN is stored; the Case ID (MM/2026/0001) is the only identifier and drives duplicate-free re-uploads.</p>
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button type="button" className="mm-btn primary" onClick={() => setModal({ mode: 'import' })}>⬆ Import monthly list</button>
                 <button type="button" className="mm-btn" onClick={() => setModal({ mode: 'new' })}>+ New case</button>
@@ -293,11 +293,11 @@ export default function MmPage() {
                     <button type="button" className="mm-btn primary" style={{ marginLeft: 'auto' }} onClick={() => setModal({ mode: 'import' })}>⬆ Import monthly list</button>
                   </div>
                   <div className="card" style={{ padding: '6px 16px 10px' }}><div className="vd-scroll"><table className="vd-table">
-                    <thead><tr><th>Case No</th><th>Facility</th><th>Dept</th><th>Type</th><th>Age/Sex</th><th>Ward</th><th>Category</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Case ID</th><th>Facility</th><th>Dept</th><th>Type</th><th>Age/Sex</th><th>Race</th><th>Adm ward</th><th>Ward @ death</th><th>Category</th><th>Status</th></tr></thead>
                     <tbody>{filteredCases.map((c) => (
                       <tr key={c.id} className="mm-rowlink" onClick={() => openView(c.id)}>
                         <td><b>{c.case_no}</b></td><td><span className={`badge ${c.facility === 'PPUiTM' ? 'b-blue' : 'b-info'}`}>{c.facility}</span></td><td>{deptName(c.dept_code)}</td><td>{c.report_type}</td>
-                        <td>{c.age ?? '<1'} / {c.sex ?? '?'}</td><td>{c.ward ?? '—'}</td><td>{c.category_of_death ?? '—'}</td><td>{statusBadge(c.status)}</td></tr>
+                        <td>{c.age ?? '<1'} / {c.sex ?? '?'}</td><td>{c.race ?? '—'}</td><td>{c.admission_ward ?? '—'}</td><td>{c.ward ?? '—'}</td><td>{c.category_of_death ?? '—'}</td><td>{statusBadge(c.status)}</td></tr>
                     ))}</tbody>
                   </table></div></div>
                 </>
