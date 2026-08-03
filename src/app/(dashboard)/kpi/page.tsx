@@ -923,7 +923,7 @@ function SiqTab({ siq }: { siq: KpiSiqRecord[] }) {
                     <tr key={s.id}>
                       <td style={{ fontFamily: 'monospace' }}>{s.siq_id ?? '—'}</td>
                       <td style={{ fontFamily: 'monospace' }}>{s.kpi_id ?? '—'}</td>
-                      <td>{s.dept_code ?? '—'}</td>
+                      <td>{s.dept_code ?? s.department ?? '—'}</td>
                       <td title={s.kpi_name ?? ''} style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.kpi_name ?? '—'}</td>
                       <td>{s.frequency ?? '—'}</td>
                       <td>{s.trigger_period ?? '—'}</td>
@@ -957,7 +957,7 @@ function SiqTab({ siq }: { siq: KpiSiqRecord[] }) {
                   <tr key={s.id}>
                     <td style={{ fontFamily: 'monospace' }}>{s.siq_id ?? '—'}</td>
                     <td style={{ fontFamily: 'monospace' }}>{s.kpi_id ?? '—'}</td>
-                    <td>{s.dept_code ?? '—'}</td>
+                    <td>{s.dept_code ?? s.department ?? '—'}</td>
                     <td>{fmtDate(s.closure_date)}</td>
                   </tr>
                 ))}

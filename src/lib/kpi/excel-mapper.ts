@@ -117,6 +117,17 @@ const toIsoDate = (v: unknown): string | null => {
   if (!s || s.toUpperCase() === 'NA' || s === '-') return null
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
   if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  // Day-first (Malaysian) dates: DD/MM/YYYY or DD-MM-YYYY. This must come before
+  // the JS Date fallback, which assumes US MM/DD and either fails (day > 12) or
+  // silently swaps day and month.
+  const dmy = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(s)
+  if (dmy) {
+    let day = Number(dmy[1]); let mon = Number(dmy[2]); const yr = Number(dmy[3])
+    if (mon > 12 && day <= 12) { const t = day; day = mon; mon = t } // clearly written MM/DD
+    if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) {
+      return `${yr}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    }
+  }
   const d = new Date(s)
   if (Number.isNaN(d.getTime())) return null
   return toIsoDate(d)
