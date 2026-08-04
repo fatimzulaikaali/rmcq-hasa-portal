@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  KpiDefinition, KpiDataRow, Frequency, Period, TargetOperator,
+  KpiDefinition, KpiDataRow, KpiSiqRecord, Frequency, Period, TargetOperator, RiskLevel, SiqStatus,
   PERIODS, FREQUENCIES,
 } from '@/lib/kpi/types'
 import { scheduledPeriodsFor, computeAchievement, isOverdueDeadline, detectSiqTrigger } from '@/lib/kpi/dashboard-helpers'
@@ -27,11 +27,12 @@ function looksLikeRawFraction(v: string): boolean {
 }
 
 export function KpiDataEntry({
-  supabase, defs, data, year, onChanged, onGoToSiq,
+  supabase, defs, data, siq, year, onChanged, onGoToSiq,
 }: {
   supabase: SupabaseClient
   defs: KpiDefinition[]
   data: KpiDataRow[]
+  siq: KpiSiqRecord[]
   year: number
   onChanged: () => void
   onGoToSiq?: () => void
@@ -49,6 +50,14 @@ export function KpiDataEntry({
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [adding, setAdding] = useState(false)
+  const [siqFor, setSiqFor] = useState<KpiDefinition | null>(null)  // open the create-SIQ form for this KPI
+
+  // latest SIQ record per KPI (to show a status chip and avoid confusion)
+  const siqByKpi = useMemo(() => {
+    const m = new Map<string, KpiSiqRecord>()
+    for (const s of siq) if (s.kpi_id) m.set(s.kpi_id, s)
+    return m
+  }, [siq])
 
   const kpis = useMemo(
     () => defs.filter((d) => d.dept_code === deptCode).sort((a, b) => a.kpi_id.localeCompare(b.kpi_id)),
@@ -206,12 +215,119 @@ export function KpiDataEntry({
                       </td>
                     )
                   })}
-                  <td><button type="button" className="de-x" title="Hide this KPI" onClick={() => hideKpi(d)}>✕</button></td>
+                  <td className="de-actions">
+                    {siqByKpi.has(d.kpi_id) && (
+                      <button type="button" className={`de-siq-chip s-${(siqByKpi.get(d.kpi_id)!.status ?? 'Open').replace(/\s+/g, '-').toLowerCase()}`}
+                        title="View in SIQ Tracker" onClick={() => onGoToSiq?.()}>
+                        SIQ: {siqByKpi.get(d.kpi_id)!.status ?? 'Open'}
+                      </button>
+                    )}
+                    <button type="button" className="de-siq-add" title="Open a new SIQ for this KPI" onClick={() => setSiqFor(d)}>+ SIQ</button>
+                    <button type="button" className="de-x" title="Hide this KPI" onClick={() => hideKpi(d)}>✕</button>
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+      </div>
+
+      {siqFor && (
+        <SiqForm
+          supabase={supabase}
+          def={siqFor}
+          year={year}
+          trigger={triggered.get(siqFor.kpi_id) ?? null}
+          existingCount={siq.filter((s) => s.trigger_year === year).length}
+          onDone={() => { setSiqFor(null); setMsg('SIQ created — see the SIQ Tracker tab.'); onChanged() }}
+          onCancel={() => setSiqFor(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ---- Create-a-new-SIQ modal (writes to kpi_siq_records → shows in SIQ Tracker) ---- */
+const RISK_LEVELS: RiskLevel[] = ['Low', 'Moderate', 'High', 'Extreme']
+const SIQ_STATUSES: SiqStatus[] = ['Open', 'In Progress', 'Pending Department Feedback', 'Closed']
+
+function SiqForm({
+  supabase, def, year, trigger, existingCount, onDone, onCancel,
+}: {
+  supabase: SupabaseClient
+  def: KpiDefinition
+  year: number
+  trigger: { period: string | null; streak: number } | null
+  existingCount: number
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [owner, setOwner] = useState('')
+  const [risk, setRisk] = useState<RiskLevel>('Moderate')
+  const [status, setStatus] = useState<SiqStatus>('Open')
+  const [dateIssued, setDateIssued] = useState(today)
+  const [dueDate, setDueDate] = useState('')
+  const [actionPlan, setActionPlan] = useState('')
+  const [remarks, setRemarks] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save() {
+    setBusy(true); setErr('')
+    const siqId = `SIQ/${year}/${String(existingCount + 1).padStart(3, '0')}`
+    const { error } = await supabase.from('kpi_siq_records').insert({
+      siq_id: siqId,
+      kpi_id: def.kpi_id,
+      website_kpi_id: def.website_kpi_id,
+      dept_code: def.dept_code,
+      department: def.department,
+      kpi_name: def.kpi_name,
+      frequency: def.frequency,
+      trigger_year: year,
+      trigger_period: trigger?.period ?? null,
+      trigger_basis: trigger ? `${trigger.streak} consecutive Not Achieved` : 'Manually opened',
+      date_issued: dateIssued || null,
+      due_date: dueDate || null,
+      owner: owner.trim() || null,
+      risk_level: risk,
+      status,
+      action_plan: actionPlan.trim() || null,
+      remarks: remarks.trim() || null,
+    })
+    if (error) { setErr(error.message); setBusy(false); return }
+    onDone()
+  }
+
+  return (
+    <div className="de-modal-bg" onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="de-modal">
+        <div className="de-modal-head">
+          <div>
+            <div className="de-modal-title">Open SIQ</div>
+            <div className="de-modal-sub">{def.kpi_name}</div>
+          </div>
+          <button type="button" className="de-x" onClick={onCancel}>✕</button>
+        </div>
+        {err && <div className="de-alert err">{err}</div>}
+        {trigger && <div className="de-note">Triggered at <b>{trigger.period}</b> · {trigger.streak} consecutive Not Achieved.</div>}
+        <div className="de-add-grid">
+          <label className="de-field"><span>Owner (PIC)</span><input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="Name / role" /></label>
+          <label className="de-field"><span>Risk level</span><select value={risk} onChange={(e) => setRisk(e.target.value as RiskLevel)}>{RISK_LEVELS.map((r) => <option key={r}>{r}</option>)}</select></label>
+          <label className="de-field"><span>Date issued</span><input type="date" value={dateIssued} onChange={(e) => setDateIssued(e.target.value)} /></label>
+          <label className="de-field"><span>Due date</span><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
+          <label className="de-field"><span>Status</span><select value={status} onChange={(e) => setStatus(e.target.value as SiqStatus)}>{SIQ_STATUSES.map((s) => <option key={s}>{s}</option>)}</select></label>
+        </div>
+        <label className="de-field" style={{ marginTop: 8 }}><span>Action plan</span>
+          <textarea rows={3} value={actionPlan} onChange={(e) => setActionPlan(e.target.value)} placeholder="Corrective / improvement actions" />
+        </label>
+        <label className="de-field" style={{ marginTop: 8 }}><span>Remarks</span>
+          <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+        </label>
+        <div className="de-add-nav">
+          <button type="button" className="de-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="de-btn primary" disabled={busy} onClick={save}>{busy ? 'Creating…' : 'Create SIQ'}</button>
+        </div>
       </div>
     </div>
   )

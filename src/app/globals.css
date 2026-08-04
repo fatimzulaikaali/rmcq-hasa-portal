@@ -1296,3 +1296,16 @@ body{counter-reset:rcpage;}
 .de-siq-pill { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--red-lt); color: var(--red); border: 1px solid var(--red); font-size: 10px; font-weight: 800; cursor: pointer; vertical-align: middle; }
 .de-siq-pill:hover { background: var(--red); color: #fff; }
 .de-row-siq .de-kpi-col { box-shadow: inset 3px 0 0 var(--red); }
+/* Create-SIQ from data-entry grid */
+.de-actions { white-space: nowrap; display: flex; gap: 4px; align-items: center; justify-content: flex-end; }
+.de-siq-add { border: 1px solid var(--amber); background: var(--amber-lt); color: var(--amber); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.de-siq-add:hover { background: var(--amber); color: #fff; }
+.de-siq-chip { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; cursor: pointer; border: 1px solid var(--border); white-space: nowrap; }
+.de-siq-chip.s-open, .de-siq-chip.s-in-progress, .de-siq-chip.s-pending-department-feedback { background: var(--amber-lt); color: var(--amber); border-color: var(--amber); }
+.de-siq-chip.s-closed { background: var(--green-lt); color: var(--green); border-color: var(--green); }
+.de-field textarea { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; resize: vertical; }
+.de-modal-bg { position: fixed; inset: 0; background: rgba(15,20,25,.45); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 60; overflow: auto; }
+.de-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-md); width: 640px; max-width: 100%; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+.de-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.de-modal-title { font-weight: 800; font-size: 16px; color: var(--text); }
+.de-modal-sub { font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
