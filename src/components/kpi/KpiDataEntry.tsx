@@ -6,7 +6,7 @@ import {
   KpiDefinition, KpiDataRow, Frequency, Period, TargetOperator,
   PERIODS, FREQUENCIES,
 } from '@/lib/kpi/types'
-import { scheduledPeriodsFor, computeAchievement, isOverdueDeadline } from '@/lib/kpi/dashboard-helpers'
+import { scheduledPeriodsFor, computeAchievement, isOverdueDeadline, detectSiqTrigger } from '@/lib/kpi/dashboard-helpers'
 
 /* Manual data-entry grid: pick a department, then a year-grid of its KPIs
  * (rows) x 12 months (columns). Only each KPI's scheduled periods are editable.
@@ -27,13 +27,14 @@ function looksLikeRawFraction(v: string): boolean {
 }
 
 export function KpiDataEntry({
-  supabase, defs, data, year, onChanged,
+  supabase, defs, data, year, onChanged, onGoToSiq,
 }: {
   supabase: SupabaseClient
   defs: KpiDefinition[]
   data: KpiDataRow[]
   year: number
   onChanged: () => void
+  onGoToSiq?: () => void
 }) {
   // department options (from active defs)
   const deptOpts = useMemo(() => {
@@ -53,6 +54,17 @@ export function KpiDataEntry({
     () => defs.filter((d) => d.dept_code === deptCode).sort((a, b) => a.kpi_id.localeCompare(b.kpi_id)),
     [defs, deptCode],
   )
+
+  // SIQ triggers (from saved data): a KPI whose consecutive Not-Achieved streak
+  // has hit its threshold. Recomputed after each save/refresh.
+  const triggered = useMemo(() => {
+    const m = new Map<string, { period: string | null; streak: number }>()
+    for (const d of kpis) {
+      const t = detectSiqTrigger(d, data, year)
+      if (t.triggered) m.set(d.kpi_id, { period: t.triggerPeriod, streak: t.consecutive })
+    }
+    return m
+  }, [kpis, data, year])
 
   // saved results for this year: (kpi_id|period) -> result
   const saved = useMemo(() => {
@@ -125,6 +137,13 @@ export function KpiDataEntry({
       {err && <div className="de-alert err">{err}</div>}
       {msg && <div className="de-alert ok">{msg}</div>}
 
+      {triggered.size > 0 && (
+        <div className="de-siq-banner">
+          <span>⚠️ <b>{triggered.size}</b> KPI{triggered.size === 1 ? ' has' : 's have'} triggered an SIQ in this department (consecutive months below target).</span>
+          {onGoToSiq && <button type="button" className="de-siq-link" onClick={onGoToSiq}>Open SIQ Tracker →</button>}
+        </div>
+      )}
+
       {adding && (
         <AddKpi
           supabase={supabase}
@@ -160,8 +179,15 @@ export function KpiDataEntry({
             {kpis.map((d) => {
               const sched = new Set(scheduledPeriodsFor(d.frequency))
               return (
-                <tr key={d.kpi_id}>
-                  <td className="de-kpi-col" title={d.kpi_name}>{d.kpi_name}</td>
+                <tr key={d.kpi_id} className={triggered.has(d.kpi_id) ? 'de-row-siq' : ''}>
+                  <td className="de-kpi-col" title={d.kpi_name}>
+                    {d.kpi_name}
+                    {triggered.has(d.kpi_id) && (
+                      <button type="button" className="de-siq-pill" title="SIQ triggered — open SIQ Tracker" onClick={() => onGoToSiq?.()}>
+                        ⚠ SIQ
+                      </button>
+                    )}
+                  </td>
                   <td className="de-mono">{d.target ?? '—'}</td>
                   <td className="de-freq">{d.frequency[0]}</td>
                   {PERIODS.map((p) => {

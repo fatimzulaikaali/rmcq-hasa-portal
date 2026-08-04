@@ -246,7 +246,7 @@ export default function KpiPage() {
           {loading && !loadError && <Loader />}
           {!loading && !loadError && (
             <>
-              {tab === 'data-entry'  && <KpiDataEntry supabase={supabase} defs={defs!} data={data!} year={filters.year} onChanged={refresh} />}
+              {tab === 'data-entry'  && <KpiDataEntry supabase={supabase} defs={defs!} data={data!} year={filters.year} onChanged={refresh} onGoToSiq={() => setTab('siq')} />}
               {tab === 'overview'    && <OverviewTab defs={filteredDefs} data={filteredData} siq={siq!} year={filters.year} />}
               {tab === 'by-dept'     && <ByDeptTab defs={filteredDefs} data={filteredData} year={filters.year} />}
               {tab === 'compliance'  && <ComplianceTab defs={filteredDefs} data={filteredData} year={filters.year} />}
