@@ -511,17 +511,25 @@ function ByDeptTab({ defs, data, year }: { defs: KpiDefinition[]; data: KpiDataR
                   <td>{d.submitted}</td>
                   <td>{d.pending > 0 ? <span className="b b-red">{d.pending}</span> : 0}</td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 80, height: 8, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{ width: `${d.pct}%`, height: '100%', background: d.pct >= 80 ? 'var(--green-md)' : d.pct >= 50 ? 'var(--amber-md)' : 'var(--red-md)' }} />
+                    {d.scheduledDue === 0 ? (
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>— nothing due yet</span>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 80, height: 8, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ width: `${d.pct}%`, height: '100%', background: d.pct >= 80 ? 'var(--green-md)' : d.pct >= 50 ? 'var(--amber-md)' : 'var(--red-md)' }} />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: d.pct >= 80 ? 'var(--green)' : d.pct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{d.pct}%</span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: d.pct >= 80 ? 'var(--green)' : d.pct >= 50 ? 'var(--amber)' : 'var(--red)' }}>{d.pct}%</span>
-                    </div>
+                    )}
                   </td>
                   <td>
-                    <span className={`b b-${complianceTone(d.pct)}`}>
-                      {d.pct >= 80 ? 'On Track' : d.pct >= 50 ? 'At Risk' : 'Critical'}
-                    </span>
+                    {d.scheduledDue === 0 ? (
+                      <span className="b" style={{ background: 'var(--bg)', color: 'var(--muted)' }}>Nothing due</span>
+                    ) : (
+                      <span className={`b b-${complianceTone(d.pct)}`}>
+                        {d.pct >= 80 ? 'On Track' : d.pct >= 50 ? 'At Risk' : 'Critical'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
