@@ -23,22 +23,21 @@ import {
   KpiPeriodKey, KPI_PERIOD_OPTIONS, kpiPeriodLabel, kpiPeriodMonths, fmtDate,
 } from '@/lib/kpi/dashboard-helpers'
 import { parseKpiWorkbook } from '@/lib/kpi/excel-mapper'
+import { KpiDataEntry } from '@/components/kpi/KpiDataEntry'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler, Title)
 
 type TabId =
-  | 'overview' | 'by-dept' | 'compliance' | 'achievement'
+  | 'data-entry' | 'overview' | 'by-dept' | 'compliance' | 'achievement'
   | 'performance' | 'siq' | 'kpi-list' | 'report-card' | 'upload'
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: 'data-entry',  label: 'Data Entry',           icon: '✏️' },
   { id: 'overview',    label: 'Overview',             icon: '📊' },
-  { id: 'by-dept',     label: 'By Department',        icon: '🏢' },
-  { id: 'compliance',  label: 'Submission Compliance',icon: '📅' },
-  { id: 'achievement', label: 'Achievement',          icon: '🎯' },
-  { id: 'performance', label: 'Performance Grid',     icon: '📈' },
-  { id: 'siq',         label: 'SIQ Tracker',          icon: '⚠️' },
-  { id: 'kpi-list',    label: 'KPI List',             icon: '📋' },
+  { id: 'compliance',  label: 'Compliance',           icon: '📅' },
+  { id: 'achievement', label: 'Performance',          icon: '🎯' },
   { id: 'report-card', label: 'Report Card',          icon: '📄' },
+  { id: 'siq',         label: 'SIQ Tracker',          icon: '⚠️' },
   { id: 'upload',      label: 'Upload Workbook',      icon: '⬆' },
 ]
 
@@ -64,8 +63,10 @@ export default function KpiPage() {
   const [depts, setDepts] = useState<KpiDepartment[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [filters, setFilters] = useState<KpiFilters>(DEFAULT_FILTERS)
-  const [tab, setTab] = useState<TabId>('overview')
+  const [tab, setTab] = useState<TabId>('data-entry')
   const [refreshTick, setRefreshTick] = useState(0)
+  const supabase = useMemo(() => createClient(), [])
+  const refresh = () => setRefreshTick((t) => t + 1)
 
   async function signOut() {
     const supabase = createClient()
@@ -245,6 +246,7 @@ export default function KpiPage() {
           {loading && !loadError && <Loader />}
           {!loading && !loadError && (
             <>
+              {tab === 'data-entry'  && <KpiDataEntry supabase={supabase} defs={defs!} data={data!} year={filters.year} onChanged={refresh} />}
               {tab === 'overview'    && <OverviewTab defs={filteredDefs} data={filteredData} siq={siq!} year={filters.year} />}
               {tab === 'by-dept'     && <ByDeptTab defs={filteredDefs} data={filteredData} year={filters.year} />}
               {tab === 'compliance'  && <ComplianceTab defs={filteredDefs} data={filteredData} year={filters.year} />}
@@ -395,8 +397,9 @@ function OverviewTab({ defs, data, siq, year }: { defs: KpiDefinition[]; data: K
       <div className="mrow" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
         <MetricCard tone="blue"  label="Total KPIs"          value={kpiCount} />
         <MetricCard tone="teal"  label="Submission Compliance" value={`${compliancePct}%`} sub={`${submitted}/${scheduledDue} due`} />
-        <MetricCard tone="green" label="Achievement Rate"    value={`${achievementPct}%`} sub={`${achieved} achieved`} />
-        <MetricCard tone="red"   label="Pending Submission"  value={pending} sub="Past 25th deadline" />
+        <MetricCard tone="green" label="Achieved"            value={achieved} sub={`${achievementPct}% of measured`} />
+        <MetricCard tone="red"   label="Not Achieved"        value={notAchieved} sub="Below target" />
+        <MetricCard tone="amber" label="Pending Submission"  value={pending} sub="Past 25th deadline, overdue" />
         <MetricCard tone="amber" label="Active SIQs"         value={siqOpen} sub={`${siqClosed} closed`} />
         <MetricCard tone="purple" label="Live SIQ Triggers"  value={liveSiqs} sub="From current data" />
       </div>

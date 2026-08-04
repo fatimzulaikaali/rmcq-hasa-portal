@@ -88,6 +88,18 @@ const toNum = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
+/* Normalize a result value for a percentage KPI so a raw decimal Excel cell
+ * (e.g. 0.7111 or 1) is stored as a proper percentage ("71.11%", "100%").
+ * Non-percentage KPIs and values that already carry a % are left untouched. */
+const normalizeResult = (raw: string | null, isPercent: boolean): string | null => {
+  if (raw == null || raw === '') return raw
+  if (!isPercent || raw.includes('%')) return raw
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return raw
+  const pct = Math.abs(n) <= 1.5 ? n * 100 : n   // 0..1.5 is a fraction; >1.5 already percent-points
+  return `${Math.round(pct * 100) / 100}%`
+}
+
 /**
  * Convert any plausible cell value (Excel serial number, JS Date, or string)
  * to a YYYY-MM-DD calendar day. Timezone-independent.
@@ -238,6 +250,12 @@ export function parseKpiWorkbook(buf: ArrayBuffer): KpiParseResult {
     errors.push("Missing sheet 'KPI_Master'")
   }
 
+  // Percentage KPIs (by target or name) — their results get normalized to "NN%".
+  const pctKpis = new Set<string>()
+  for (const d of definitions) {
+    if ((d.target ?? '').includes('%') || /percentage|peratus/i.test(d.kpi_name)) pctKpis.add(d.kpi_id)
+  }
+
   // ------ KPI_Data ------
   const data: ParsedDataRow[] = []
   if (wb.Sheets['KPI_Data']) {
@@ -252,7 +270,7 @@ export function parseKpiWorkbook(buf: ArrayBuffer): KpiParseResult {
         year,
         period,
         period_order: toInt(getCol(r, 'Period_Order')),
-        result: trim(getCol(r, 'Result')),
+        result: normalizeResult(trim(getCol(r, 'Result')), pctKpis.has(kpi_id)),
       })
     }
     sheetCounts['KPI_Data'] = data.length
