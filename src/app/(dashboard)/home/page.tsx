@@ -37,6 +37,8 @@ const MODULES: Module[] = [
     desc: 'Mortality & Morbidity review workflow, action-plan audit and MSQH PI 01 reporting — de-identified.', global: false },
   { href: '/acc', icon: '📋', title: 'Accreditation', accent: 'var(--purple)',
     desc: 'MSQH 7th Edition — Standard 24 criteria and evidence of compliance.', global: true },
+  { href: '/tna', icon: '🎓', title: 'TNA & Kompetensi', accent: 'var(--blue)',
+    desc: 'Analisis Keperluan Latihan Jabatan RMCQ — penilaian kompetensi staf, jurang dan keutamaan latihan.', global: false },
 ]
 
 export default function HomePage() {

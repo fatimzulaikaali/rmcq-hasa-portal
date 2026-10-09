@@ -68,6 +68,7 @@ export function RiskSidebar({ onClose, children }: {
           {showGlobal && (
             <Link href="/acc" className="nav-item"><span className="nav-icon">📋</span><span>Accreditation</span></Link>
           )}
+          <Link href="/tna" className="nav-item"><span className="nav-icon">🎓</span><span>TNA &amp; Kompetensi</span></Link>
         </div>
         {children}
       </aside>

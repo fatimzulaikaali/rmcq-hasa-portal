@@ -34,3 +34,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# TNA staff seed (personal data: names + staff numbers)
+sql/*-seed-staff.sql

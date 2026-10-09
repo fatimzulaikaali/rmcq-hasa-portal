@@ -1309,3 +1309,93 @@ body{counter-reset:rcpage;}
 .de-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .de-modal-title { font-weight: 800; font-size: 16px; color: var(--text); }
 .de-modal-sub { font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+
+/* ================= TNA & KOMPETENSI ================= */
+/* --- public staff link (/tna/s/[token]) — sits on top of srv-* --- */
+.tna-ok{background:var(--green-lt);border:1px solid #CFE4B0;color:var(--green);border-radius:10px;padding:10px 13px;font-size:13.5px;font-weight:600;}
+.tna-info{background:var(--blue-lt);border:1px solid #C4DDF5;color:var(--blue);border-radius:10px;padding:10px 13px;font-size:13.5px;font-weight:600;}
+.tna-kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:10px 0 16px;font-size:14px;}
+.tna-kv dt{color:var(--muted);font-size:12.5px;}
+.tna-kv dd{font-weight:600;color:#16202E;}
+.tna-seg{display:flex;background:#fff;border:1px solid #D1D5DB;border-radius:12px;padding:3px;margin-bottom:12px;}
+.tna-seg button{flex:1;border:0;background:none;padding:9px 8px;border-radius:9px;font:inherit;font-size:13.5px;font-weight:600;color:#374151;cursor:pointer;}
+.tna-seg button[aria-pressed=true]{background:#16202E;color:#fff;}
+.tna-sticky{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0 6px;margin-bottom:6px;}
+.tna-sticky-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#16202E;}
+.tna-save{font-size:12px;color:var(--muted);}
+.tna-save.saved{color:var(--green);}
+.tna-save.error{color:var(--red);font-weight:600;}
+.tna-secnav{display:flex;gap:6px;overflow-x:auto;padding:8px 0 2px;-webkit-overflow-scrolling:touch;}
+.tna-secnav button{flex-shrink:0;border:1px solid #D1D5DB;background:#fff;border-radius:99px;padding:6px 12px;font:inherit;font-size:12.5px;color:#374151;cursor:pointer;white-space:nowrap;}
+.tna-secnav button.full{border-color:#A9CF85;background:var(--green-lt);color:var(--green);}
+.tna-secnav button[aria-pressed=true]{background:#16202E;border-color:#16202E;color:#fff;}
+.tna-comp{border-left:4px solid #D1D5DB;}
+.tna-comp.done{border-left-color:var(--green-md);}
+.tna-comp-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
+.tna-code{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--blue);text-transform:uppercase;}
+.tna-comp-name{font-size:16px;font-weight:700;color:#16202E;line-height:1.35;margin-top:2px;}
+.tna-req{font-size:10.5px;color:var(--muted);text-align:right;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0;line-height:1.6;}
+.tna-lv{display:inline-block;border-radius:99px;padding:2px 9px;font-size:11.5px;font-weight:700;text-transform:none;letter-spacing:0;}
+.tna-lv.lv1{background:#F1EFE8;color:#5F5E5A;}
+.tna-lv.lv2{background:#E6F1FB;color:#185FA5;}
+.tna-lv.lv3{background:#E1F5EE;color:#0F6E56;}
+.tna-lv.lv4{background:#FAEEDA;color:#854F0B;}
+.tna-lv.lv5{background:#EEEDFE;color:#534AB7;}
+.tna-def{font-size:13px;color:#4B5563;line-height:1.55;margin:8px 0 4px;}
+.tna-opts{display:flex;flex-direction:column;gap:7px;margin-top:12px;}
+.tna-opt{display:flex;gap:10px;align-items:flex-start;border:1.5px solid #E5E7EB;border-radius:11px;padding:10px 12px;cursor:pointer;background:#fff;}
+.tna-opt input{margin-top:3px;accent-color:#16202E;flex-shrink:0;}
+.tna-opt.req{border-style:dashed;border-color:#9CA3AF;}
+.tna-opt.on{border-style:solid;border-color:#16202E;background:#F3F4F6;}
+.tna-opt-n{display:block;font-size:13.5px;font-weight:700;color:#16202E;}
+.tna-opt-n em{font-style:normal;font-weight:600;font-size:11.5px;color:var(--amber);margin-left:4px;}
+.tna-opt-i{display:block;font-size:12.5px;color:#4B5563;line-height:1.5;margin-top:2px;}
+.tna-never{display:flex;gap:9px;align-items:flex-start;margin-top:10px;background:var(--amber-lt);border:1px solid #E9D5B2;border-radius:10px;padding:9px 11px;font-size:13px;color:#5B3A08;cursor:pointer;}
+.tna-never input{margin-top:3px;flex-shrink:0;}
+.tna-note{margin-top:10px;}
+.tna-note summary{font-size:12.5px;color:var(--blue);cursor:pointer;padding:4px 0;}
+.tna-note textarea{margin-top:6px;}
+.tna-nav{display:flex;gap:10px;justify-content:space-between;margin-top:16px;flex-wrap:wrap;}
+.tna-plan{border:1px solid #E5E7EB;border-radius:11px;padding:11px 13px;margin-top:10px;}
+.tna-plan-h{font-weight:700;color:#16202E;font-size:14px;}
+.tna-plan-gap{font-size:12.5px;color:var(--muted);margin-top:3px;}
+.tna-plan-intro{font-size:12.5px;color:var(--amber);margin-top:5px;font-weight:600;}
+.tna-plan-tr{font-size:13px;color:#16202E;margin-top:6px;}
+.tna-confirm{display:flex;gap:9px;align-items:flex-start;margin:16px 0 4px;font-size:13.5px;color:#16202E;cursor:pointer;}
+.tna-confirm input{margin-top:3px;flex-shrink:0;}
+.tna-tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:12px;}
+.tna-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
+.tna-tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:7px 6px;border-bottom:1px solid #E5E7EB;white-space:nowrap;}
+.tna-tbl td{padding:7px 6px;border-bottom:1px solid #F0EFEA;vertical-align:top;}
+.tna-tbl td.c,.tna-tbl th.c{text-align:center;white-space:nowrap;}
+.tna-miss{color:var(--red);font-weight:600;}
+.tna-tag{display:inline-block;margin-top:3px;font-size:10.5px;background:var(--amber-lt);color:var(--amber);border-radius:6px;padding:1px 6px;font-weight:600;}
+
+/* --- portal module (/tna) --- */
+.tna-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+.tna-toolbar select,.tna-toolbar input{padding:8px 11px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;font-family:inherit;background:var(--surface);color:var(--text);outline:none;}
+.tna-toolbar .sp{margin-left:auto;}
+.tna-hm{display:grid;gap:3px;font-size:11px;}
+.tna-hm-cell{text-align:center;border-radius:5px;padding:6px 2px;font-weight:700;min-width:30px;}
+.tna-hm-h{font-size:10px;font-weight:700;color:var(--muted);text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);padding:4px 0;white-space:nowrap;}
+.tna-hm-name{font-size:12px;font-weight:600;white-space:nowrap;padding-right:6px;display:flex;align-items:center;}
+.tna-g0{background:#EAF3DE;color:#3B6D11;}
+.tna-g1{background:#FAEEDA;color:#854F0B;}
+.tna-g2{background:#F7C9A0;color:#7A3A06;}
+.tna-g3{background:#E24B4A;color:#fff;}
+.tna-gna{background:#F1EFE8;color:#B4B2AA;}
+.tna-lvsel{padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;background:var(--surface);}
+.tna-lvsel.diff{border-color:var(--amber-md);background:var(--amber-lt);font-weight:700;}
+.tna-inline{width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;}
+.tna-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.tna-linkbox{background:var(--bg);border:1px dashed var(--border);border-radius:9px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all;margin:8px 0;}
+.tna-muted{color:var(--muted);font-size:12px;}
+.tna-textarea{width:100%;min-height:70px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;}
+.mm-field textarea{padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;width:100%;min-height:64px;}
+.tna-ok-sm{color:var(--green);font-weight:600;font-size:12px;}
+@media (max-width:760px){
+  .tna-kv{grid-template-columns:1fr;gap:0 0;}
+  .tna-kv dd{margin-bottom:6px;}
+  .tna-comp-name{font-size:15px;}
+  .tna-toolbar .sp{margin-left:0;}
+}
