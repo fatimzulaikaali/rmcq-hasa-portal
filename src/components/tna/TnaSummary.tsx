@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { CLUSTERS, PRIORITY_BADGE, STATUS_BADGE, STATUS_LABEL, clusterOrder, priorityLabel, type AssignmentStatus } from '@/lib/tna/types'
+import { CLUSTERS, PRIORITY_BADGE, STATUS_BADGE, STATUS_LABEL, clusterOrder, gapScore, priorityLabel, type AssignmentStatus } from '@/lib/tna/types'
 import { indexData, type TabProps } from './shared'
 
 /* Ringkasan — progress tiles, gap heatmap (staff × competency) and the
@@ -44,8 +44,9 @@ export function TnaSummary({ data }: TabProps) {
 
   const prio = data.priority.map((r) => {
     const c = ix.compByCode.get(r.competency_code)
-    const score = r.staff_validated > 0 ? r.gap_score * r.impact * r.strategic : null
-    return { r, c, score, label: priorityLabel(score) }
+    const gs = gapScore(r.staff_with_gap, r.gap_points, r.staff_never_exposed)
+    const score = r.staff_validated > 0 ? gs * r.impact * r.strategic : null
+    return { r, c, gs, score, label: priorityLabel(score) }
   }).filter((x) => x.c && x.r.staff_with_gap > 0)
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.r.competency_code.localeCompare(b.r.competency_code, undefined, { numeric: true }))
 
@@ -101,12 +102,12 @@ export function TnaSummary({ data }: TabProps) {
           <div className="vd-scroll"><table className="vd-table">
             <thead><tr><th>Kod</th><th>Kompetensi</th><th>Kluster</th><th>Staf jurang</th><th>Mata jurang</th><th>Belum terdedah</th><th>Skor jurang</th><th>Impak</th><th>Strategik</th><th>Skor</th><th>Keutamaan</th></tr></thead>
             <tbody>
-              {prio.map(({ r, c, score, label }) => (
+              {prio.map(({ r, c, gs, score, label }) => (
                 <tr key={r.competency_code}>
                   <td><b>{r.competency_code}</b></td><td>{c!.name_ms}</td>
                   <td>{CLUSTERS.find((x) => x.key === c!.cluster)?.label ?? c!.cluster}</td>
                   <td>{r.staff_with_gap} / {r.staff_validated}</td><td>{r.gap_points}</td><td>{r.staff_never_exposed || '—'}</td>
-                  <td>{r.gap_score}</td><td>{r.impact}</td><td>{r.strategic}</td><td><b>{score ?? '—'}</b></td>
+                  <td>{gs}</td><td>{r.impact}</td><td>{r.strategic}</td><td><b>{score ?? '—'}</b></td>
                   <td><span className={`badge ${PRIORITY_BADGE[label]}`}>{label}</span></td>
                 </tr>
               ))}

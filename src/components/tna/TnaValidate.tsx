@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { CLUSTERS, LEVELS, LEVEL_NAME, STATUS_BADGE, STATUS_LABEL, clusterOrder, errMsg, gapOf, levelName } from '@/lib/tna/types'
-import { fmtDate, indexData, type TabProps } from './shared'
+import { RequestsTable, fmtDate, indexData, type TabProps } from './shared'
 
 type Row = { agreed: number | null; note: string }
 
@@ -125,6 +125,8 @@ export function TnaValidate({ data, supabase, userId, reload, flash, focus }: Ta
               })}
             </tbody>
           </table></div>
+          <div className="mm-sec">Kursus dimohon oleh staf</div>
+          <RequestsTable list={data.requests.filter((q) => q.assignment_id === a.id)} comps={ix.compByCode} />
           <div className="mm-formnav">
             {locked ? (
               <button type="button" className="mm-btn" disabled={busy} onClick={() => void reopen()}>↺ Buka semula</button>

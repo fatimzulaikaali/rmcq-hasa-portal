@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { CLUSTERS, LEVELS, LEVEL_NAME, clusterOrder, levelName } from '@/lib/tna/types'
+import { CLUSTERS, LEVELS, LEVEL_NAME, MONTHS, REQ_PRIORITIES, clusterOrder, levelName, rm } from '@/lib/tna/types'
 
 type Item = {
   code: string; layer: 'A' | 'B'; cluster: string; name: string; definition: string | null
@@ -23,7 +23,14 @@ type Payload = {
   staff: { name: string }
   position: { title: string; grade: string; grade_level: number; unit: string }
   items: Item[] | null
+  requests: ReqIn[] | null
 }
+type ReqIn = { title: string; provider: string | null; competency: string | null; reason: string | null; month: number | null; cost: number | null; priority: string | null }
+/* Course request rows are kept as strings while editing; the RPC validates and converts. */
+type Req = { title: string; provider: string; competency: string; reason: string; month: string; cost: string; priority: string }
+const EMPTY_REQ: Req = { title: '', provider: '', competency: '', reason: '', month: '', cost: '', priority: '' }
+const MAX_REQ = 10
+const REQ_SEC = '__req'
 type RpcErr = { ok: false; error: string; message: string }
 type Step = 'verify' | 'profile' | 'assess' | 'review' | 'done'
 type Answer = { level: number | null; note: string; never: boolean }
@@ -46,6 +53,9 @@ export default function TnaStaffLinkPage() {
   const pending = useRef<Record<string, Answer>>({})
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [tab, setTab] = useState<'assess' | 'plan'>('assess')
+  const [reqs, setReqs] = useState<Req[]>([])
+  const reqTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reqDirty = useRef(false)
 
   // Resume within the same browser tab (refresh) without re-typing the staff no.
   useEffect(() => {
@@ -76,6 +86,10 @@ export default function TnaStaffLinkPage() {
     const a: Record<string, Answer> = {}
     for (const it of items) a[it.code] = { level: it.self_level, note: it.self_note ?? '', never: it.never_exposed }
     setAns(a)
+    setReqs((r.requests ?? []).map((q) => ({
+      title: q.title ?? '', provider: q.provider ?? '', competency: q.competency ?? '', reason: q.reason ?? '',
+      month: q.month ? String(q.month) : '', cost: q.cost != null ? String(q.cost) : '', priority: q.priority ?? '',
+    })))
     setSec(items[0]?.cluster ?? '')
     const st = r.assignment.status
     if (st === 'submitted' || st === 'validated') { setStep('done'); setTab(st === 'validated' ? 'plan' : 'assess') }
@@ -117,10 +131,32 @@ export default function TnaStaffLinkPage() {
     setAns({ ...ans, [code]: next }); queueSave(code, next)
   }
 
+  /* ---- course requests: the whole list is saved together (debounced) ---- */
+  function changeReqs(next: Req[]) {
+    setReqs(next); reqDirty.current = true; setSaveState('saving')
+    if (reqTimer.current) clearTimeout(reqTimer.current)
+    reqTimer.current = setTimeout(() => { void flushReqs(next) }, 900)
+  }
+  async function flushReqs(list: Req[] = reqs) {
+    if (!reqDirty.current) return true
+    const payload = list.filter((q) => q.title.trim()).map((q) => ({
+      title: q.title.trim(), provider: q.provider.trim() || null, competency: q.competency || null, reason: q.reason.trim() || null,
+      month: q.month || null, cost: q.cost.trim().replace(/,/g, '') || null, priority: q.priority || null,
+    }))
+    const { data: res, error } = await supabase.rpc('tna_link_save_requests', { p_token: token, p_staff_no: staffNo.trim(), p_requests: payload })
+    if (error) { setSaveState('error'); setSaveErr(`[${error.code ?? ''}] ${error.message}`); return false }
+    const r = res as { ok: boolean; error?: string; message?: string }
+    if (!r.ok) { setSaveState('error'); setSaveErr(`${r.message} (kod: ${r.error})`); return false }
+    reqDirty.current = false; setSaveState('saved'); setSaveErr('')
+    return true
+  }
+  const setReq = (i: number, patch: Partial<Req>) => changeReqs(reqs.map((q, j) => (j === i ? { ...q, ...patch } : q)))
+
   async function submit() {
     setBusy(true); setErr('')
     if (timer.current) clearTimeout(timer.current)
-    const ok = await flush()
+    if (reqTimer.current) clearTimeout(reqTimer.current)
+    const ok = (await flush()) && (await flushReqs())
     if (!ok) { setBusy(false); setErr('Jawapan terakhir belum disimpan. Semak sambungan internet dan cuba lagi.'); return }
     const { data: res, error } = await supabase.rpc('tna_link_submit', { p_token: token, p_staff_no: staffNo.trim() })
     setBusy(false)
@@ -212,6 +248,7 @@ export default function TnaStaffLinkPage() {
                 </div>
                 <p className="srv-p" style={{ marginTop: 10 }}>Borang dikunci selepas dihantar. Hubungi Ketua Jabatan jika perlu dibuka semula.</p>
                 <ReviewTable items={items} ans={ans} showAgreed={validated} />
+                <RequestTable reqs={reqs} items={items} />
               </div>
             )}
 
@@ -259,8 +296,52 @@ export default function TnaStaffLinkPage() {
                           onClick={() => { setSec(s.key); window.scrollTo({ top: 0 }) }}>{s.label} {d}/{n.length}</button>
                       )
                     })}
+                    <button type="button" aria-pressed={sec === REQ_SEC} className={reqs.some((q) => q.title.trim()) ? 'full' : ''}
+                      onClick={() => { setSec(REQ_SEC); window.scrollTo({ top: 0 }) }}>Kursus dimohon ({reqs.filter((q) => q.title.trim()).length})</button>
                   </div>
                 </div>
+
+                {sec === REQ_SEC && (
+                  <section className="srv-card">
+                    <h2 className="srv-h2">Kursus yang saya mohon</h2>
+                    <p className="srv-p">Pilihan. Senaraikan kursus / latihan yang anda ingin hadiri pada tahun ini — <b>satu kursus bagi setiap baris</b>. Maklumat ini menjadi input kepada TNA jabatan. Maksimum {MAX_REQ} kursus.</p>
+                    {reqs.map((q, i) => (
+                      <div className="tna-req-row" key={i}>
+                        <div className="tna-req-head"><b>Kursus {i + 1}</b>
+                          <button type="button" className="tna-linkbtn" onClick={() => changeReqs(reqs.filter((_, j) => j !== i))}>Buang</button></div>
+                        <label className="srv-label">Nama kursus / latihan <span className="tna-miss">*</span></label>
+                        <input className="srv-input" value={q.title} maxLength={300} onChange={(e) => setReq(i, { title: e.target.value })} placeholder="cth. Kursus RCA Facilitator" />
+                        <div className="tna-req-grid">
+                          <div><label className="srv-label">Penganjur</label>
+                            <input className="srv-input" value={q.provider} maxLength={200} onChange={(e) => setReq(i, { provider: e.target.value })} placeholder="cth. ILD UiTM / KKM / MSQH" /></div>
+                          <div><label className="srv-label">Kompetensi berkaitan</label>
+                            <select className="srv-select" value={q.competency} onChange={(e) => setReq(i, { competency: e.target.value })}>
+                              <option value="">Lain-lain / tiada</option>
+                              {items.map((it) => <option key={it.code} value={it.code}>{it.code} · {it.name}</option>)}
+                            </select></div>
+                          <div><label className="srv-label">Bulan dicadangkan</label>
+                            <select className="srv-select" value={q.month} onChange={(e) => setReq(i, { month: e.target.value })}>
+                              <option value="">—</option>
+                              {MONTHS.map((m, k) => <option key={m} value={k + 1}>{m}</option>)}
+                            </select></div>
+                          <div><label className="srv-label">Anggaran kos (RM)</label>
+                            <input className="srv-input" inputMode="decimal" value={q.cost} onChange={(e) => setReq(i, { cost: e.target.value.replace(/[^0-9.]/g, '') })} placeholder="cth. 450" /></div>
+                          <div><label className="srv-label">Keutamaan</label>
+                            <select className="srv-select" value={q.priority} onChange={(e) => setReq(i, { priority: e.target.value })}>
+                              <option value="">—</option>
+                              {REQ_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                            </select></div>
+                        </div>
+                        <label className="srv-label">Sebab / justifikasi</label>
+                        <textarea className="srv-textarea" style={{ minHeight: 60 }} maxLength={1000} value={q.reason} onChange={(e) => setReq(i, { reason: e.target.value })} placeholder="Bagaimana kursus ini membantu tugas anda" />
+                      </div>
+                    ))}
+                    {reqs.length < MAX_REQ && (
+                      <button type="button" className="srv-btn ghost" style={{ marginTop: 12 }} onClick={() => { setReqs([...reqs, { ...EMPTY_REQ }]) }}>+ Tambah kursus</button>
+                    )}
+                    <p className="srv-note">Baris tanpa nama kursus tidak disimpan.</p>
+                  </section>
+                )}
 
                 {secItems.map((it) => {
                   const a = ans[it.code] ?? { level: null, note: '', never: false }
@@ -305,8 +386,8 @@ export default function TnaStaffLinkPage() {
 
                 <div className="tna-nav">
                   <button type="button" className="srv-btn ghost" onClick={() => {
-                    const i = secs.findIndex((s) => s.key === sec)
-                    setSec(secs[(i + 1) % secs.length].key); window.scrollTo({ top: 0 })
+                    const order = [...secs.map((x) => x.key), REQ_SEC]
+                    setSec(order[(order.indexOf(sec) + 1) % order.length]); window.scrollTo({ top: 0 })
                   }}>Bahagian seterusnya</button>
                   <button type="button" className="srv-btn primary" onClick={() => { setStep('review'); window.scrollTo({ top: 0 }) }}>Semak &amp; hantar</button>
                 </div>
@@ -320,6 +401,7 @@ export default function TnaStaffLinkPage() {
                   ? <div className="srv-error" role="alert">{missing.length} kompetensi belum dijawab: {missing.map((m) => m.code).join(', ')}.</div>
                   : <div className="tna-ok">Semua {items.length} kompetensi telah dijawab.</div>}
                 <ReviewTable items={items} ans={ans} showAgreed={false} />
+                <RequestTable reqs={reqs} items={items} />
                 <label className="tna-confirm">
                   <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
                   <span>Saya mengesahkan penilaian kendiri ini dibuat dengan jujur dan akan dibincangkan bersama Ketua Jabatan.</span>
@@ -358,5 +440,32 @@ function ReviewTable({ items, ans, showAgreed }: { items: Item[]; ans: Record<st
         </tbody>
       </table>
     </div>
+  )
+}
+
+function RequestTable({ reqs, items }: { reqs: Req[]; items: Item[] }) {
+  const list = reqs.filter((q) => q.title.trim())
+  return (
+    <>
+      <h3 className="srv-h2" style={{ fontSize: 15, marginTop: 18 }}>Kursus dimohon ({list.length})</h3>
+      {list.length === 0 ? <p className="srv-note">Tiada permohonan kursus.</p> : (
+        <div className="tna-tblwrap">
+          <table className="tna-tbl">
+            <thead><tr><th>Kursus</th><th>Kompetensi</th><th className="c">Bulan</th><th className="c">Kos</th><th className="c">Keutamaan</th></tr></thead>
+            <tbody>
+              {list.map((q, i) => (
+                <tr key={i}>
+                  <td><b>{q.title}</b>{q.provider && <div className="tna-muted">{q.provider}</div>}{q.reason && <div className="tna-muted">{q.reason}</div>}</td>
+                  <td>{q.competency ? `${q.competency} · ${items.find((it) => it.code === q.competency)?.name ?? ''}` : 'Lain-lain'}</td>
+                  <td className="c">{q.month ? MONTHS[Number(q.month) - 1] : '—'}</td>
+                  <td className="c">{q.cost ? rm(Number(q.cost)) : '—'}</td>
+                  <td className="c">{q.priority || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   )
 }

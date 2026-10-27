@@ -143,3 +143,51 @@ export function errMsg(e: unknown): string {
   const o = e as { message?: string; code?: string; details?: string; hint?: string }
   return [o.code && `[${o.code}]`, o.message, o.details, o.hint].filter(Boolean).join(' ')
 }
+
+/* ---- Phase 1b: staff course requests, dept template, hospital programmes ---- */
+export const MONTHS = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogo', 'Sep', 'Okt', 'Nov', 'Dis']
+export const REQ_PRIORITIES = ['Tinggi', 'Sederhana', 'Rendah'] as const
+export type ReqPriority = (typeof REQ_PRIORITIES)[number]
+
+/** A course a staff member asked for (one row each, entered on the staff link). */
+export interface TnaRequest {
+  id: number; assignment_id: number; sort_order: number; title_ms: string; provider_ms: string | null
+  competency_code: string | null; reason_ms: string | null; preferred_month: number | null
+  est_cost_rm: number | null; priority: ReqPriority | null
+}
+/** One row of the hospital's 8-column TNA template (cols B–F; G/H are generated from gaps). */
+export interface TnaTemplateRow {
+  id: number; cycle_id: number; sort_order: number; unit_code: string | null; item_ms: string
+  indicator_ms: string | null; kpi_ms: string | null; weight_ms: string | null
+  activities_ms: string | null; initial_training_ms: string | null
+}
+export interface TnaProgramme {
+  id: number; cycle_id: number; scope: string; source_section: string | null; issue_ms: string | null
+  title_ms: string; target_group_ms: string | null; owner_ms: string | null; rmcq_role: string | null
+  method_ms: string | null; frequency_ms: string | null; non_training_action_ms: string | null; kpi_ms: string | null
+  score_size: number | null; score_severity: number | null; score_reach: number | null
+  priority_override: string | null; planned_months: number[]; est_cost_rm: number | null; status: string
+}
+export const PROG_SECTION: Record<string, string> = {
+  A: 'A · Dapatan pelaporan insiden', B: 'B · Dapatan audit / mock survey MSQH',
+  C: 'C · Program sedia ada RMCQ (PIC jabatan)', D: 'D · Cadangan tambahan',
+}
+export const RMCQ_ROLE: Record<string, string> = {
+  organiser: 'Penganjur', co_organiser: 'Penyelaras bersama', monitor: 'Pemantau',
+}
+/** Hospital programme score = size × severity × reach (each 1–3, max 27). */
+export function progScore(p: Pick<TnaProgramme, 'score_size' | 'score_severity' | 'score_reach'>): number | null {
+  if (!p.score_size || !p.score_severity || !p.score_reach) return null
+  return p.score_size * p.score_severity * p.score_reach
+}
+export function progPriority(p: TnaProgramme): 'Tinggi' | 'Sederhana' | 'Rendah' | '—' {
+  if (p.priority_override === 'Tinggi' || p.priority_override === 'Sederhana' || p.priority_override === 'Rendah') return p.priority_override
+  const s = progScore(p)
+  if (s == null) return '—'
+  return s >= 18 ? 'Tinggi' : s >= 9 ? 'Sederhana' : 'Rendah'
+}
+/** Suggested quarter for a department gap-training line, from its priority (same rule as Excel). */
+export const quarterFor = (label: string) =>
+  label === 'Tinggi' ? 'S1 (Jan–Mac)' : label === 'Sederhana' ? 'S2 (Apr–Jun)' : label === 'Rendah' ? 'S3–S4 (Jul–Dis)' : '—'
+export const rm = (v: number | null | undefined) =>
+  v == null ? '—' : 'RM ' + Number(v).toLocaleString('ms-MY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
