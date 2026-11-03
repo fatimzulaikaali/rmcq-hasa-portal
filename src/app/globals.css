@@ -1472,3 +1472,12 @@ body{counter-reset:rcpage;}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 @media screen and (max-width:900px){.tna-page,.tna-page.tna-land{width:auto;margin:0 8px 14px;padding:16px 12px;overflow-x:auto;}}
+.tp-tpl{table-layout:fixed;}
+.tp-tpl td.tp-gh{white-space:normal;}
+.tp-gh ul{margin:2px 0 4px 12px;padding:0;}
+.tp-gh li{margin-bottom:2px;}
+.tp-ghh{font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px;}
+.tp-ghg+.tp-ghg{margin-top:5px;border-top:1px dashed #CFCDC5;padding-top:4px;}
+.tp-gh ul{list-style:disc;}
+.tp-lamp{table-layout:fixed;}
+.tp-lamp td.c{white-space:nowrap;}

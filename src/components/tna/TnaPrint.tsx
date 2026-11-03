@@ -3,7 +3,7 @@
 /* Printable TNA reports (A4). Rendered by /tna/laporan; each .tna-page starts on a new sheet. */
 import { Fragment, type ReactNode } from 'react'
 import { LEVEL_NAME, MONTHS, PROG_SECTION, RMCQ_ROLE, STATUS_LABEL, progPriority, progScore, rm } from '@/lib/tna/types'
-import { calendar, clusterLabel, gapLines, lv, templateGH, type StaffReport } from '@/lib/tna/report'
+import { calendar, clusterLabel, gapLines, lv, templateUnit, type StaffReport } from '@/lib/tna/report'
 import { fmtDate, type TnaData } from './shared'
 
 const today = () => new Date().toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -193,13 +193,57 @@ export function DeptReport({ d, reps, unit }: { d: TnaData; reps: StaffReport[];
         <article className="tna-page tna-land">
           <Head d={d} title={`Analisis Keperluan Latihan (TNA) ${d.cycle.year} — Templat Pengurusan Hospital`} sub={unitName ?? 'Jabatan RMCQ'} />
           <table className="tp-tbl tp-tpl">
+            <colgroup><col style={{ width: '3%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /><col style={{ width: '13%' }} /><col style={{ width: '14%' }} /><col style={{ width: '16%' }} /><col style={{ width: '20%' }} /></colgroup>
             <thead><tr><th>Bil.</th><th>Unit / Item</th><th>Penunjuk Prestasi</th><th>KPI &amp; Sasaran Kerja</th><th>Cadangan Pemberat / Kaedah Ukuran KPI</th><th>Aktiviti / Program Sokongan</th><th>Kompetensi Diperlukan</th><th>Cadangan Latihan Pembangunan Kompetensi</th></tr></thead>
             <tbody>{tpl.map((t, i) => {
-              const { G, H } = templateGH(d, t.unit_code, reps, t.initial_training_ms)
-              return <tr key={t.id}><td className="c">{i + 1}</td><td><b>{t.item_ms}</b></td><td>{t.indicator_ms}</td><td>{t.kpi_ms}</td><td>{t.weight_ms}</td><td>{t.activities_ms}</td><td>{G}</td><td>{H}</td></tr>
+              const u = templateUnit(d, t.unit_code, reps, t.initial_training_ms)
+              return (
+                <tr key={t.id}><td className="c">{i + 1}</td><td><b>{t.item_ms}</b></td><td>{t.indicator_ms}</td><td>{t.kpi_ms}</td><td>{t.weight_ms}</td><td>{t.activities_ms}</td>
+                  <td className="tp-gh">
+                    <div className="tp-ghh">{t.unit_code === 'KJ' ? 'Kepimpinan & pengurusan' : 'Kefungsian unit'}</div>
+                    {u.core.length ? <ul>{u.core.map((x) => <li key={x.c.code}><b>{x.c.code}</b> {x.c.name_ms} — <i>{LEVEL_NAME[x.max]}</i></li>)}</ul> : <p>—</p>}
+                    <p className="tp-small">+ Asas RMCQ, Nilai, Teras &amp; Generik UiTM ikut gred jawatan.</p>
+                  </td>
+                  <td className="tp-gh">
+                    {!u.members.length ? <p>Tiada staf dalam unit.</p>
+                      : !u.assessed ? <><p className="tp-small"><i>Cadangan awal (belum disahkan):</i></p><p>{t.initial_training_ms}</p></>
+                        : !u.groups.length ? <p>Tiada jurang — latihan pengekalan sahaja.</p>
+                          : u.groups.map((gr) => (
+                            <div key={gr.label} className="tp-ghg">
+                              <div className={`tp-ghh tp-p-${gr.label}`}>{gr.label} · {gr.quarter}</div>
+                              <ul>{gr.items.map((x) => <li key={x.training}>{x.training} <span className="tp-small">({x.codes.join(', ')}; {x.staff} staf)</span></li>)}</ul>
+                            </div>
+                          ))}
+                  </td></tr>
+              )
             })}</tbody>
           </table>
-          <p className="tp-note">Lajur Kompetensi Diperlukan dan Cadangan Latihan dijana daripada analisis jurang (Kamus Kompetensi UiTM 2021 + Kamus Kefungsian RMCQ).</p>
+          <p className="tp-note">Lajur Kompetensi Diperlukan = kompetensi kefungsian utama unit dan tahap tertinggi yang diperlukan dalam unit. Cadangan Latihan = latihan bagi jurang yang telah disahkan, disusun mengikut keutamaan dan suku tahun. Butiran staf bagi setiap jurang di Lampiran.</p>
+        </article>
+      )}
+
+      {tpl.length > 0 && (
+        <article className="tna-page tna-land">
+          <Head d={d} title="Lampiran — Butiran Jurang Kompetensi Mengikut Unit" sub={unitName ?? 'Jabatan RMCQ'} />
+          <p className="tp-note">Satu baris bagi setiap kompetensi berjurang. Tahap: 1 Asas · 2 Kompeten · 3 Cekap · 4 Pakar · 5 Pakar Strategi. Contoh “2→4” = tahap dipersetujui 2, diperlukan 4. * belum pernah terdedah.</p>
+          <table className="tp-tbl tp-lamp">
+            <colgroup><col style={{ width: '5%' }} /><col style={{ width: '22%' }} /><col style={{ width: '27%' }} /><col style={{ width: '5%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '22%' }} /></colgroup>
+            <thead><tr><th>Kod</th><th>Kompetensi</th><th>Staf berjurang (semasa → diperlukan)</th><th className="c">Bil.</th><th className="c">Keutamaan</th><th className="c">Suku</th><th>Latihan dicadangkan</th></tr></thead>
+            <tbody>{tpl.map((t) => {
+              const u = templateUnit(d, t.unit_code, reps, t.initial_training_ms)
+              return (
+                <Fragment key={t.id}>
+                  <tr className="tp-grp"><td colSpan={7}>{t.item_ms.replace(/\s*\n\s*/g, ' ')} · {!u.assessed ? 'belum disahkan' : u.details.length ? `${u.details.length} kompetensi berjurang` : 'tiada jurang'}</td></tr>
+                  {u.details.map((x) => (
+                    <tr key={x.g.c.code}><td>{x.g.c.code}</td><td>{x.g.c.name_ms}</td>
+                      <td>{x.staff.map((s) => <div key={s.name}>{s.name} <b>{s.from}→{s.to}</b>{s.never ? ' *' : ''}</div>)}</td>
+                      <td className="c">{x.staff.length}</td><td className={`c tp-p-${x.g.label}`}>{x.g.label}</td><td className="c">{x.g.quarter}</td>
+                      <td className="tp-small">{x.g.c.default_training_ms ?? '—'}</td></tr>
+                  ))}
+                </Fragment>
+              )
+            })}</tbody>
+          </table>
         </article>
       )}
     </>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react'
 import { errMsg, type TnaTemplateRow } from '@/lib/tna/types'
-import { downloadXlsx, handoverSheets, sheetCalendar, sheetRequests, sheetTemplate, staffReports, templateGH } from '@/lib/tna/report'
+import { downloadXlsx, handoverSheets, sheetCalendar, sheetRequests, sheetTemplate, sheetTemplateDetail, staffReports, templateGH } from '@/lib/tna/report'
 import { L, Modal, todayISO, type TabProps } from './shared'
 
 /* Laporan — printable reports (open in a new tab → browser print / PDF) and Excel exports,
@@ -62,7 +62,7 @@ export function TnaReports({ data, supabase, reload, flash }: TabProps) {
 
       <Card code="B" title="Laporan Jabatan" desc="Ringkasan liputan, status staf, peta jurang, keutamaan latihan, permohonan kursus dan helaian TNA dalam templat 8 lajur pengurusan hospital.">
         <button type="button" className="mm-btn primary sm" onClick={() => open('r=jabatan')}>🖨 Buka untuk cetak</button>
-        <button type="button" className="mm-btn sm" disabled={!!busy} onClick={() => void xl('tpl', () => downloadXlsx(`TNA_Jabatan_RMCQ_${tag}.xlsx`, [sheetTemplate(data, reps)]))}>⬇ Templat 8 lajur (Excel)</button>
+        <button type="button" className="mm-btn sm" disabled={!!busy} onClick={() => void xl('tpl', () => downloadXlsx(`TNA_Jabatan_RMCQ_${tag}.xlsx`, [sheetTemplate(data, reps), sheetTemplateDetail(data, reps)]))}>⬇ Templat 8 lajur (Excel)</button>
       </Card>
 
       <Card code="C" title="Laporan Unit" desc="Sama seperti laporan jabatan tetapi untuk satu unit sahaja, termasuk baris templat unit tersebut.">
