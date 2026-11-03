@@ -1481,3 +1481,6 @@ body{counter-reset:rcpage;}
 .tp-gh ul{list-style:disc;}
 .tp-lamp{table-layout:fixed;}
 .tp-lamp td.c{white-space:nowrap;}
+.tna-warn{font-size:11.5px;color:var(--amber);font-weight:600;margin-top:4px;max-width:240px;}
+.tp-sub2{margin:1px 0 0 2px;font-size:8.5px;}
+.tp-tpl tr{break-inside:auto;}

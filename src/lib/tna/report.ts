@@ -3,7 +3,7 @@
 import type { TnaData } from '@/components/tna/shared'
 import {
   CLUSTERS, LEVEL_NAME, MONTHS, STATUS_LABEL, clusterOrder, gapScore, priorityLabel, progPriority, progScore, quarterFor,
-  type TnaAssignment, type TnaCompetency, type TnaPosition, type TnaRequest, type TnaStaff,
+  KJ_DECISION, requestInTna, type TnaAssignment, type TnaCompetency, type TnaPosition, type TnaRequest, type TnaStaff,
 } from './types'
 
 export interface StaffItem {
@@ -86,60 +86,82 @@ export function gapLines(d: TnaData, reps: StaffReport[]): GapLine[] {
 }
 
 export interface TplCore { c: TnaCompetency; max: number }
-export interface TplTraining { training: string; codes: string[]; staff: number }
+export interface TplReq { title: string; provider: string | null; staff: string[] }
+export interface TplTraining { c: TnaCompetency; staff: number; kamus: string | null; requested: TplReq[] }
 export interface TplGroup { label: 'Tinggi' | 'Sederhana' | 'Rendah'; quarter: string; items: TplTraining[] }
-export interface TplDetail { g: GapLine; staff: { name: string; from: number; to: number; never: boolean }[] }
+export interface TplDetail { g: GapLine; staff: { name: string; from: number; to: number; never: boolean }[]; requested: TplReq[] }
+export interface TplExtra { title: string; provider: string | null; staff: string; code: string | null; note: string | null }
 export interface TplUnit {
   members: StaffReport[]; assessed: boolean; core: TplCore[]
-  groups: TplGroup[]; details: TplDetail[]; G: string; H: string
+  groups: TplGroup[]; extra: TplExtra[]; details: TplDetail[]; G: string; H: string
 }
 
 /** One unit's row of the hospital 8-column template, structured.
  *  G = what the unit must be competent in (core functional competencies, highest level in unit).
  *  H = training to close the validated gaps, grouped by priority → quarter, one line per course.
  *  details = the evidence behind H (who has which gap) for the appendix table. */
+/** Which template row (unit) concludes gaps in competency c. */
+export const ownerOf = (c: Pick<TnaCompetency, 'template_unit' | 'unit_code' | 'layer'>): string =>
+  c.template_unit ?? c.unit_code ?? 'KJ'
+
 export function templateUnit(d: TnaData, unitCode: string | null, reps: StaffReport[], initialTraining: string | null): TplUnit {
-  const members = reps.filter((r) => r.p.unit_code === unitCode)
+  // Gaps are grouped by the unit that OWNS the competency (Kamus → "Baris templat"), whichever unit the staff is in.
+  const members = reps
   const coreMap = new Map<string, TplCore>()
-  for (const r of members) for (const it of r.items) {
-    const isCore = unitCode === 'KJ'
-      ? it.c.cluster === 'Kepimpinan' || it.c.code === 'GN1' || it.c.cluster === 'Merentas RMCQ'
-      : it.c.cluster === 'Kefungsian Unit' && (it.c.unit_code === unitCode || it.c.unit_code == null)
-    if (!isCore) continue
+  for (const r of reps) for (const it of r.items) {
+    if (ownerOf(it.c) !== unitCode || it.c.layer !== 'B') continue
     const cur = coreMap.get(it.c.code)
     if (!cur || it.required > cur.max) coreMap.set(it.c.code, { c: it.c, max: it.required })
   }
   const core = Array.from(coreMap.values()).sort((a, b) => clusterOrder(a.c.cluster) - clusterOrder(b.c.cluster) || a.c.sort_order - b.c.sort_order)
-  const assessed = members.some((r) => r.validated)
-  const lines = gapLines(d, members).filter((g) => g.withGap.length > 0)
-  const groups: TplGroup[] = (['Tinggi', 'Sederhana', 'Rendah'] as const).map((label) => {
-    const byTraining = new Map<string, TplTraining>()
-    for (const g of lines.filter((x) => x.label === label)) {
-      const key = (g.c.default_training_ms ?? g.c.name_ms).trim()
-      const t = byTraining.get(key) ?? { training: key, codes: [], staff: 0 }
-      t.codes.push(g.c.code); t.staff = Math.max(t.staff, g.withGap.length)
-      byTraining.set(key, t)
+  const assessed = reps.some((r) => r.validated)
+  const lines = gapLines(d, reps).filter((g) => g.withGap.length > 0 && ownerOf(g.c) === unitCode)
+  // staff course requests, split into: closes a validated gap of that staff → under that competency; otherwise only if KJ chose "masuk"
+  const supports = (rep: StaffReport, code: string | null) => !!code && rep.gaps.some((x) => x.c.code === code)
+  const reqFor = (g: GapLine): TplReq[] => {
+    const m = new Map<string, TplReq>()
+    for (const rep of g.withGap) for (const q of rep.requests) {
+      if (q.competency_code !== g.c.code || !requestInTna(q, true)) continue
+      const key = q.title_ms.trim().toLowerCase()
+      const t = m.get(key) ?? { title: q.title_ms.trim(), provider: q.provider_ms, staff: [] }
+      if (!t.staff.includes(rep.s.name)) t.staff.push(rep.s.name)
+      m.set(key, t)
     }
-    return { label, quarter: quarterFor(label), items: Array.from(byTraining.values()) }
-  }).filter((x) => x.items.length)
+    return Array.from(m.values())
+  }
+  const groups: TplGroup[] = (['Tinggi', 'Sederhana', 'Rendah'] as const).map((label) => ({
+    label, quarter: quarterFor(label),
+    items: lines.filter((x) => x.label === label).map((g) => ({ c: g.c, staff: g.withGap.length, kamus: g.c.default_training_ms, requested: reqFor(g) })),
+  })).filter((x) => x.items.length)
+  const compBy = new Map(d.comps.map((c) => [c.code, c]))
+  const reqOwner = (rep: StaffReport, code: string | null) => { const c = code ? compBy.get(code) : undefined; return c ? ownerOf(c) : rep.p.unit_code }
+  const extra: TplExtra[] = reps.flatMap((rep) => rep.validated ? rep.requests
+    .filter((q) => reqOwner(rep, q.competency_code) === unitCode && !supports(rep, q.competency_code) && requestInTna(q, false))
+    .map((q) => ({ title: q.title_ms.trim(), provider: q.provider_ms, staff: rep.s.name, code: q.competency_code, note: q.kj_note })) : [])
   const details: TplDetail[] = lines.map((g) => ({
-    g, staff: g.withGap.map((r) => {
+    g, requested: reqFor(g), staff: g.withGap.map((r) => {
       const it = r.items.find((x) => x.c.code === g.c.code)!
       return { name: r.s.name, from: it.agreed!, to: it.required, never: it.never }
     }),
   }))
 
   const G = [
-    unitCode === 'KJ' ? 'Kepimpinan & pengurusan:' : 'Kefungsian unit:',
-    ...(core.length ? core.map((x) => `• ${x.c.code} ${x.c.name_ms} — ${LEVEL_NAME[x.max]}`) : ['• (tiada kompetensi kefungsian khusus)']),
-    '', 'Asas RMCQ, Nilai, Teras & Generik UiTM: ikut gred jawatan.',
+    'Kompetensi di bawah tanggungjawab unit (tahap tertinggi diperlukan):',
+    ...(core.length ? core.map((x) => `• ${x.c.code} ${x.c.name_ms} — ${LEVEL_NAME[x.max]}`) : ['• —']),
+    ...(unitCode === 'KJ' ? ['', '+ Nilai, Teras, Generik & Kepimpinan UiTM (semua staf, ikut gred).'] : []),
   ].join('\n')
   const H = !members.length ? 'Tiada staf dalam unit.'
     : !assessed ? ['(Cadangan awal — dikemas kini selepas penilaian disahkan)', initialTraining ?? ''].join('\n').trim()
-      : !groups.length ? 'Tiada jurang — latihan pengekalan sahaja.'
-        : groups.map((gr) => [`KEUTAMAAN ${gr.label.toUpperCase()} — ${gr.quarter}`,
-          ...gr.items.map((t) => `• ${t.training} (${t.codes.join(', ')}; ${t.staff} staf)`)].join('\n')).join('\n\n')
-  return { members, assessed, core, groups, details, G, H }
+      : [
+        ...(!groups.length ? ['Tiada jurang kompetensi — latihan pengekalan sahaja.'] : groups.map((gr) => [
+          `KEUTAMAAN ${gr.label.toUpperCase()} — ${gr.quarter}`,
+          ...gr.items.map((t) => `• ${t.c.code} ${t.c.name_ms} (${t.staff} staf): ${t.requested.length
+            ? t.requested.map((q) => `${q.title}${q.provider ? ` (${q.provider})` : ''}`).join('; ') + ' †' : t.kamus ?? '—'}`),
+        ].join('\n'))),
+        ...(extra.length ? [['PEMBANGUNAN LANJUTAN (diluluskan Ketua Jabatan)',
+          ...extra.map((x) => `• ${x.title}${x.provider ? ` (${x.provider})` : ''} — ${x.staff}${x.code ? ` [${x.code}]` : ''}`)].join('\n')] : []),
+      ].join('\n\n')
+  return { members, assessed, core, groups, extra, details, G, H }
 }
 /** Back-compat: plain-text G & H (Excel / portal preview). */
 export function templateGH(d: TnaData, unitCode: string | null, reps: StaffReport[], initialTraining: string | null) {
@@ -182,16 +204,25 @@ export async function downloadXlsx(fileName: string, sheets: SheetSpec[]) {
   XLSX.writeFile(wb, fileName)
 }
 
+/** [status jurang, keputusan KJ, dalam templat?, catatan] for one request. */
+export function reqStatus(r: StaffReport, q: TnaRequest): [string, string, string, string | null] {
+  const gap = !!q.competency_code && r.gaps.some((x) => x.c.code === q.competency_code)
+  const status = !r.validated ? 'Belum disahkan' : gap ? 'Menyokong jurang' : 'Tiada jurang'
+  const dec = q.kj_decision ? KJ_DECISION[q.kj_decision] : gap ? 'Auto (jurang)' : 'Belum diputuskan'
+  return [status, dec, r.validated && requestInTna(q, gap) ? 'Ya' : 'Tidak', q.kj_note]
+}
+
 export function sheetRequests(d: TnaData, reps: StaffReport[]): SheetSpec {
   const comp = new Map(d.comps.map((c) => [c.code, c.name_ms]))
-  const rows: Cell[][] = [['Bil.', 'No. Staf', 'Nama', 'Jawatan', 'Unit', 'Kursus / latihan', 'Penganjur', 'Kod kompetensi', 'Kompetensi', 'Sebab / justifikasi', 'Bulan', 'Anggaran kos (RM)', 'Keutamaan']]
+  const rows: Cell[][] = [['Bil.', 'No. Staf', 'Nama', 'Jawatan', 'Unit', 'Kursus / latihan', 'Penganjur', 'Kod kompetensi', 'Kompetensi', 'Sebab / justifikasi', 'Bulan', 'Anggaran kos (RM)', 'Keutamaan', 'Status jurang', 'Keputusan KJ', 'Dalam templat TNA', 'Catatan KJ']]
   let n = 0
   for (const r of reps) for (const q of r.requests) rows.push([
     ++n, r.s.staff_no, r.s.name, r.p.title_ms, r.p.unit_code, q.title_ms, q.provider_ms, q.competency_code,
     q.competency_code ? comp.get(q.competency_code) ?? '' : 'Lain-lain', q.reason_ms,
     q.preferred_month ? MONTHS[q.preferred_month - 1] : null, q.est_cost_rm != null ? Number(q.est_cost_rm) : null, q.priority,
+    ...reqStatus(r, q),
   ])
-  return { name: 'Permohonan Kursus', rows, widths: [5, 10, 28, 22, 8, 40, 20, 10, 30, 40, 8, 12, 11] }
+  return { name: 'Permohonan Kursus', rows, widths: [5, 10, 28, 22, 8, 40, 20, 10, 30, 40, 8, 12, 11, 16, 16, 10, 30] }
 }
 
 export function sheetTemplate(d: TnaData, reps: StaffReport[]): SheetSpec {
@@ -208,16 +239,19 @@ export function sheetTemplate(d: TnaData, reps: StaffReport[]): SheetSpec {
 
 /** Appendix to the template: every validated gap, one row per competency per unit. */
 export function sheetTemplateDetail(d: TnaData, reps: StaffReport[]): SheetSpec {
-  const rows: Cell[][] = [['Unit', 'Kod', 'Kompetensi', 'Staf berjurang (tahap semasa → diperlukan)', 'Bil. staf', 'Keutamaan', 'Suku tahun', 'Latihan dicadangkan']]
+  const rows: Cell[][] = [['Unit', 'Kod', 'Kompetensi', 'Staf berjurang (tahap semasa → diperlukan)', 'Bil. staf', 'Keutamaan', 'Suku tahun', 'Kursus dipohon staf', 'Cadangan kamus']]
   for (const t of d.template) {
     const u = templateUnit(d, t.unit_code, reps, t.initial_training_ms)
     for (const x of u.details) rows.push([
       t.unit_code, x.g.c.code, x.g.c.name_ms,
       x.staff.map((s) => `${s.name} (${s.from}→${s.to}${s.never ? ', belum terdedah' : ''})`).join('; '),
-      x.staff.length, x.g.label, x.g.quarter, x.g.c.default_training_ms,
+      x.staff.length, x.g.label, x.g.quarter,
+      x.requested.map((q) => `${q.title}${q.provider ? ` (${q.provider})` : ''} — ${q.staff.join(', ')}`).join('; ') || null,
+      x.g.c.default_training_ms,
     ])
+    for (const x of u.extra) rows.push([t.unit_code, x.code, 'Pembangunan lanjutan (diluluskan KJ)', x.staff, 1, null, null, `${x.title}${x.provider ? ` (${x.provider})` : ''}`, x.note])
   }
-  return { name: 'Lampiran Jurang Unit', rows, widths: [8, 7, 34, 60, 8, 11, 14, 45] }
+  return { name: 'Lampiran Jurang Unit', rows, widths: [8, 7, 34, 60, 8, 11, 14, 50, 45] }
 }
 
 export function sheetCalendar(d: TnaData, reps: StaffReport[]): SheetSpec {

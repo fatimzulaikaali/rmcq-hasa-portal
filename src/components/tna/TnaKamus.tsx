@@ -12,7 +12,7 @@ const PREFIX: Record<string, string> = { Nilai: 'NL', Teras: 'TR', Generik: 'GN'
 const LAYER_OF = (cluster: string): 'A' | 'B' => (PREFIX[cluster] ? 'A' : 'B')
 
 type Form = {
-  isNew: boolean; code: string; cluster: string; unit_code: string; name_ms: string; definition_ms: string
+  isNew: boolean; code: string; cluster: string; unit_code: string; template_unit: string; name_ms: string; definition_ms: string
   default_training_ms: string; min_sspa_grade: string; max_sspa_grade: string; active: boolean
   levels: Record<number, string>
 }
@@ -41,7 +41,7 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
     for (const l of data.levels) if (l.competency_code === c.code) lv[l.level] = l.indicator_ms
     setErr('')
     setForm({
-      isNew: false, code: c.code, cluster: c.cluster, unit_code: c.unit_code ?? '', name_ms: c.name_ms, definition_ms: c.definition_ms ?? '',
+      isNew: false, code: c.code, cluster: c.cluster, unit_code: c.unit_code ?? '', template_unit: c.template_unit ?? '', name_ms: c.name_ms, definition_ms: c.definition_ms ?? '',
       default_training_ms: c.default_training_ms ?? '', min_sspa_grade: c.min_sspa_grade?.toString() ?? '', max_sspa_grade: c.max_sspa_grade?.toString() ?? '',
       active: c.active, levels: lv,
     })
@@ -50,7 +50,7 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
     const cluster = fCluster || 'Kefungsian Unit'
     setErr('')
     setForm({
-      isNew: true, cluster, code: nextCode(PREFIX[cluster] ?? 'R', data.comps.map((c) => c.code)), unit_code: '', name_ms: '', definition_ms: '',
+      isNew: true, cluster, code: nextCode(PREFIX[cluster] ?? 'R', data.comps.map((c) => c.code)), unit_code: '', template_unit: PREFIX[cluster] ? 'KJ' : '', name_ms: '', definition_ms: '',
       default_training_ms: '', min_sspa_grade: '', max_sspa_grade: '', active: true, levels: {},
     })
   }
@@ -66,6 +66,7 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
     const layer = LAYER_OF(f.cluster)
     const rec = {
       cluster: f.cluster, layer, unit_code: f.cluster === 'Kefungsian Unit' ? (f.unit_code || null) : null,
+      template_unit: f.template_unit || (f.cluster === 'Kefungsian Unit' ? f.unit_code || null : null),
       name_ms: f.name_ms.trim(), definition_ms: f.definition_ms.trim() || null, default_training_ms: f.default_training_ms.trim() || null,
       min_sspa_grade: toInt(f.min_sspa_grade), max_sspa_grade: toInt(f.max_sspa_grade), active: f.active,
     }
@@ -111,7 +112,7 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
       </div>
 
       <div className="card" style={{ padding: '6px 16px 10px' }}><div className="vd-scroll"><table className="vd-table">
-        <thead><tr><th>Kod</th><th>Kompetensi</th><th>Kluster</th><th>Latihan cadangan</th><th>Sumber</th><th>Jawatan</th></tr></thead>
+        <thead><tr><th>Kod</th><th>Kompetensi</th><th>Kluster</th><th>Latihan cadangan</th><th>Baris templat</th><th>Sumber</th><th>Jawatan</th></tr></thead>
         <tbody>
           {list.map((c) => (
             <tr key={c.code} className="mm-rowlink" onClick={() => open(c)} style={c.active ? undefined : { opacity: 0.55 }}>
@@ -119,6 +120,7 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
               <td>{c.name_ms}{c.unit_code && <span className="tna-muted"> · {c.unit_code}</span>}{!c.active && <span className="badge b-gray" style={{ marginLeft: 6 }}>Tidak aktif</span>}</td>
               <td>{CLUSTERS.find((x) => x.key === c.cluster)?.label ?? c.cluster}</td>
               <td className="tna-muted" style={{ maxWidth: 320 }}>{c.default_training_ms ?? '—'}</td>
+              <td>{c.template_unit ?? <span className="badge b-amber">Belum</span>}</td>
               <td>{c.source === 'Tambahan' ? <span className="badge b-purple">Tambahan</span> : <span className="tna-muted">{c.source}</span>}</td>
               <td>{usage.get(c.code) ?? 0}</td>
             </tr>
@@ -143,12 +145,20 @@ export function TnaKamus({ data, supabase, userId, reload, flash }: TabProps) {
             </L>
             {form.cluster === 'Kefungsian Unit' ? (
               <L label="Unit">
-                <select value={form.unit_code} onChange={(e) => setForm({ ...form, unit_code: e.target.value })}>
+                <select value={form.unit_code} onChange={(e) => setForm({ ...form, unit_code: e.target.value, template_unit: form.template_unit || e.target.value })}>
                   <option value="">—</option>
                   {data.units.map((u) => <option key={u.code} value={u.code}>{u.code} · {u.name_ms}</option>)}
                 </select>
               </L>
             ) : <L label="Status"><label className="mm-chk"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Aktif</label></L>}
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <L label="Baris templat TNA (unit yang menyimpulkan latihan ini)" hint="Jurang kompetensi ini — daripada staf mana-mana unit — dimasukkan ke lajur Cadangan Latihan bagi unit ini.">
+              <select value={form.template_unit} onChange={(e) => setForm({ ...form, template_unit: e.target.value })}>
+                <option value="">— pilih —</option>
+                {data.units.map((u) => <option key={u.code} value={u.code}>{u.code} · {u.name_ms}</option>)}
+              </select>
+            </L>
           </div>
           <div style={{ marginTop: 12 }}>
             <L label="Nama kompetensi"><input value={form.name_ms} onChange={(e) => setForm({ ...form, name_ms: e.target.value })} /></L>

@@ -46,6 +46,8 @@ export interface TnaCompetency {
   dept_code: string | null; unit_code: string | null; name_ms: string; definition_ms: string | null
   default_training_ms: string | null; min_sspa_grade: number | null; max_sspa_grade: number | null
   sort_order: number; active: boolean
+  /** Unit row of the 8-column template where gaps in this competency are concluded. */
+  template_unit: string | null
 }
 export interface TnaLevel { competency_code: string; level: number; indicator_ms: string }
 export interface TnaUnit { code: string; name_ms: string; bahagian_ms: string | null; sort_order: number }
@@ -154,6 +156,14 @@ export interface TnaRequest {
   id: number; assignment_id: number; sort_order: number; title_ms: string; provider_ms: string | null
   competency_code: string | null; reason_ms: string | null; preferred_month: number | null
   est_cost_rm: number | null; priority: ReqPriority | null
+  kj_decision: KjDecision | null; kj_note: string | null; decided_at: string | null
+}
+export type KjDecision = 'masuk' | 'tangguh' | 'tidak'
+export const KJ_DECISION: Record<KjDecision, string> = { masuk: 'Masuk TNA', tangguh: 'Tangguh', tidak: 'Tidak dimasukkan' }
+/** A request counts in the TNA template if it closes a validated gap (unless KJ said "tidak"),
+ *  or if KJ explicitly chose "masuk" (development beyond the required level). */
+export function requestInTna(q: Pick<TnaRequest, 'kj_decision'>, supportsGap: boolean): boolean {
+  return supportsGap ? q.kj_decision !== 'tidak' : q.kj_decision === 'masuk'
 }
 /** One row of the hospital's 8-column TNA template (cols B–F; G/H are generated from gaps). */
 export interface TnaTemplateRow {
