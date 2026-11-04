@@ -393,7 +393,7 @@ export const mgmtCost = costOf
 /* ---- Summarised rows for the final management report: one row per objective (template row) × category ---- */
 export interface MgmtGroupRow {
   category: string; competencies: string[]
-  R: number; C: number; gap: number; priority: MgmtPriority | null
+  R: number | null; C: number | null; gap: number | null; priority: MgmtPriority | null
   inhouse: string[]; inhouseCost: number | null; external: string[]; externalCost: number | null; date: string
 }
 export interface MgmtGroupBlock { t: TnaData['template'][number]; rows: MgmtGroupRow[] }
@@ -406,23 +406,48 @@ const uniq = (xs: string[]) => { const seen = new Set<string>(); return xs.filte
  *  so a group with a real gap never shows Gap 0. In-house = Kamus suggestions + in-house staff requests;
  *  External = external staff requests. No codes or staff names (final report). */
 export function mgmtGrouped(d: TnaData, reps: StaffReport[]): MgmtGroupBlock[] {
-  return mgmtBlocks(d, reps).map((b) => {
-    const cats = ['Fungsional', 'Generik', 'Kepimpinan'].filter((c) => b.rows.some((r) => r.category === c))
-    const rows = cats.map((cat) => {
+  const compBy = new Map(d.comps.map((c) => [c.code, c]))
+  const label = (q: TnaRequest) => q.title_ms.trim() + (q.provider_ms ? ` (${q.provider_ms.trim()})` : '')
+  // KJ-approved requests ("masuk") for competencies that have no gap row → still part of the plan (development)
+  type Extra = { unit: string; cat: string; q: TnaRequest; comp: string | null }
+  const blocks = mgmtBlocks(d, reps)
+  const inRows = new Set(blocks.flatMap((b) => b.rows.map((r) => r.c.code)))
+  const extras: Extra[] = []
+  for (const r of reps) {
+    if (!r.validated) continue
+    for (const q of r.requests) {
+      if (q.competency_code && inRows.has(q.competency_code)) continue // already listed under its gap row
+      if (q.kj_decision !== 'masuk') continue
+      const c = q.competency_code ? compBy.get(q.competency_code) : undefined
+      extras.push({ unit: c ? ownerOf(c) : r.p.unit_code, cat: c ? mgmtCategory(c) : 'Generik', q, comp: c?.name_ms ?? null })
+    }
+  }
+  return blocks.map((b) => {
+    const myExtra = extras.filter((x) => x.unit === b.t.unit_code)
+    const cats = ['Fungsional', 'Generik', 'Kepimpinan'].filter((c) => b.rows.some((r) => r.category === c) || myExtra.some((x) => x.cat === c))
+    const rows = cats.map((cat): MgmtGroupRow => {
       const rs = b.rows.filter((r) => r.category === cat)
         .sort((x, y) => y.gap - x.gap || PRI_ORDER.indexOf(x.priority) - PRI_ORDER.indexOf(y.priority))
+      const ex = myExtra.filter((x) => x.cat === cat)
       const crit = rs[0]
       const priority = rs.map((r) => r.priority).sort((x, y) => PRI_ORDER.indexOf(x) - PRI_ORDER.indexOf(y))[0] ?? null
       const req = (xs: MgmtPlanItem[]) => xs.filter((x) => x.source === 'staf')
-      const inh = uniq([...rs.flatMap((r) => splitTraining(r.c.default_training_ms)), ...rs.flatMap((r) => req(r.inhouse).map((x) => x.title + (x.provider ? ` (${x.provider})` : '')))])
-      const ext = uniq(rs.flatMap((r) => req(r.external).map((x) => x.title + (x.provider ? ` (${x.provider})` : ''))))
+      const exIn = ex.filter((x) => trainingTypeOf(x.q) === 'dalaman'); const exOut = ex.filter((x) => trainingTypeOf(x.q) === 'luaran')
+      const inh = uniq([...rs.flatMap((r) => splitTraining(r.c.default_training_ms)), ...rs.flatMap((r) => req(r.inhouse).map((x) => x.title + (x.provider ? ` (${x.provider})` : ''))), ...exIn.map((x) => label(x.q))])
+      const ext = uniq([...rs.flatMap((r) => req(r.external).map((x) => x.title + (x.provider ? ` (${x.provider})` : ''))), ...exOut.map((x) => label(x.q))])
       const sum = (xs: MgmtPlanItem[]) => xs.reduce((s, x) => s + (x.cost ?? 0), 0)
-      const ic = rs.reduce((s, r) => s + sum(req(r.inhouse)), 0); const ec = rs.reduce((s, r) => s + sum(req(r.external)), 0)
-      const months = Array.from(new Set(rs.flatMap((r) => [...r.inhouse, ...r.external].flatMap((x) => x.months)))).sort((a, b) => a - b)
+      const exCost = (xs: Extra[]) => xs.reduce((s, x) => s + Number(x.q.est_cost_rm ?? 0), 0)
+      const ic = rs.reduce((s, r) => s + sum(req(r.inhouse)), 0) + exCost(exIn)
+      const ec = rs.reduce((s, r) => s + sum(req(r.external)), 0) + exCost(exOut)
+      const months = Array.from(new Set([...rs.flatMap((r) => [...r.inhouse, ...r.external].flatMap((x) => x.months)), ...ex.flatMap((x) => (x.q.preferred_month ? [x.q.preferred_month] : []))])).sort((a, b) => a - b)
+      const comps = [
+        ...rs.sort((x, y) => PRI_ORDER.indexOf(x.priority) - PRI_ORDER.indexOf(y.priority) || y.gap - x.gap).map((r) => r.c.name_ms),
+        ...uniq(ex.map((x) => x.comp).filter((x): x is string => !!x)).map((n) => `${n} (pembangunan)`),
+        ...(ex.some((x) => !x.comp) ? ['Pembangunan kemahiran umum (diluluskan Ketua Jabatan)'] : []),
+      ]
       return {
-        category: cat,
-        competencies: rs.sort((x, y) => PRI_ORDER.indexOf(x.priority) - PRI_ORDER.indexOf(y.priority) || y.gap - x.gap).map((r) => r.c.name_ms),
-        R: crit.R, C: crit.C, gap: crit.gap, priority,
+        category: cat, competencies: uniq(comps),
+        R: crit ? crit.R : null, C: crit ? crit.C : null, gap: crit ? crit.gap : null, priority,
         inhouse: inh, inhouseCost: ic || null, external: ext, externalCost: ec || null,
         date: months.length ? months.map((m) => MONTHS[m - 1]).join(', ') : mgmtQuarter(priority),
       }

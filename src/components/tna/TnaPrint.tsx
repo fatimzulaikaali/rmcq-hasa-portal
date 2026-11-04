@@ -388,8 +388,8 @@ export function MgmtReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
               </>}
               {r ? <>
                 <td>{r.category}</td><td>{ul(r.competencies)}</td>
-                <td className="c">{r.R}</td><td className="c">{r.C}</td>
-                <td className="c"><b>{r.gap}</b><div className="tp-small">{GAP_LABEL[Math.min(r.gap, 4)]}</div></td>
+                <td className="c">{r.R ?? '—'}</td><td className="c">{r.C ?? '—'}</td>
+                <td className="c">{r.gap == null ? '—' : <><b>{r.gap}</b><div className="tp-small">{GAP_LABEL[Math.min(r.gap, 4)]}</div></>}</td>
                 <td className={pcls(r.priority)}>{r.priority ?? '—'}</td>
               </> : <td colSpan={5} className="tp-muted">Tiada jurang kompetensi</td>}
               {i === 0 && <td rowSpan={list.length}>{b.t.activities_ms}</td>}
@@ -402,7 +402,7 @@ export function MgmtReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
           ))
         })}</tbody>
       </table>
-      <p className="tp-note">R = tahap diperlukan · C = tahap semasa jabatan · R−C: 0 No · 1 Low · 2 Moderate · 3 High · 4 Critical Gap (bagi kompetensi paling kritikal dalam kategori). Priority berdasarkan impak kepada operasi jabatan.</p>
+      <p className="tp-note">R = tahap diperlukan · C = tahap semasa jabatan · R−C: 0 No · 1 Low · 2 Moderate · 3 High · 4 Critical Gap (bagi kompetensi paling kritikal dalam kategori). Priority berdasarkan impak kepada operasi jabatan. “(pembangunan)” = kursus yang diluluskan Ketua Jabatan walaupun tiada jurang.</p>
     </article>
   )
 }

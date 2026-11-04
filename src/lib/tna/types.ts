@@ -161,10 +161,11 @@ export interface TnaRequest {
 }
 export type KjDecision = 'masuk' | 'tangguh' | 'tidak'
 export const KJ_DECISION: Record<KjDecision, string> = { masuk: 'Masuk TNA', tangguh: 'Tangguh', tidak: 'Tidak dimasukkan' }
-/** A request counts in the TNA template if it closes a validated gap (unless KJ said "tidak"),
+/** A request counts in the TNA template if it closes a validated gap (unless KJ said "tidak" or "tangguh"),
  *  or if KJ explicitly chose "masuk" (development beyond the required level). */
 export function requestInTna(q: Pick<TnaRequest, 'kj_decision'>, supportsGap: boolean): boolean {
-  return supportsGap ? q.kj_decision !== 'tidak' : q.kj_decision === 'masuk'
+  // closes a gap → in, unless KJ chose "tidak" or "tangguh"; otherwise only when KJ chose "masuk"
+  return supportsGap ? q.kj_decision == null || q.kj_decision === 'masuk' : q.kj_decision === 'masuk'
 }
 /** One row of the hospital's 8-column TNA template (cols B–F; G/H are generated from gaps). */
 export interface TnaTemplateRow {
