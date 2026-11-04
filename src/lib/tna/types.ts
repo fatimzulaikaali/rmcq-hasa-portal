@@ -219,3 +219,26 @@ export const quarterFor = (label: string) =>
   label === 'Tinggi' ? 'S1 (Jan–Mac)' : label === 'Sederhana' ? 'S2 (Apr–Jun)' : label === 'Rendah' ? 'S3–S4 (Jul–Dis)' : '—'
 export const rm = (v: number | null | undefined) =>
   v == null ? '—' : 'RM ' + Number(v).toLocaleString('ms-MY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
+/* ---- Pelan Latihan: CQE calendar + individual training records ---- */
+export type CqeStatus = 'dirancang' | 'selesai' | 'ditangguh'
+export const CQE_STATUS: Record<CqeStatus, string> = { dirancang: 'Dirancang', selesai: 'Selesai', ditangguh: 'Ditangguh' }
+export interface TnaCqe {
+  id: number; cycle_id: number; competency_code: string | null; title_ms: string; organiser_unit: string | null
+  planned_month: number | null; actual_date: string | null; status: CqeStatus; attendees: number | null
+  notes_ms: string | null; sort_order: number
+}
+export type RecordStatus = 'planned' | 'attended' | 'verified' | 'rejected' | 'cancelled'
+export const RECORD_STATUS: Record<RecordStatus, string> = {
+  planned: 'Belum hadir', attended: 'Sudah hadir', verified: 'Disahkan hadir', rejected: 'Ditolak', cancelled: 'Dibatalkan',
+}
+export const RECORD_BADGE: Record<RecordStatus, string> = {
+  planned: 'b-amber', attended: 'b-green', verified: 'b-green', rejected: 'b-gray', cancelled: 'b-gray',
+}
+export interface TnaTrainingRecord {
+  id: number; assignment_id: number; request_id: number | null; competency_code: string | null
+  external_title_ms: string | null; provider_ms: string | null; training_type: TrainingType | null
+  est_cost_rm: number | null; planned_month: number | null; course_date: string | null
+  status: RecordStatus; source: string; plan_source: 'permohonan' | 'kamus' | 'manual' | null; notes_ms: string | null
+}
+export const isCqe = (title: string | null | undefined) => /^\s*CQE\b/i.test(title ?? '')

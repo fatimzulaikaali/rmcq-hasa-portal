@@ -2,8 +2,9 @@
 
 /* Printable TNA reports (A4). Rendered by /tna/laporan; each .tna-page starts on a new sheet. */
 import { Fragment, type ReactNode } from 'react'
-import { GAP_LABEL, LEVEL_NAME, MONTHS, PROG_SECTION, RMCQ_ROLE, STATUS_LABEL, progPriority, progScore, rm } from '@/lib/tna/types'
-import { calendar, clusterLabel, gapLines, lv, mgmtGrouped, reqStatus, templateUnit, type StaffReport } from '@/lib/tna/report'
+import { CQE_STATUS, GAP_LABEL, LEVEL_NAME, MONTHS, RECORD_STATUS, PROG_SECTION, RMCQ_ROLE, STATUS_LABEL, progPriority, progScore, rm } from '@/lib/tna/types'
+import { calendar, clusterLabel, gapLines, lv, mgmtGrouped, reqStatus, splitTraining, templateUnit, type StaffReport } from '@/lib/tna/report'
+import { planStats } from '@/lib/tna/plan'
 import { fmtDate, type TnaData } from './shared'
 
 const today = () => new Date().toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -232,6 +233,18 @@ export function DeptReport({ d, reps, unit }: { d: TnaData; reps: StaffReport[];
 
       {!unit && <MgmtReport d={d} reps={reps} />}
 
+      <GapAppendix d={d} reps={reps} unit={unit} />
+    </>
+  )
+}
+
+
+/* ---------------- Lampiran: butiran jurang (kod & nama staf — rekod dalaman) ---------------- */
+export function GapAppendix({ d, reps, unit }: { d: TnaData; reps: StaffReport[]; unit?: string }) {
+  const tpl = d.template.filter((t) => !unit || t.unit_code === unit)
+  const unitName = unit ? d.units.find((u) => u.code === unit)?.name_ms ?? unit : null
+  return (
+    <>
       {tpl.length > 0 && (
         <article className="tna-page tna-land">
           <Head d={d} title="Lampiran — Butiran Jurang Kompetensi Mengikut Unit" sub={unitName ?? 'Jabatan RMCQ'} />
@@ -402,5 +415,114 @@ export function MgmtReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
       </table>
       <p className="tp-note">R = tahap diperlukan · C = tahap semasa jabatan · R−C: 0 No · 1 Low · 2 Moderate · 3 High · 4 Critical Gap (bagi kompetensi paling kritikal dalam kategori). Priority berdasarkan impak kepada operasi jabatan. “(pembangunan)” = kursus yang diluluskan Ketua Jabatan walaupun tiada jurang.</p>
     </article>
+  )
+}
+
+/* ---------------- Laporan Jabatan (ringkas): proses → pelan → template hospital → lampiran ---------------- */
+export function ProcessSummary({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
+  const live = reps
+  const validated = live.filter((r) => r.validated)
+  const lines = gapLines(d, validated).filter((g) => g.withGap.length > 0)
+  const pin = new Map(d.pinputs.map((p) => [p.competency_code, p.mgmt_priority]))
+  const pr = (k: string) => lines.filter((g) => (pin.get(g.c.code) ?? 'Moderate') === k).length
+  const st = planStats(d)
+  const reqIn = d.requests.filter((q) => q.kj_decision === 'masuk' || (q.kj_decision == null && q.competency_code && validated.some((r) => r.a.id === q.assignment_id && r.gaps.some((g) => g.c.code === q.competency_code)))).length
+  const positions = d.positions.filter((p) => p.active).length
+  const compUsed = new Set(d.reqs.map((r) => r.competency_code)).size
+  const steps = [
+    { n: '1', t: 'Profil kompetensi', v: `${compUsed} kompetensi`, s: `${positions} jawatan · Kamus UiTM (pentadbiran) + Kamus RMCQ` },
+    { n: '2', t: 'Penilaian staf', v: `${validated.length}/${live.length} disahkan`, s: 'Penilaian kendiri 1–5 → disahkan Ketua Jabatan' },
+    { n: '3', t: 'Jurang kompetensi', v: `${lines.length} kompetensi`, s: `${validated.filter((r) => r.gaps.length).length} staf mempunyai sekurang-kurangnya satu jurang` },
+    { n: '4', t: 'Keutamaan', v: `${pr('High')} High · ${pr('Moderate')} Mod · ${pr('Low')} Low`, s: 'Ikut impak kepada operasi jabatan' },
+    { n: '5', t: 'Pelan latihan', v: `${st.cqeTotal} CQE + ${st.total} kursus`, s: `${d.requests.length} permohonan staf → ${reqIn} masuk TNA · anggaran ${rm(st.cost)}` },
+    { n: '6', t: 'Pelaksanaan', v: `${st.pct}% hadir`, s: `CQE ${st.cqeDone}/${st.cqeTotal} selesai · kursus ${st.attended}/${st.total} dihadiri` },
+  ]
+  const top = [...lines].sort((a, b) => b.withGap.length - a.withGap.length || b.points - a.points).slice(0, 8)
+  return (
+    <article className="tna-page">
+      <Head d={d} title={`Laporan Analisis Keperluan Latihan (TNA) ${d.cycle.year}`} sub="Jabatan RMCQ — ringkasan proses" />
+      <Sec n="1" title="Proses TNA jabatan">
+        <div className="tp-flow">{steps.map((x, i) => (
+          <Fragment key={x.n}>
+            <div className="tp-flow-box"><div className="tp-flow-n">{x.n}</div><div className="tp-flow-t">{x.t}</div><div className="tp-flow-v">{x.v}</div><div className="tp-flow-s">{x.s}</div></div>
+            {i < steps.length - 1 && <div className="tp-flow-arrow">→</div>}
+          </Fragment>
+        ))}</div>
+      </Sec>
+      <Sec n="2" title="Jurang utama (paling ramai staf)">
+        {!top.length ? <p>Tiada jurang yang disahkan.</p> : (
+          <table className="tp-tbl">
+            <thead><tr><th>Kompetensi</th><th className="c">Staf berjurang</th><th className="c">Priority</th><th>Latihan dirancang</th></tr></thead>
+            <tbody>{top.map((g) => (
+              <tr key={g.c.code}><td>{g.c.name_ms}</td><td className="c">{g.withGap.length} / {g.validated}</td><td className="c">{pin.get(g.c.code) ?? '—'}</td>
+                <td className="tp-small">{splitTraining(g.c.default_training_ms).join('; ') || '—'}</td></tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Sec>
+      <Sec n="3" title="Kandungan laporan ini">
+        <ol className="tp-toc">
+          <li><b>Pelan Latihan</b> — A. Kalendar CQE jabatan (wajib semua staf) · B. Pelan latihan individu dengan status kehadiran.</li>
+          <li><b>Template TNA Pengurusan Hospital</b> — format rasmi yang dihantar ke hospital (18 lajur).</li>
+          <li><b>Lampiran</b> — butiran jurang mengikut unit, staf dan kursus dipohon (rujukan dalaman).</li>
+        </ol>
+        <p className="tp-note">Data lengkap (staf, kamus, penilaian, permohonan, pelan) disimpan dalam Excel “Pakej Serahan” — portal RMCQ → TNA &amp; Kompetensi → Laporan → F.</p>
+      </Sec>
+    </article>
+  )
+}
+
+export function PlanReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
+  const unitName = new Map(d.units.map((u) => [u.code, u.name_ms]))
+  const byAsg = new Map(reps.map((r) => [r.a.id, r]))
+  const groups = reps.map((r) => ({ r, recs: d.training.filter((t) => t.assignment_id === r.a.id && t.status !== 'rejected').sort((a, b) => (a.planned_month ?? 13) - (b.planned_month ?? 13)) })).filter((g) => g.recs.length)
+  const st = planStats(d)
+  return (
+    <>
+      <article className="tna-page tna-land">
+        <Head d={d} title={`Pelan Latihan ${d.cycle.year} — A. Kalendar CQE Jabatan`} sub="Wajib untuk semua staf RMCQ" />
+        {!d.cqe.length ? <p>Tiada CQE dirancang.</p> : (
+          <table className="tp-tbl tp-cal">
+            <thead><tr><th>Bil.</th><th>CQE</th><th>Unit penganjur</th>{MONTHS.map((m) => <th key={m} className="c">{m}</th>)}<th className="c">Tarikh</th><th className="c">Status</th><th className="c">Hadir</th></tr></thead>
+            <tbody>{d.cqe.map((c, i) => (
+              <tr key={c.id}><td>{i + 1}</td><td>{c.title_ms}</td><td className="tp-small">{c.organiser_unit ? unitName.get(c.organiser_unit) ?? c.organiser_unit : '—'}</td>
+                {MONTHS.map((_, m) => <td key={m} className={`c ${c.planned_month === m + 1 ? 'tp-on' : ''}`}>{c.planned_month === m + 1 ? (c.status === 'selesai' ? '✓' : '●') : ''}</td>)}
+                <td className="c">{c.actual_date ? fmtDate(c.actual_date) : '—'}</td><td className="c">{CQE_STATUS[c.status]}</td><td className="c">{c.attendees ?? '—'}</td></tr>
+            ))}</tbody>
+          </table>
+        )}
+        <p className="tp-note">CQE {st.cqeDone}/{st.cqeTotal} selesai. ● dirancang · ✓ selesai.</p>
+      </article>
+      <article className="tna-page tna-land">
+        <Head d={d} title={`Pelan Latihan ${d.cycle.year} — B. Pelan Latihan Individu`} sub={`${st.total} kursus · ${st.attended} dihadiri (${st.pct}%) · anggaran ${rm(st.cost)}`} />
+        {!groups.length ? <p>Pelan individu belum dijana (portal → Pelan Latihan → Jana daripada TNA).</p> : (
+          <table className="tp-tbl">
+            <thead><tr><th>Staf</th><th>Kursus / latihan</th><th>Penganjur</th><th className="c">Jenis</th><th className="c">Bulan</th><th className="c">Kos (RM)</th><th className="c">Status</th><th className="c">Tarikh hadir</th></tr></thead>
+            <tbody>{groups.map(({ r, recs }) => recs.map((t, i) => (
+              <tr key={t.id}>
+                {i === 0 && <td rowSpan={recs.length}><b>{r.s.name}</b><div className="tp-small">{r.p.title_ms} · {r.p.unit_code}</div></td>}
+                <td>{t.external_title_ms}</td><td className="tp-small">{t.provider_ms ?? '—'}</td>
+                <td className="c">{t.training_type === 'luaran' ? 'Luaran' : 'Dalaman'}</td>
+                <td className="c">{t.planned_month ? MONTHS[t.planned_month - 1] : '—'}</td>
+                <td className="c">{t.est_cost_rm != null ? Number(t.est_cost_rm).toLocaleString('ms-MY') : '—'}</td>
+                <td className="c">{RECORD_STATUS[t.status]}</td><td className="c">{t.course_date ? fmtDate(t.course_date) : '—'}</td>
+              </tr>
+            )))}</tbody>
+          </table>
+        )}
+        {byAsg.size > groups.length && <p className="tp-note">{byAsg.size - groups.length} staf tiada kursus individu (CQE sahaja).</p>}
+      </article>
+    </>
+  )
+}
+
+export function DeptMainReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
+  return (
+    <>
+      <ProcessSummary d={d} reps={reps} />
+      <PlanReport d={d} reps={reps} />
+      <MgmtReport d={d} reps={reps} />
+      <GapAppendix d={d} reps={reps} />
+    </>
   )
 }

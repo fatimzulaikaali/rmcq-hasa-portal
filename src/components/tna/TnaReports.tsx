@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { GAP_LABEL, errMsg, type MgmtPriority, type TnaTemplateRow } from '@/lib/tna/types'
 import { downloadXlsx, handoverSheets, mgmtBlocks, sheetMgmt, sheetCalendar, sheetRequests, sheetTemplate, sheetTemplateDetail, staffReports, templateGH } from '@/lib/tna/report'
 import { L, Modal, todayISO, type TabProps } from './shared'
+import { sheetCqe, sheetPlan } from '@/lib/tna/plan'
 
 /* Laporan — printable reports (open in a new tab → browser print / PDF) and Excel exports,
  * plus editing of the hospital 8-column template rows (columns B–F). */
@@ -60,8 +61,9 @@ export function TnaReports({ data, supabase, reload, flash }: TabProps) {
         <button type="button" className="mm-btn primary sm" onClick={() => open(`r=individu&a=${staffSel}`)}>🖨 Buka untuk cetak</button>
       </Card>
 
-      <Card code="B" title="Laporan Jabatan" desc="Ringkasan liputan, status staf, peta jurang, keutamaan latihan, permohonan kursus, templat 8 lajur, template TNA pengurusan hospital (18 lajur) dan lampiran butiran jurang.">
-        <button type="button" className="mm-btn primary sm" onClick={() => open('r=jabatan')}>🖨 Buka untuk cetak</button>
+      <Card code="B" title="Laporan Jabatan" desc="Laporan utama jabatan dalam 4 bahagian: (1) proses TNA dalam satu halaman, (2) pelan latihan — kalendar CQE & pelan individu, (3) template TNA pengurusan hospital, (4) lampiran butiran jurang. “Analisis terperinci” = peta jurang, keutamaan, permohonan & templat 8 lajur.">
+        <button type="button" className="mm-btn primary sm" onClick={() => open('r=jabatan')}>🖨 Laporan Jabatan</button>
+        <button type="button" className="mm-btn sm" onClick={() => open('r=analisis')}>🖨 Analisis terperinci</button>
         <button type="button" className="mm-btn sm" disabled={!!busy} onClick={() => void xl('tpl', () => downloadXlsx(`TNA_Jabatan_RMCQ_${tag}.xlsx`, [sheetTemplate(data, reps), sheetTemplateDetail(data, reps)]))}>⬇ Templat 8 lajur (Excel)</button>
       </Card>
 
@@ -90,7 +92,7 @@ export function TnaReports({ data, supabase, reload, flash }: TabProps) {
       <MgmtInputs data={data} reps={reps} supabase={supabase} flash={flash} reload={reload} />
 
       <Card code="F" title="Pakej Serahan" desc="Semua data kitaran dalam satu fail Excel (staf, jawatan, profil, kamus, petunjuk tahap, penilaian, jurang, permohonan, latihan hospital, templat, kalendar) — boleh dibaca tanpa portal. Laporan lengkap mencetak A + B + D + E sekali gus.">
-        <button type="button" className="mm-btn primary sm" disabled={!!busy} onClick={() => void xl('all', () => downloadXlsx(`TNA_Pakej_Serahan_RMCQ_${tag}.xlsx`, handoverSheets(data)))}>{busy === 'all' ? 'Menjana…' : '⬇ Pakej Serahan (Excel)'}</button>
+        <button type="button" className="mm-btn primary sm" disabled={!!busy} onClick={() => void xl('all', () => downloadXlsx(`TNA_Pakej_Serahan_RMCQ_${tag}.xlsx`, [...handoverSheets(data), sheetCqe(data), sheetPlan(data)]))}>{busy === 'all' ? 'Menjana…' : '⬇ Pakej Serahan (Excel)'}</button>
         <button type="button" className="mm-btn sm" onClick={() => open('r=semua')}>🖨 Laporan lengkap</button>
       </Card>
 

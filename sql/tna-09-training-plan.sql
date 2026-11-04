@@ -1,0 +1,6 @@
+-- TNA 09: training plan (applied as migration tna_09_training_plan, 2026-11-04)
+-- * tna_training_records: + request_id, provider_ms, training_type, est_cost_rm, planned_month, plan_source, notes_ms, updated_at; status adds 'cancelled'
+-- * tna_cqe_sessions: department CQE calendar (seeded from Kamus items starting with "CQE")
+-- * tna_link_resolve_any / tna_link_training_get / tna_link_training_update: staff link "Latihan Saya" (works when the cycle is closed)
+-- * tna_competencies.template_unit: R26, R27 → KJ (cross-department block); KJ template row objective text updated
+-- Full DDL is in Supabase migration history (tna_09_training_plan).

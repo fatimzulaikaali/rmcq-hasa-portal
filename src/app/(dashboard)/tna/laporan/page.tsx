@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/client'
 import { errMsg } from '@/lib/tna/types'
 import { staffReports } from '@/lib/tna/report'
 import { loadTnaData, type TnaData } from '@/components/tna/shared'
-import { CalendarReport, DeptReport, HospitalReport, IndividualReport, MgmtReport, RequestsReport } from '@/components/tna/TnaPrint'
+import { CalendarReport, DeptMainReport, DeptReport, HospitalReport, IndividualReport, MgmtReport, PlanReport, RequestsReport } from '@/components/tna/TnaPrint'
 
 export default function TnaPrintPage() {
   return <Suspense fallback={<div className="tp-toolbar">Memuatkan…</div>}><PrintInner /></Suspense>
@@ -38,7 +38,7 @@ function PrintInner() {
   }, [supabase, router])
 
   const reps = useMemo(() => (d ? staffReports(d) : []), [d])
-  const title = { individu: 'Laporan Individu', jabatan: 'Laporan Jabatan', unit: 'Laporan Unit', kursus: 'Permohonan Kursus', kalendar: 'Kalendar Latihan', pengurusan: 'Template Pengurusan', hospital: 'Latihan Hospital', semua: 'Laporan Lengkap' }[r] ?? 'Laporan'
+  const title = { individu: 'Laporan Individu', jabatan: 'Laporan Jabatan', analisis: 'Analisis Terperinci', pelan: 'Pelan Latihan', unit: 'Laporan Unit', kursus: 'Permohonan Kursus', kalendar: 'Kalendar Latihan', pengurusan: 'Template Pengurusan', hospital: 'Latihan Hospital', semua: 'Laporan Lengkap' }[r] ?? 'Laporan'
 
   useEffect(() => { if (d) document.title = `TNA ${d.cycle.year} — ${title}` }, [d, title])
 
@@ -57,9 +57,11 @@ function PrintInner() {
       {d && (
         <div className="tp-doc">
           {(r === 'individu' || r === 'semua') && (a === 'all' ? reps : reps.filter((x) => String(x.a.id) === a)).map((x) => <IndividualReport key={x.a.id} d={d} r={x} />)}
-          {(r === 'jabatan' || r === 'semua') && <DeptReport d={d} reps={reps} />}
+          {(r === 'jabatan' || r === 'semua') && <DeptMainReport d={d} reps={reps} />}
+          {r === 'analisis' && <DeptReport d={d} reps={reps} />}
+          {r === 'pelan' && <PlanReport d={d} reps={reps} />}
           {r === 'unit' && <DeptReport d={d} reps={reps} unit={u} />}
-          {(r === 'pengurusan' || r === 'semua') && <MgmtReport d={d} reps={reps} />}
+          {r === 'pengurusan' && <MgmtReport d={d} reps={reps} />}
           {(r === 'kursus' || r === 'semua') && <RequestsReport d={d} reps={reps} />}
           {(r === 'hospital' || r === 'semua') && <HospitalReport d={d} />}
           {(r === 'kalendar' || r === 'semua') && <CalendarReport d={d} reps={reps} />}

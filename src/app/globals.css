@@ -1487,3 +1487,33 @@ body{counter-reset:rcpage;}
 .tp-mgmt td{font-size:8.5px;}
 .tp-mul{list-style:disc;margin:0 0 0 11px;padding:0;}
 .tp-mul li{margin-bottom:1px;}
+/* TNA — Pelan Latihan & Panduan */
+.tna-sub{font-size:12.5px;font-weight:700;margin:16px 0 6px;color:var(--text);}
+.tna-cal td,.tna-cal th{padding:5px 4px;}
+.tna-cal td.c{min-width:30px;}
+.tna-cal-on{background:#DCE7F7;color:var(--blue);font-weight:700;}
+.tna-cal-done{background:var(--green-lt);color:var(--green);font-weight:700;}
+.tna-cal-off{background:#EEE;color:#999;}
+.tna-lvsel.ok{border-color:#A9CF85;background:var(--green-lt);}
+.tna-guide{list-style:none;padding:0;margin:8px 0 12px;}
+.tna-guide>li{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+.tna-guide-n{flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--blue-lt);color:var(--blue);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.tna-guide>li.done .tna-guide-n{background:var(--green-lt);color:var(--green);}
+.tna-guide-t{font-weight:700;font-size:13.5px;margin-bottom:3px;}
+.tna-guide ul{margin:0 0 0 16px;padding:0;list-style:disc;font-size:12.5px;color:#444;}
+.tna-guide ul li{margin:2px 0;}
+/* staff link — Latihan Saya */
+.tna-tr{border:1px solid #E5E7EB;border-radius:11px;padding:10px 12px;margin-top:10px;}
+.tna-tr-h{font-weight:700;color:#16202E;font-size:14px;}
+.tna-tr-m{font-size:12.5px;color:var(--muted);margin-top:2px;}
+.tna-tr-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;}
+.tna-tr-row input[type=date]{padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font:inherit;font-size:13px;}
+.tp-flow{display:flex;align-items:stretch;gap:4px;margin:6px 0 4px;}
+.tp-flow-box{flex:1;border:1.5px solid #16202E;border-radius:8px;padding:7px 6px;text-align:center;min-width:0;}
+.tp-flow-n{display:inline-block;width:18px;height:18px;line-height:18px;border-radius:50%;background:#16202E;color:#fff;font-size:9.5px;font-weight:700;}
+.tp-flow-t{font-weight:700;font-size:10px;margin-top:3px;}
+.tp-flow-v{font-size:12px;font-weight:700;color:#185FA5;margin:3px 0;}
+.tp-flow-s{font-size:8.5px;color:#555;line-height:1.3;}
+.tp-flow-arrow{align-self:center;font-weight:700;color:#16202E;}
+.tp-toc{margin:2px 0 4px 16px;padding:0;font-size:10px;}
+.tp-toc li{margin:3px 0;}

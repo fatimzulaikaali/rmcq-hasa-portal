@@ -21,8 +21,10 @@ import { TnaKamus } from '@/components/tna/TnaKamus'
 import { TnaCycleTab } from '@/components/tna/TnaCycleTab'
 import { TnaProgrammes } from '@/components/tna/TnaProgrammes'
 import { TnaReports } from '@/components/tna/TnaReports'
+import { TnaPlan } from '@/components/tna/TnaPlan'
+import { TnaGuide } from '@/components/tna/TnaGuide'
 
-type Tab = 'sum' | 'assess' | 'valid' | 'staff' | 'pos' | 'kamus' | 'prog' | 'rep' | 'cycle'
+type Tab = 'sum' | 'assess' | 'valid' | 'staff' | 'pos' | 'kamus' | 'prog' | 'plan' | 'rep' | 'cycle' | 'guide'
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'sum', icon: '📊', label: 'Ringkasan' },
   { id: 'assess', icon: '🔗', label: 'Penilaian' },
@@ -31,8 +33,10 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'pos', icon: '◆', label: 'Profil Jawatan' },
   { id: 'kamus', icon: '📖', label: 'Kamus' },
   { id: 'prog', icon: '🏥', label: 'Latihan Hospital' },
+  { id: 'plan', icon: '🗓', label: 'Pelan Latihan' },
   { id: 'rep', icon: '🖨', label: 'Laporan' },
-  { id: 'cycle', icon: '🗓', label: 'Kitaran' },
+  { id: 'cycle', icon: '⏱', label: 'Kitaran' },
+  { id: 'guide', icon: '❓', label: 'Panduan' },
 ]
 
 export default function TnaPage() {
@@ -126,8 +130,10 @@ export default function TnaPage() {
               {tab === 'pos' && <TnaPositions {...props} />}
               {tab === 'kamus' && <TnaKamus {...props} />}
               {tab === 'prog' && <TnaProgrammes {...props} />}
+              {tab === 'plan' && <TnaPlan {...props} />}
               {tab === 'rep' && <TnaReports {...props} />}
               {tab === 'cycle' && <TnaCycleTab {...props} />}
+              {tab === 'guide' && <TnaGuide {...props} />}
             </>
           )}
         </main>
