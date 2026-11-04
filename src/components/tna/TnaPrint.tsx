@@ -212,17 +212,13 @@ export function DeptReport({ d, reps, unit }: { d: TnaData; reps: StaffReport[];
                           {u.groups.map((gr) => (
                             <div key={gr.label} className="tp-ghg">
                               <div className={`tp-ghh tp-p-${gr.label}`}>{gr.label} · {gr.quarter}</div>
-                              <ul>{gr.items.map((x) => (
-                                <li key={x.c.code}><b>{x.c.code}</b> {x.c.name_ms} <span className="tp-small">({x.staff} staf)</span>: {x.requested.length
-                                  ? x.requested.map((q) => `${q.title}${q.provider ? ` (${q.provider})` : ''}`).join('; ') + ' †'
-                                  : x.kamus ?? '—'}</li>
-                              ))}</ul>
+                              <ul>{gr.courses.map((c) => <li key={c}>{c}</li>)}</ul>
                             </div>
                           ))}
                           {u.extra.length > 0 && (
                             <div className="tp-ghg">
                               <div className="tp-ghh">Pembangunan lanjutan · diluluskan KJ</div>
-                              <ul>{u.extra.map((x, k) => <li key={k}>{x.title}{x.provider ? ` (${x.provider})` : ''} <span className="tp-small">— {x.staff}{x.code ? ` [${x.code}]` : ''}</span></li>)}</ul>
+                              <ul>{Array.from(new Set(u.extra.map((x) => `${x.title}${x.provider ? ` (${x.provider})` : ''}`))).map((c) => <li key={c}>{c}</li>)}</ul>
                             </div>
                           )}
                         </>}
@@ -230,9 +226,11 @@ export function DeptReport({ d, reps, unit }: { d: TnaData; reps: StaffReport[];
               )
             })}</tbody>
           </table>
-          <p className="tp-note">Setiap kompetensi disimpulkan di bawah unit yang bertanggungjawab ke atasnya (Kamus → Baris templat), tanpa mengira unit staf yang berjurang — cth. R01 Keselamatan Pesakit di bawah Unit Insiden & Keselamatan Pesakit. Lajur Kompetensi Diperlukan = tahap tertinggi diperlukan dalam jabatan. Cadangan Latihan = latihan bagi jurang yang telah disahkan, disusun mengikut keutamaan dan suku tahun. † = kursus yang dipohon sendiri oleh staf (jika tiada, cadangan Kamus dipaparkan). Pembangunan lanjutan = permohonan tanpa jurang yang diluluskan Ketua Jabatan. Nama staf dan cadangan Kamus penuh di Lampiran.</p>
+          <p className="tp-note">Setiap kompetensi disimpulkan di bawah unit yang bertanggungjawab ke atasnya (Kamus → Baris templat), tanpa mengira unit staf yang berjurang — cth. R01 Keselamatan Pesakit di bawah Unit Insiden & Keselamatan Pesakit. Lajur Kompetensi Diperlukan = tahap tertinggi diperlukan dalam jabatan. Cadangan Latihan = kursus bagi jurang yang telah disahkan, disusun mengikut keutamaan dan suku tahun (kursus yang dipohon staf; jika tiada, cadangan Kamus). Pembangunan lanjutan = kursus tanpa jurang yang diluluskan Ketua Jabatan. Butiran kompetensi dan staf di Lampiran.</p>
         </article>
       )}
+
+      {!unit && <MgmtReport d={d} reps={reps} />}
 
       {tpl.length > 0 && (
         <article className="tna-page tna-land">

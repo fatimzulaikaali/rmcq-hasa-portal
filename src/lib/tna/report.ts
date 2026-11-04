@@ -88,7 +88,7 @@ export function gapLines(d: TnaData, reps: StaffReport[]): GapLine[] {
 export interface TplCore { c: TnaCompetency; max: number }
 export interface TplReq { title: string; provider: string | null; staff: string[] }
 export interface TplTraining { c: TnaCompetency; staff: number; kamus: string | null; requested: TplReq[] }
-export interface TplGroup { label: 'Tinggi' | 'Sederhana' | 'Rendah'; quarter: string; items: TplTraining[] }
+export interface TplGroup { label: 'Tinggi' | 'Sederhana' | 'Rendah'; quarter: string; items: TplTraining[]; courses: string[] }
 export interface TplDetail { g: GapLine; staff: { name: string; from: number; to: number; never: boolean }[]; requested: TplReq[] }
 export interface TplExtra { title: string; provider: string | null; staff: string; code: string | null; note: string | null }
 export interface TplUnit {
@@ -102,6 +102,7 @@ export interface TplUnit {
  *  details = the evidence behind H (who has which gap) for the appendix table. */
 /** Template row for cross-department (generic, leadership, support) competencies and uncategorised courses. */
 export const CROSS_UNIT = 'KJ'
+const uniqCourses = (xs: string[]) => { const seen = new Set<string>(); return xs.filter((x) => { const k = x.trim().toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true }) }
 /** Which template row (unit) concludes gaps in competency c. */
 export const ownerOf = (c: Pick<TnaCompetency, 'template_unit' | 'unit_code' | 'layer'>): string =>
   c.template_unit ?? c.unit_code ?? 'KJ'
@@ -134,7 +135,11 @@ export function templateUnit(d: TnaData, unitCode: string | null, reps: StaffRep
   const groups: TplGroup[] = (['Tinggi', 'Sederhana', 'Rendah'] as const).map((label) => ({
     label, quarter: quarterFor(label),
     items: lines.filter((x) => x.label === label).map((g) => ({ c: g.c, staff: g.withGap.length, kamus: g.c.default_training_ms, requested: reqFor(g) })),
-  })).filter((x) => x.items.length)
+  })).filter((x) => x.items.length).map((g) => ({
+    ...g,
+    // course names only (final report): staff-requested courses where there are any, else the Kamus suggestion
+    courses: uniqCourses(g.items.flatMap((t) => t.requested.length ? t.requested.map((q) => q.title + (q.provider ? ` (${q.provider})` : '')) : splitTraining(t.kamus))),
+  }))
   const compBy = new Map(d.comps.map((c) => [c.code, c]))
   const reqOwner = (_rep: StaffReport, code: string | null) => { const c = code ? compBy.get(code) : undefined; return c ? ownerOf(c) : CROSS_UNIT }
   const extra: TplExtra[] = reps.flatMap((rep) => rep.validated ? rep.requests
@@ -157,11 +162,10 @@ export function templateUnit(d: TnaData, unitCode: string | null, reps: StaffRep
       : [
         ...(!groups.length ? ['Tiada jurang kompetensi — latihan pengekalan sahaja.'] : groups.map((gr) => [
           `KEUTAMAAN ${gr.label.toUpperCase()} — ${gr.quarter}`,
-          ...gr.items.map((t) => `• ${t.c.code} ${t.c.name_ms} (${t.staff} staf): ${t.requested.length
-            ? t.requested.map((q) => `${q.title}${q.provider ? ` (${q.provider})` : ''}`).join('; ') + ' †' : t.kamus ?? '—'}`),
+          ...gr.courses.map((c) => `• ${c}`),
         ].join('\n'))),
         ...(extra.length ? [['PEMBANGUNAN LANJUTAN (diluluskan Ketua Jabatan)',
-          ...extra.map((x) => `• ${x.title}${x.provider ? ` (${x.provider})` : ''} — ${x.staff}${x.code ? ` [${x.code}]` : ''}`)].join('\n')] : []),
+          ...uniqCourses(extra.map((x) => `${x.title}${x.provider ? ` (${x.provider})` : ''}`)).map((c) => `• ${c}`)].join('\n')] : []),
       ].join('\n\n')
   return { members, assessed, core, groups, extra, details, G, H }
 }

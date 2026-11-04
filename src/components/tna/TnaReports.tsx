@@ -60,7 +60,7 @@ export function TnaReports({ data, supabase, reload, flash }: TabProps) {
         <button type="button" className="mm-btn primary sm" onClick={() => open(`r=individu&a=${staffSel}`)}>🖨 Buka untuk cetak</button>
       </Card>
 
-      <Card code="B" title="Laporan Jabatan" desc="Ringkasan liputan, status staf, peta jurang, keutamaan latihan, permohonan kursus dan helaian TNA dalam templat 8 lajur pengurusan hospital.">
+      <Card code="B" title="Laporan Jabatan" desc="Ringkasan liputan, status staf, peta jurang, keutamaan latihan, permohonan kursus, templat 8 lajur, template TNA pengurusan hospital (18 lajur) dan lampiran butiran jurang.">
         <button type="button" className="mm-btn primary sm" onClick={() => open('r=jabatan')}>🖨 Buka untuk cetak</button>
         <button type="button" className="mm-btn sm" disabled={!!busy} onClick={() => void xl('tpl', () => downloadXlsx(`TNA_Jabatan_RMCQ_${tag}.xlsx`, [sheetTemplate(data, reps), sheetTemplateDetail(data, reps)]))}>⬇ Templat 8 lajur (Excel)</button>
       </Card>
