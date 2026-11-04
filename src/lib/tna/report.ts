@@ -100,6 +100,8 @@ export interface TplUnit {
  *  G = what the unit must be competent in (core functional competencies, highest level in unit).
  *  H = training to close the validated gaps, grouped by priority → quarter, one line per course.
  *  details = the evidence behind H (who has which gap) for the appendix table. */
+/** Template row for cross-department (generic, leadership, support) competencies and uncategorised courses. */
+export const CROSS_UNIT = 'KJ'
 /** Which template row (unit) concludes gaps in competency c. */
 export const ownerOf = (c: Pick<TnaCompetency, 'template_unit' | 'unit_code' | 'layer'>): string =>
   c.template_unit ?? c.unit_code ?? 'KJ'
@@ -134,7 +136,7 @@ export function templateUnit(d: TnaData, unitCode: string | null, reps: StaffRep
     items: lines.filter((x) => x.label === label).map((g) => ({ c: g.c, staff: g.withGap.length, kamus: g.c.default_training_ms, requested: reqFor(g) })),
   })).filter((x) => x.items.length)
   const compBy = new Map(d.comps.map((c) => [c.code, c]))
-  const reqOwner = (rep: StaffReport, code: string | null) => { const c = code ? compBy.get(code) : undefined; return c ? ownerOf(c) : rep.p.unit_code }
+  const reqOwner = (_rep: StaffReport, code: string | null) => { const c = code ? compBy.get(code) : undefined; return c ? ownerOf(c) : CROSS_UNIT }
   const extra: TplExtra[] = reps.flatMap((rep) => rep.validated ? rep.requests
     .filter((q) => reqOwner(rep, q.competency_code) === unitCode && !supports(rep, q.competency_code) && requestInTna(q, false))
     .map((q) => ({ title: q.title_ms.trim(), provider: q.provider_ms, staff: rep.s.name, code: q.competency_code, note: q.kj_note })) : [])
@@ -419,7 +421,7 @@ export function mgmtGrouped(d: TnaData, reps: StaffReport[]): MgmtGroupBlock[] {
       if (q.competency_code && inRows.has(q.competency_code)) continue // already listed under its gap row
       if (q.kj_decision !== 'masuk') continue
       const c = q.competency_code ? compBy.get(q.competency_code) : undefined
-      extras.push({ unit: c ? ownerOf(c) : r.p.unit_code, cat: c ? mgmtCategory(c) : 'Generik', q, comp: c?.name_ms ?? null })
+      extras.push({ unit: c ? ownerOf(c) : CROSS_UNIT, cat: c ? mgmtCategory(c) : 'Generik', q, comp: c?.name_ms ?? null })
     }
   }
   return blocks.map((b) => {
