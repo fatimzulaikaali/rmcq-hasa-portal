@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   TnaAssignment, TnaCompetency, TnaCycle, TnaItem, TnaLevel, TnaPosition, TnaProgramme, TnaRequest, TnaRequirement,
-  TnaStaff, TnaTemplateRow, TnaUnit,
+  TnaStaff, TnaTemplateRow, TnaUnit, TnaPriorityInput,
 } from '@/lib/tna/types'
 
 export interface PriorityRow {
@@ -26,6 +26,7 @@ export interface TnaData {
   asg: TnaAssignment[]
   items: TnaItem[]
   priority: PriorityRow[]
+  pinputs: TnaPriorityInput[]
   requests: TnaRequest[]
   template: TnaTemplateRow[]
   programmes: TnaProgramme[]
@@ -125,12 +126,13 @@ export async function loadTnaData(supabase: SupabaseClient): Promise<TnaData | n
   if (e1) throw e1
   const posIds = ((positions.data ?? []) as TnaPosition[]).map((p) => p.id)
   const asgIds = ((asg.data ?? []) as TnaAssignment[]).map((a) => a.id)
-  const [levels, reqs, items, priority, requests] = await Promise.all([
+  const [levels, reqs, items, priority, requests, pinputs] = await Promise.all([
     fetchAll<TnaLevel>((f, t) => supabase.from('tna_competency_levels').select('*').order('competency_code').order('level').range(f, t)),
     posIds.length ? fetchAll<TnaRequirement>((f, t) => supabase.from('tna_position_requirements').select('*').in('position_id', posIds).order('position_id').order('competency_code').range(f, t)) : Promise.resolve([] as TnaRequirement[]),
     asgIds.length ? fetchAll<TnaItem>((f, t) => supabase.from('tna_assessment_items').select('*').in('assignment_id', asgIds).order('assignment_id').order('competency_code').range(f, t)) : Promise.resolve([] as TnaItem[]),
     fetchAll<PriorityRow>((f, t) => supabase.from('tna_v_competency_priority').select('*').eq('cycle_id', cycle.id).order('competency_code').range(f, t)),
     asgIds.length ? fetchAll<TnaRequest>((f, t) => supabase.from('tna_course_requests').select('*').in('assignment_id', asgIds).order('assignment_id').order('sort_order').range(f, t)) : Promise.resolve([] as TnaRequest[]),
+    fetchAll<TnaPriorityInput>((f, t) => supabase.from('tna_priority_inputs').select('*').eq('cycle_id', cycle.id).order('competency_code').range(f, t)),
   ])
   return {
     cycle, cycles,
@@ -141,7 +143,7 @@ export async function loadTnaData(supabase: SupabaseClient): Promise<TnaData | n
     asg: (asg.data ?? []) as TnaAssignment[],
     template: (template.data ?? []) as TnaTemplateRow[],
     programmes: ((programmes.data ?? []) as TnaProgramme[]).map((p) => ({ ...p, planned_months: p.planned_months ?? [] })),
-    levels, reqs, items, priority, requests,
+    levels, reqs, items, priority, requests, pinputs,
   }
 }
 

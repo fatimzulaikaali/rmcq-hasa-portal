@@ -157,6 +157,7 @@ export interface TnaRequest {
   competency_code: string | null; reason_ms: string | null; preferred_month: number | null
   est_cost_rm: number | null; priority: ReqPriority | null
   kj_decision: KjDecision | null; kj_note: string | null; decided_at: string | null
+  training_type: TrainingType | null
 }
 export type KjDecision = 'masuk' | 'tangguh' | 'tidak'
 export const KJ_DECISION: Record<KjDecision, string> = { masuk: 'Masuk TNA', tangguh: 'Tangguh', tidak: 'Tidak dimasukkan' }
@@ -170,7 +171,23 @@ export interface TnaTemplateRow {
   id: number; cycle_id: number; sort_order: number; unit_code: string | null; item_ms: string
   indicator_ms: string | null; kpi_ms: string | null; weight_ms: string | null
   activities_ms: string | null; initial_training_ms: string | null
+  goal_ms: string | null; objective_ms: string | null; mgmt_kpi_ms: string | null
 }
+/** Per-cycle, per-competency inputs set by the Ketua Jabatan. */
+export interface TnaPriorityInput {
+  cycle_id: number; competency_code: string; impact: number; strategic: number
+  dept_current_level: number | null; mgmt_priority: MgmtPriority | null
+}
+export type MgmtPriority = 'High' | 'Moderate' | 'Low'
+export type TrainingType = 'dalaman' | 'luaran'
+export const TRAINING_TYPE: Record<TrainingType, string> = { dalaman: 'Dalaman (In-house)', luaran: 'Luaran (External)' }
+/** In-house vs external when the KJ has not chosen: in-house if the provider looks internal or is empty. */
+export function trainingTypeOf(q: { training_type?: TrainingType | null; provider_ms: string | null }): TrainingType {
+  if (q.training_type) return q.training_type
+  const p = (q.provider_ms ?? '').trim()
+  return !p || /\b(uitm|hasa|ild|rmcq|dalaman|in-?house|jabatan)\b/i.test(p) ? 'dalaman' : 'luaran'
+}
+export const GAP_LABEL = ['No Gap', 'Low Gap', 'Moderate Gap', 'High Gap', 'Critical Gap']
 export interface TnaProgramme {
   id: number; cycle_id: number; scope: string; source_section: string | null; issue_ms: string | null
   title_ms: string; target_group_ms: string | null; owner_ms: string | null; rmcq_role: string | null

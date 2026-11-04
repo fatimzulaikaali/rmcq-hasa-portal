@@ -3,7 +3,7 @@
 import type { TnaData } from '@/components/tna/shared'
 import {
   CLUSTERS, LEVEL_NAME, MONTHS, STATUS_LABEL, clusterOrder, gapScore, priorityLabel, progPriority, progScore, quarterFor,
-  KJ_DECISION, requestInTna, type TnaAssignment, type TnaCompetency, type TnaPosition, type TnaRequest, type TnaStaff,
+  KJ_DECISION, requestInTna, trainingTypeOf, type MgmtPriority, type TnaAssignment, type TnaCompetency, type TnaPosition, type TnaRequest, type TnaStaff,
 } from './types'
 
 export interface StaffItem {
@@ -191,7 +191,7 @@ export function calendar(d: TnaData, reps: StaffReport[]): CalLine[] {
 
 /* ---------------- Excel (SheetJS) ---------------- */
 type Cell = string | number | null
-type SheetSpec = { name: string; rows: Cell[][]; widths?: number[] }
+type SheetSpec = { name: string; rows: Cell[][]; widths?: number[]; merges?: { s: { r: number; c: number }; e: { r: number; c: number } }[] }
 
 export async function downloadXlsx(fileName: string, sheets: SheetSpec[]) {
   const XLSX = await import('xlsx')
@@ -199,6 +199,7 @@ export async function downloadXlsx(fileName: string, sheets: SheetSpec[]) {
   for (const sh of sheets) {
     const ws = XLSX.utils.aoa_to_sheet(sh.rows)
     if (sh.widths) ws['!cols'] = sh.widths.map((w) => ({ wch: w }))
+    if (sh.merges) ws['!merges'] = sh.merges
     XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31))
   }
   XLSX.writeFile(wb, fileName)
@@ -307,5 +308,164 @@ export function handoverSheets(d: TnaData): SheetSpec[] {
     sheetTemplate(d, reps),
     sheetTemplateDetail(d, reps),
     sheetCalendar(d, reps),
+    sheetMgmt(d, reps),
   ]
+}
+
+/* ---------------- Template TNA Pengurusan Hospital (18 lajur) ---------------- */
+const median = (xs: number[]) => {
+  if (!xs.length) return null
+  const s = [...xs].sort((a, b) => a - b)
+  return s[Math.floor((s.length - 1) / 2)] // lower median → whole level
+}
+export const mgmtCategory = (c: TnaCompetency) =>
+  c.layer === 'B' ? 'Fungsional' : c.cluster === 'Kepimpinan' ? 'Kepimpinan' : 'Generik'
+
+export interface MgmtPlanItem { title: string; provider: string | null; staff: string[]; cost: number | null; months: number[]; source: 'staf' | 'kamus' }
+export interface MgmtCompRow {
+  c: TnaCompetency; category: string
+  R: number; Cauto: number; C: number; override: boolean; gap: number
+  staffWithGap: StaffReport[]; staffRequired: number
+  priority: MgmtPriority | null
+  inhouse: MgmtPlanItem[]; external: MgmtPlanItem[]
+}
+export interface MgmtUnitBlock { t: TnaData['template'][number]; rows: MgmtCompRow[]; noGap: number }
+
+/** Department-level R and C per competency: R = median required level, C = median agreed level
+ *  (validated staff who need it), C may be overridden by the KJ. Rows = competencies where ≥1 staff has a gap. */
+export function mgmtBlocks(d: TnaData, reps: StaffReport[]): MgmtUnitBlock[] {
+  const pin = new Map(d.pinputs.map((p) => [p.competency_code, p]))
+  const validated = reps.filter((r) => r.validated)
+  const byComp = new Map<string, { c: TnaCompetency; req: number[]; agreed: number[]; gapStaff: StaffReport[] }>()
+  for (const r of validated) for (const it of r.items) {
+    const e = byComp.get(it.c.code) ?? { c: it.c, req: [], agreed: [], gapStaff: [] }
+    e.req.push(it.required)
+    if (it.agreed != null) e.agreed.push(it.agreed)
+    if ((it.gap ?? 0) > 0) e.gapStaff.push(r)
+    byComp.set(it.c.code, e)
+  }
+  const plan = (code: string, gapStaff: StaffReport[], kamus: string | null) => {
+    const inh = new Map<string, MgmtPlanItem>(); const ext = new Map<string, MgmtPlanItem>()
+    for (const r of validated) for (const q of r.requests) {
+      if (q.competency_code !== code) continue
+      const supports = gapStaff.includes(r)
+      if (!requestInTna(q, supports)) continue
+      const m = trainingTypeOf(q) === 'luaran' ? ext : inh
+      const key = q.title_ms.trim().toLowerCase()
+      const x = m.get(key) ?? { title: q.title_ms.trim(), provider: q.provider_ms, staff: [], cost: null, months: [], source: 'staf' as const }
+      if (!x.staff.includes(r.s.name)) x.staff.push(r.s.name)
+      if (q.est_cost_rm != null) x.cost = (x.cost ?? 0) + Number(q.est_cost_rm)
+      if (q.preferred_month && !x.months.includes(q.preferred_month)) x.months.push(q.preferred_month)
+      m.set(key, x)
+    }
+    if (!inh.size && !ext.size && kamus) inh.set('_k', { title: kamus, provider: null, staff: gapStaff.map((r) => r.s.name), cost: null, months: [], source: 'kamus' })
+    return { inhouse: Array.from(inh.values()), external: Array.from(ext.values()) }
+  }
+  return d.template.map((t) => {
+    const all = Array.from(byComp.values()).filter((e) => ownerOf(e.c) === t.unit_code)
+    const rows: MgmtCompRow[] = all.filter((e) => e.gapStaff.length > 0).map((e) => {
+      const R = median(e.req) ?? 1
+      const Cauto = median(e.agreed) ?? 1
+      const p = pin.get(e.c.code)
+      const C = p?.dept_current_level ?? Cauto
+      return {
+        c: e.c, category: mgmtCategory(e.c), R, Cauto, C, override: p?.dept_current_level != null, gap: Math.max(0, R - C),
+        staffWithGap: e.gapStaff, staffRequired: e.req.length, priority: p?.mgmt_priority ?? null,
+        ...plan(e.c.code, e.gapStaff, e.c.default_training_ms),
+      }
+    }).sort((a, b) => ['High', 'Moderate', 'Low', null].indexOf(a.priority) - ['High', 'Moderate', 'Low', null].indexOf(b.priority)
+      || b.gap - a.gap || a.c.code.localeCompare(b.c.code, undefined, { numeric: true }))
+    return { t, rows, noGap: all.length - rows.length }
+  })
+}
+
+const planTxt = (xs: MgmtPlanItem[]) => xs.map((x) => `• ${x.title}${x.provider ? ` (${x.provider})` : ''}${x.source === 'staf' ? ` — ${x.staff.join(', ')}` : ' — cadangan Kamus'}`).join('\n')
+const costOf = (xs: MgmtPlanItem[]) => { const v = xs.reduce((s, x) => s + (x.cost ?? 0), 0); return v ? v : null }
+const monthsOf = (xs: MgmtPlanItem[], fallback: string) => {
+  const m = Array.from(new Set(xs.flatMap((x) => x.months))).sort((a, b) => a - b)
+  return m.length ? m.map((x) => MONTHS[x - 1]).join(', ') : fallback
+}
+export const mgmtQuarter = (p: MgmtPriority | null) => (p === 'High' ? 'S1 (Jan–Mac)' : p === 'Moderate' ? 'S2 (Apr–Jun)' : p === 'Low' ? 'S3–S4 (Jul–Dis)' : '—')
+export const mgmtDate = (r: MgmtCompRow) => monthsOf([...r.inhouse, ...r.external], mgmtQuarter(r.priority))
+export const mgmtPlanTxt = planTxt
+export const mgmtCost = costOf
+
+/* ---- Summarised rows for the final management report: one row per objective (template row) × category ---- */
+export interface MgmtGroupRow {
+  category: string; competencies: string[]
+  R: number; C: number; gap: number; priority: MgmtPriority | null
+  inhouse: string[]; inhouseCost: number | null; external: string[]; externalCost: number | null; date: string
+}
+export interface MgmtGroupBlock { t: TnaData['template'][number]; rows: MgmtGroupRow[] }
+const PRI_ORDER: (MgmtPriority | null)[] = ['High', 'Moderate', 'Low', null]
+/** Split a Kamus training text into separate courses (by line or ";"; numbered lists are cleaned). */
+export const splitTraining = (t: string | null) => (t ?? '').split(/\n|;/).map((x) => x.replace(/^\s*(\d+[.)]|[-•])\s*/, '').replace(/[,.;\s]+$/, '').trim()).filter(Boolean)
+const uniq = (xs: string[]) => { const seen = new Set<string>(); return xs.filter((x) => { const k = x.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true }) }
+
+/** R/C/Gap of a group follow its most critical competency (largest gap, then highest priority),
+ *  so a group with a real gap never shows Gap 0. In-house = Kamus suggestions + in-house staff requests;
+ *  External = external staff requests. No codes or staff names (final report). */
+export function mgmtGrouped(d: TnaData, reps: StaffReport[]): MgmtGroupBlock[] {
+  return mgmtBlocks(d, reps).map((b) => {
+    const cats = ['Fungsional', 'Generik', 'Kepimpinan'].filter((c) => b.rows.some((r) => r.category === c))
+    const rows = cats.map((cat) => {
+      const rs = b.rows.filter((r) => r.category === cat)
+        .sort((x, y) => y.gap - x.gap || PRI_ORDER.indexOf(x.priority) - PRI_ORDER.indexOf(y.priority))
+      const crit = rs[0]
+      const priority = rs.map((r) => r.priority).sort((x, y) => PRI_ORDER.indexOf(x) - PRI_ORDER.indexOf(y))[0] ?? null
+      const req = (xs: MgmtPlanItem[]) => xs.filter((x) => x.source === 'staf')
+      const inh = uniq([...rs.flatMap((r) => splitTraining(r.c.default_training_ms)), ...rs.flatMap((r) => req(r.inhouse).map((x) => x.title + (x.provider ? ` (${x.provider})` : '')))])
+      const ext = uniq(rs.flatMap((r) => req(r.external).map((x) => x.title + (x.provider ? ` (${x.provider})` : ''))))
+      const sum = (xs: MgmtPlanItem[]) => xs.reduce((s, x) => s + (x.cost ?? 0), 0)
+      const ic = rs.reduce((s, r) => s + sum(req(r.inhouse)), 0); const ec = rs.reduce((s, r) => s + sum(req(r.external)), 0)
+      const months = Array.from(new Set(rs.flatMap((r) => [...r.inhouse, ...r.external].flatMap((x) => x.months)))).sort((a, b) => a - b)
+      return {
+        category: cat,
+        competencies: rs.sort((x, y) => PRI_ORDER.indexOf(x.priority) - PRI_ORDER.indexOf(y.priority) || y.gap - x.gap).map((r) => r.c.name_ms),
+        R: crit.R, C: crit.C, gap: crit.gap, priority,
+        inhouse: inh, inhouseCost: ic || null, external: ext, externalCost: ec || null,
+        date: months.length ? months.map((m) => MONTHS[m - 1]).join(', ') : mgmtQuarter(priority),
+      }
+    })
+    return { t: b.t, rows }
+  })
+}
+const bullets = (xs: string[]) => (xs.length ? xs.map((x) => `• ${x}`).join('\n') : null)
+
+/** Rows in the exact 18-column layout of the hospital management template (sheet "Jabatan di bawah Pejabat …"). */
+export function sheetMgmt(d: TnaData, reps: StaffReport[]): SheetSpec & { merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] } {
+  const rows: Cell[][] = [
+    ['No.', 'Department / Unit ', 'Goals', 'Objectives', 'KPIs', 'Performance Indicator', 'Training Competency Category', 'Competency', 'Required Competencies', null, null, null, 'Activities / Program ', 'Training Plan', null, null, null, null],
+    [null, null, null, null, null, null, null, null, 'Required Level\n (R)', 'Current Level\n(C)', 'Departmental Training Gap Analysis\nR - C', 'Training Priority', null, 'In-house/Internal Training Plan', 'Cost Implication', 'Date', 'External Training Plan', 'Cost Implication'],
+  ]
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [
+    { s: { r: 0, c: 8 }, e: { r: 0, c: 11 } }, { s: { r: 0, c: 13 }, e: { r: 0, c: 17 } },
+    ...[0, 1, 2, 3, 4, 5, 6, 7, 12].map((c) => ({ s: { r: 0, c }, e: { r: 1, c } })),
+  ]
+  const blocks = mgmtGrouped(d, reps)
+  const start = rows.length
+  for (const b of blocks) {
+    const first = rows.length
+    const list = b.rows.length ? b.rows : [null]
+    for (const r of list) {
+      rows.push([
+        null, null, null, b.t.objective_ms, b.t.mgmt_kpi_ms ?? b.t.kpi_ms, b.t.weight_ms,
+        r ? r.category : null, r ? bullets(r.competencies) : 'Tiada jurang kompetensi',
+        r ? r.R : null, r ? r.C : null, r ? r.gap : null, r ? r.priority : null,
+        b.t.activities_ms,
+        r ? bullets(r.inhouse) : null, r ? r.inhouseCost : null, r ? r.date : null,
+        r ? bullets(r.external) : null, r ? r.externalCost : null,
+      ])
+    }
+    const last = rows.length - 1
+    if (last > first) for (const c of [3, 4, 5, 12]) merges.push({ s: { r: first, c }, e: { r: last, c } })
+  }
+  const end = rows.length - 1
+  if (end >= start) {
+    rows[start][0] = 1
+    rows[start][1] = 'Jabatan Pengurusan Risiko, Pematuhan & Kualiti'
+    rows[start][2] = d.template.find((t) => t.goal_ms)?.goal_ms ?? null
+    if (end > start) for (const c of [0, 1, 2]) merges.push({ s: { r: start, c }, e: { r: end, c } })
+  }
+  return { name: 'TNA Pengurusan (RMCQ)', rows, merges, widths: [5, 22, 30, 32, 45, 40, 14, 34, 9, 9, 12, 10, 40, 45, 11, 14, 45, 11] }
 }

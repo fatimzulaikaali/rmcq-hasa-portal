@@ -2,8 +2,8 @@
 
 /* Printable TNA reports (A4). Rendered by /tna/laporan; each .tna-page starts on a new sheet. */
 import { Fragment, type ReactNode } from 'react'
-import { LEVEL_NAME, MONTHS, PROG_SECTION, RMCQ_ROLE, STATUS_LABEL, progPriority, progScore, rm } from '@/lib/tna/types'
-import { calendar, clusterLabel, gapLines, lv, reqStatus, templateUnit, type StaffReport } from '@/lib/tna/report'
+import { GAP_LABEL, LEVEL_NAME, MONTHS, PROG_SECTION, RMCQ_ROLE, STATUS_LABEL, progPriority, progScore, rm } from '@/lib/tna/types'
+import { calendar, clusterLabel, gapLines, lv, mgmtGrouped, reqStatus, templateUnit, type StaffReport } from '@/lib/tna/report'
 import { fmtDate, type TnaData } from './shared'
 
 const today = () => new Date().toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -356,6 +356,53 @@ export function HospitalReport({ d }: { d: TnaData }) {
           )
         })}</tbody>
       </table>
+    </article>
+  )
+}
+
+/* ---------------- G. Template TNA Pengurusan Hospital (18 lajur, ringkasan) ---------------- */
+export function MgmtReport({ d, reps }: { d: TnaData; reps: StaffReport[] }) {
+  const blocks = mgmtGrouped(d, reps)
+  const goal = d.template.find((t) => t.goal_ms)?.goal_ms
+  const ul = (xs: string[]) => (xs.length ? <ul className="tp-mul">{xs.map((x, i) => <li key={i}>{x}</li>)}</ul> : '—')
+  const pcls = (p: string | null) => `c tp-p-${p === 'High' ? 'Tinggi' : p === 'Moderate' ? 'Sederhana' : 'Rendah'}`
+  return (
+    <article className="tna-page tna-land">
+      <Head d={d} title={`Training Needs Analysis ${d.cycle.year}`} sub="Jabatan Pengurusan Risiko, Pematuhan & Kualiti" />
+      <p className="tp-note"><b>Goal:</b> {goal ?? '—'}</p>
+      <table className="tp-tbl tp-tpl tp-mgmt">
+        <colgroup>{[9, 11, 9, 5, 12, 3, 3, 4, 5, 9, 10, 10, 5, 5].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
+        <thead>
+          <tr><th rowSpan={2}>Objectives</th><th rowSpan={2}>KPIs</th><th rowSpan={2}>Performance Indicator</th><th rowSpan={2}>Category</th><th rowSpan={2}>Competency</th>
+            <th colSpan={4} className="c">Required Competencies</th><th rowSpan={2}>Activities / Program</th><th colSpan={4} className="c">Training Plan</th></tr>
+          <tr><th className="c">R</th><th className="c">C</th><th className="c">R−C</th><th className="c">Priority</th><th>In-house / Internal</th><th>External</th><th className="c">Cost (RM)</th><th className="c">Date</th></tr>
+        </thead>
+        <tbody>{blocks.map((b) => {
+          const list = b.rows.length ? b.rows : [null]
+          return list.map((r, i) => (
+            <tr key={`${b.t.id}-${i}`}>
+              {i === 0 && <>
+                <td rowSpan={list.length}><b>{b.t.objective_ms ?? b.t.item_ms}</b></td>
+                <td rowSpan={list.length}>{b.t.mgmt_kpi_ms ?? b.t.kpi_ms}</td>
+                <td rowSpan={list.length}>{b.t.weight_ms}</td>
+              </>}
+              {r ? <>
+                <td>{r.category}</td><td>{ul(r.competencies)}</td>
+                <td className="c">{r.R}</td><td className="c">{r.C}</td>
+                <td className="c"><b>{r.gap}</b><div className="tp-small">{GAP_LABEL[Math.min(r.gap, 4)]}</div></td>
+                <td className={pcls(r.priority)}>{r.priority ?? '—'}</td>
+              </> : <td colSpan={5} className="tp-muted">Tiada jurang kompetensi</td>}
+              {i === 0 && <td rowSpan={list.length}>{b.t.activities_ms}</td>}
+              {r ? <>
+                <td>{ul(r.inhouse)}</td><td>{ul(r.external)}</td>
+                <td className="c">{r.inhouseCost || r.externalCost ? <>{r.inhouseCost ? <div>Dalaman: {rm(r.inhouseCost)}</div> : null}{r.externalCost ? <div>Luaran: {rm(r.externalCost)}</div> : null}</> : '—'}</td>
+                <td className="c">{r.date}</td>
+              </> : <td colSpan={4} />}
+            </tr>
+          ))
+        })}</tbody>
+      </table>
+      <p className="tp-note">R = tahap diperlukan · C = tahap semasa jabatan · R−C: 0 No · 1 Low · 2 Moderate · 3 High · 4 Critical Gap (bagi kompetensi paling kritikal dalam kategori). Priority berdasarkan impak kepada operasi jabatan.</p>
     </article>
   )
 }

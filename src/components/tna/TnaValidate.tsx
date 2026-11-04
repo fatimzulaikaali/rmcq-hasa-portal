@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { CLUSTERS, KJ_DECISION, LEVELS, LEVEL_NAME, MONTHS, STATUS_BADGE, STATUS_LABEL, clusterOrder, errMsg, gapOf, levelName, requestInTna, rm, type KjDecision, type TnaRequest } from '@/lib/tna/types'
+import { CLUSTERS, KJ_DECISION, LEVELS, LEVEL_NAME, MONTHS, STATUS_BADGE, STATUS_LABEL, clusterOrder, errMsg, gapOf, levelName, requestInTna, rm, TRAINING_TYPE, trainingTypeOf, type KjDecision, type TnaRequest, type TrainingType } from '@/lib/tna/types'
 import { fmtDate, indexData, type TabProps } from './shared'
 
 type Row = { agreed: number | null; note: string }
@@ -25,7 +25,7 @@ export function TnaValidate({ data, supabase, userId, reload, flash, focus }: Ta
   [a?.id, data])
 
   const [rows, setRows] = useState<Record<string, Row>>({})
-  const [dec, setDec] = useState<Record<number, Pick<TnaRequest, 'kj_decision' | 'kj_note'>>>({})
+  const [dec, setDec] = useState<Record<number, Partial<Pick<TnaRequest, 'kj_decision' | 'kj_note' | 'training_type'>>>>({})
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -69,8 +69,15 @@ export function TnaValidate({ data, supabase, userId, reload, flash, focus }: Ta
       .update({ kj_decision: d, kj_note: note === undefined ? q.kj_note : note, decided_at: d ? new Date().toISOString() : null }).eq('id', q.id)
     if (error) { flash(`Gagal simpan keputusan: ${errMsg(error)}`, 'err'); return }
     // keep it local so unsaved agreed-level edits above are not reset by a reload
-    setDec((m) => ({ ...m, [q.id]: { kj_decision: d, kj_note: note === undefined ? q.kj_note : note } }))
+    setDec((m) => ({ ...m, [q.id]: { ...m[q.id], kj_decision: d, kj_note: note === undefined ? q.kj_note : note } }))
     flash('Keputusan kursus disimpan.')
+  }
+
+  async function setType(q: TnaRequest, t: TrainingType | null) {
+    const { error } = await supabase.from('tna_course_requests').update({ training_type: t }).eq('id', q.id)
+    if (error) { flash(`Gagal simpan jenis latihan: ${errMsg(error)}`, 'err'); return }
+    setDec((m) => ({ ...m, [q.id]: { ...m[q.id], training_type: t } }))
+    flash('Jenis latihan disimpan.')
   }
 
   async function reopen() {
@@ -154,7 +161,7 @@ export function TnaValidate({ data, supabase, userId, reload, flash, focus }: Ta
               <>
                 <p className="vd-sub">Kursus yang <b>menyokong jurang</b> (tahap dipersetujui &lt; diperlukan) masuk ke templat TNA secara automatik. Kursus lain hanya masuk jika Dr. pilih <b>Masuk TNA</b> (pembangunan lanjutan). Status jurang di sini ikut tahap dipersetujui yang sedang dipilih di atas.</p>
                 <div className="vd-scroll"><table className="vd-table tna-ptable">
-                  <thead><tr><th>Kursus</th><th>Kompetensi</th><th>Bulan · kos · keutamaan</th><th>Status</th><th>Keputusan Ketua Jabatan</th></tr></thead>
+                  <thead><tr><th>Kursus</th><th>Kompetensi</th><th>Bulan · kos · keutamaan</th><th>Status</th><th>Keputusan Ketua Jabatan · jenis latihan</th></tr></thead>
                   <tbody>{myReqs.map((q) => {
                     const req = q.competency_code ? reqLevel.get(q.competency_code) : undefined
                     const ag = q.competency_code ? rows[q.competency_code]?.agreed ?? null : null
@@ -175,6 +182,10 @@ export function TnaValidate({ data, supabase, userId, reload, flash, focus }: Ta
                           <select className="tna-lvsel" value={q.kj_decision ?? ''} onChange={(e) => void decide(q, (e.target.value || null) as KjDecision | null)}>
                             <option value="">{gap ? 'Auto (menyokong jurang)' : '— belum diputuskan —'}</option>
                             {(Object.keys(KJ_DECISION) as KjDecision[]).map((k) => <option key={k} value={k}>{KJ_DECISION[k]}</option>)}
+                          </select>
+                          <select className="tna-lvsel" style={{ marginTop: 4 }} value={q.training_type ?? ''} onChange={(e) => void setType(q, (e.target.value || null) as TrainingType | null)}>
+                            <option value="">Auto: {TRAINING_TYPE[trainingTypeOf({ provider_ms: q.provider_ms })]}</option>
+                            {(Object.keys(TRAINING_TYPE) as TrainingType[]).map((k) => <option key={k} value={k}>{TRAINING_TYPE[k]}</option>)}
                           </select>
                           <input className="tna-inline" style={{ marginTop: 4 }} placeholder="Catatan (pilihan)" defaultValue={q.kj_note ?? ''}
                             onBlur={(e) => { if (e.target.value !== (q.kj_note ?? '')) void decide(q, q.kj_decision, e.target.value || null) }} />
